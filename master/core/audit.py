@@ -1,0 +1,270 @@
+"""
+Vigile — Audit Trail
+
+Implements an append-only, chained SHA256 audit log.
+Every entry includes the hash of the previous entry, making
+any tampering with historical records detectable.
+
+Design:
+  - Each entry has a monotonic `sequence` number (ordering guarantee)
+  - entry_hash = sha256(previous_hash | sequence | timestamp | action |
+                        user_id | node_id | details_json)
+  - The genesis entry (sequence=1) uses '0'*64 as previous_hash
+  - verify_chain() walks the entire log and recomputes all hashes
+
+The hash function is pure Python stdlib (hashlib) — no dependencies.
+"""
+
+import asyncio
+import hashlib
+import json
+import logging
+import time
+import uuid
+from typing import Any
+
+import aiosqlite
+
+logger = logging.getLogger(__name__)
+
+# Serialize writes to prevent sequence collision
+_audit_lock = asyncio.Lock()
+
+# Sentinel for the first entry in the chain
+GENESIS_HASH = "0" * 64
+
+
+# ---------------------------------------------------------------------------
+# Core hash computation (shared with migrations.py for genesis entry)
+# ---------------------------------------------------------------------------
+
+
+def compute_entry_hash(
+    previous_hash: str,
+    sequence: int,
+    timestamp: float,
+    action: str,
+    user_id: str,
+    node_id: str | None,
+    details_json: str,
+) -> str:
+    """
+    Deterministic SHA256 of all entry fields.
+    Fields joined with '|' — a character that cannot appear in any field value
+    (UUIDs, action names, and JSON all use different separators).
+    """
+    raw = "|".join([
+        previous_hash,
+        str(sequence),
+        f"{timestamp:.6f}",
+        action,
+        user_id,
+        node_id or "",
+        details_json,
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+async def log_action(
+    db: aiosqlite.Connection,
+    *,
+    user_id: str,
+    action: str,
+    node_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> str:
+    """
+    Append a new entry to the audit log.
+
+    Steps:
+      1. Fetch the current chain head (latest sequence + entry_hash)
+      2. Compute the new entry_hash over all fields
+      3. Insert atomically
+
+    Returns the entry_id (UUID string).
+
+    Raises:
+      RuntimeError if the DB is in an inconsistent state.
+    """
+    details_json = json.dumps(details or {}, separators=(",", ":"), ensure_ascii=False)
+    timestamp = time.time()
+    entry_id = str(uuid.uuid4())
+
+    # Serialized via asyncio.Lock to prevent sequence collision under concurrency.
+    # (BEGIN IMMEDIATE alone isn't sufficient because await points inside the
+    # critical section allow other coroutines to interleave.)
+    async with _audit_lock:
+        async with db.execute(
+            "SELECT sequence, entry_hash FROM audit_log ORDER BY sequence DESC LIMIT 1"
+        ) as cursor:
+            head = await cursor.fetchone()
+
+        if head is None:
+            previous_hash = GENESIS_HASH
+            sequence = 1
+        else:
+            previous_hash = head["entry_hash"]
+            sequence = head["sequence"] + 1
+
+        entry_hash = compute_entry_hash(
+            previous_hash=previous_hash,
+            sequence=sequence,
+            timestamp=timestamp,
+            action=action,
+            user_id=user_id,
+            node_id=node_id,
+            details_json=details_json,
+        )
+
+        await db.execute(
+            """
+            INSERT INTO audit_log
+                (id, sequence, timestamp, user_id, action, node_id,
+                 details_json, previous_hash, entry_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry_id, sequence, timestamp, user_id, action,
+                node_id, details_json, previous_hash, entry_hash,
+            ),
+        )
+        await db.commit()
+
+    logger.info(
+        "AUDIT seq=%d action=%s user=%s node=%s",
+        sequence, action, user_id, node_id or "-",
+    )
+    return entry_id
+
+
+async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
+    """
+    Walk the entire audit log and verify the hash chain integrity.
+
+    Returns a report dict:
+      {
+        "valid": bool,
+        "total_entries": int,
+        "first_broken_sequence": int | None,
+        "error": str | None,
+      }
+    """
+    report: dict[str, Any] = {
+        "valid": True,
+        "total_entries": 0,
+        "first_broken_sequence": None,
+        "error": None,
+    }
+
+    expected_previous_hash = GENESIS_HASH
+    count = 0
+
+    async with db.execute(
+        """
+        SELECT id, sequence, timestamp, user_id, action, node_id,
+               details_json, previous_hash, entry_hash
+        FROM audit_log
+        ORDER BY sequence ASC
+        """
+    ) as cursor:
+        async for row in cursor:
+            count += 1
+            seq = row["sequence"]
+
+            # Check that previous_hash matches expected value
+            if row["previous_hash"] != expected_previous_hash:
+                report["valid"] = False
+                report["first_broken_sequence"] = seq
+                report["error"] = (
+                    f"Sequence {seq}: previous_hash mismatch. "
+                    f"Expected '{expected_previous_hash[:12]}...', "
+                    f"got '{row['previous_hash'][:12]}...'"
+                )
+                break
+
+            # Recompute entry_hash
+            computed = compute_entry_hash(
+                previous_hash=row["previous_hash"],
+                sequence=seq,
+                timestamp=row["timestamp"],
+                action=row["action"],
+                user_id=row["user_id"],
+                node_id=row["node_id"],
+                details_json=row["details_json"],
+            )
+
+            if computed != row["entry_hash"]:
+                report["valid"] = False
+                report["first_broken_sequence"] = seq
+                report["error"] = (
+                    f"Sequence {seq}: entry_hash mismatch. "
+                    f"Record has been tampered with."
+                )
+                break
+
+            expected_previous_hash = row["entry_hash"]
+
+    report["total_entries"] = count
+    if report["valid"]:
+        logger.info("Audit chain verification OK — %d entries verified.", count)
+    else:
+        logger.error("Audit chain BROKEN at sequence %s: %s",
+                     report["first_broken_sequence"], report["error"])
+
+    return report
+
+
+async def get_recent_entries(
+    db: aiosqlite.Connection,
+    *,
+    limit: int = 100,
+    node_id: str | None = None,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Fetch recent audit entries, optionally filtered by node or user.
+    Returns a list of dicts ordered newest-first.
+    """
+    conditions = []
+    params: list[Any] = []
+
+    if node_id:
+        conditions.append("node_id = ?")
+        params.append(node_id)
+    if user_id:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params.append(limit)
+
+    sql = f"""
+        SELECT id, sequence, timestamp, user_id, action, node_id,
+               details_json, previous_hash, entry_hash
+        FROM audit_log
+        {where}
+        ORDER BY sequence DESC
+        LIMIT ?
+    """
+
+    rows = []
+    async with db.execute(sql, params) as cursor:
+        async for row in cursor:
+            rows.append({
+                "id": row["id"],
+                "sequence": row["sequence"],
+                "timestamp": row["timestamp"],
+                "user_id": row["user_id"],
+                "action": row["action"],
+                "node_id": row["node_id"],
+                "details": json.loads(row["details_json"]),
+                "previous_hash": row["previous_hash"],
+                "entry_hash": row["entry_hash"],
+            })
+
+    return rows
