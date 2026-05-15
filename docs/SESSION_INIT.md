@@ -140,7 +140,7 @@ PYTHONPATH="." .venv/bin/python tests/integration/test_api.py
 
 ## ⏭️ Prochaines Étapes (Sprint 2 & 3)
 
-**Sprint 3 : Couche IA et Human-in-the-Loop** ← PROCHAINE ÉTAPE
+**Sprint 4 : Frontend React** ← PROCHAINE ÉTAPE
 
 **Sprint 2 : Plugins OS et Worker Go (Terminé ✅)**
 - ✅ `metrics_plugin.py` — Métriques CPU/RAM/disque/swap/uptime, validation Pydantic, pipeline STATUS_REPORT
@@ -159,9 +159,24 @@ PYTHONPATH="." .venv/bin/python tests/integration/test_api.py
   - Métriques CPU/MEM/DISK via STATUS_REPORT 60s
   - Bug `containers.go:DialContext` fixé (écrasait le socket Unix par TCP)
 
-**Sprint 3 : Couche IA et Human-in-the-Loop**
-- Développement du `LLMClient` natif et du `StructuredLLM` (basé sur httpx).
-- Modèles de propositions d'actions validables.
+**Sprint 3 : Couche IA et Human-in-the-Loop (Terminé ✅)**
+- `LLMClient` natif : complete + stream SSE
+- `StructuredLLM` : boucle retry + validation Pydantic
+- `ActionProposal` : modèle Pydantic + table DB (PENDING→APPROVED→EXECUTED|FAILED)
+- Chat API : POST /api/chat (SSE), POST /proposals/approve, POST /proposals/reject
+
+**Sprint 4 : Frontend React** ← PROCHAINE ÉTAPE
+- Application React standalone (Vite + TailwindCSS + shadcn/ui)
+- ChatPanel, NodeCard, LogViewer, AuditLog, Auth UI
+- Plugin Catalogue (page d'accueil, prépare Sprint 5)
+
+**Sprint 5 : Plugin Ecosystem (Home Assistant-like)**
+- Format standard de plugins, catalogue installable
+- Moteur d'automatisations (trigger → condition → action)
+- Exemples : backup, alerting, DNS updater
+
+**Sprint 6 : Production Hardening**
+- Rate limiting, rotation tokens, cross-compile Worker
 
 ---
 *Fin du résumé. Fournis ce fichier comme contexte en début de chaque nouvelle session.*

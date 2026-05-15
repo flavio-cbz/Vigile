@@ -488,14 +488,28 @@ vigile/
 - Audit Trail : hash chaîné, stockage immuable
 
 ### Sprint 4 — Frontend
+- Application React standalone (vite + TailwindCSS + shadcn/ui)
 - `ChatPanel` : streaming SSE natif, historique de conversation
 - `ActionProposal` : carte d'approbation avec contexte et niveau de risque
 - `NodeCard` : état, métriques temps réel, logs
-- `LogViewer` : Xterm.js en lecture seule, WebSocket streaming
+- `LogViewer` : terminal lecture seule, WebSocket streaming
 - `AuditLog` : timeline des actions approuvées
 - Auth UI : login, gestion de session JWT
+- **Plugin Catalogue** : page d'accueil des plugins disponibles avec installation en 1 clic (prépare le terrain pour Sprint 5)
 
-### Sprint 5 — Production Hardening
+### Sprint 5 — Plugin Ecosystem (Home Assistant-like)
+- **Format de plugin standardisé** : métadonnées, dépendances, hooks, configuration
+- **Plugin Registry** : catalogue de plugins téléchargeables (GitHub / registre local)
+- **Installation frontend** : browse, install, activate, configure depuis l'UI
+- **Plugin isolation** : chaque plugin dans son propre sous-processus ou namespace
+- **Moteur d'automatisations** : déclencheur (trigger) → conditions (conditions) → actions
+  - Triggers : heartbeat, STATUS_REPORT, INTENT_RESULT, timer CRON, webhook
+  - Conditions : métrique > seuil, service down, log match, AND/OR/NOT
+  - Actions : intent Worker, webhook, notification, LLM call
+- **Plugin SDK** : documentation + template pour créer des plugins tiers
+- Exemples de plugins : backup, uptime monitoring, alerting Slack/Discord, DNS updater
+
+### Sprint 6 — Production Hardening
 - Rate limiting sur les endpoints sensibles
 - Rotation automatique WORKER_TOKEN
 - Mode offline (binaires préchargés pour réseau isolé)
