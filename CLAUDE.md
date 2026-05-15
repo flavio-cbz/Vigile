@@ -135,6 +135,7 @@ Chaque sprint est validé par **5 couches de test**, de la plus rapide à la plu
 Un sprint n'est terminé que quand les 5 niveaux passent.
 
 ### Niveau 1 — Tests unitaires internes
+
 Tests automatisés, sans I/O réseau, sans fichiers réels.
 
 ```bash
@@ -148,6 +149,7 @@ PYTHONPATH="." python3 tests/unit/test_plugins.py
 - **Tous verts** avant de passer au niveau 2
 
 ### Niveau 2 — Tests d'intégration externes
+
 Tests contre l'API HTTP réelle (serveur lancé).
 
 ```bash
@@ -162,6 +164,7 @@ PYTHONPATH="." python3 tests/integration/test_api.py
 - **Tous verts** avant de passer au niveau 3
 
 ### Niveau 3 — Simulation réaliste
+
 Tests en environnement conteneurisé avec données simulées parfaites.
 
 ```bash
@@ -178,6 +181,7 @@ scripts/test_all_simulation.py  # 41 tests de simulation
 - **Tous verts** avant de passer au niveau 4
 
 ### Niveau 4 — Déploiement terrain
+
 Déploiement sur le serveur de production/staging.
 
 ```bash
@@ -191,6 +195,7 @@ docker compose up -d master
 - **Tous les endpoints répondent** avant de passer au niveau 5
 
 ### Niveau 5 — Conditions réelles
+
 Déploiement natif (Worker sur l'hôte, sans Docker).
 
 ```bash

@@ -338,7 +338,7 @@ def handle_intent(intent: dict, node_id: str, node_ws):
 
 Le binaire Worker n'utilise que la stdlib Go. Aucun `go get`. Compilable sur n'importe quelle machine avec Go installé.
 
-```
+```text
 Packages stdlib utilisés :
 - crypto/ed25519      → génération keypair + signature challenge
 - crypto/sha256       → fingerprint machine-id
@@ -375,7 +375,7 @@ func handleIntent(intent Intent) IntentResult {
 
 Le LLM ne touche jamais un Worker directement.
 
-```
+```text
 Utilisateur tape une demande dans le ChatPanel
            ↓
 Master reçoit → construit le contexte (état du node, métriques récentes)
@@ -407,7 +407,7 @@ Résultat renvoyé au Master → Audit Trail signé
 
 ## Structure des Dossiers
 
-```
+```tree
 vigile/
 ├── master/
 │   ├── main.py
