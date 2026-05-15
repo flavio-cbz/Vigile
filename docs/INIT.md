@@ -1,4 +1,4 @@
-# YouCloud AI Admin — Plan Technique Révisé v2
+# Vigile — Plan Technique Révisé v2
 
 > Fleet Manager intelligent pour serveurs et homelabs.
 > Zero-Trust. Zéro Dépendance Tierce sur le Core. Zéro SSH.
@@ -40,7 +40,7 @@ Les seules dépendances acceptées sont les fondations bas-niveau stables et inc
 | **Portainer Agent** | Reconnexion WebSocket avec backoff, heartbeat, dispatch d'intents, états de connexion | Intégralité du Worker Go |
 | **Pluggy (pytest)** | Système hookspec/hookimpl, registre de plugins, dispatch par hook | `PluginManager` : 80 lignes Python, dict de hooks, chargement dynamique |
 | **FastAPI-Users** | Génération JWT, validation, refresh token, hashing bcrypt, middleware d'auth | `SecurityManager` : JWT natif avec python-jose, bcrypt avec passlib |
-| **Netdata kickstart.sh** | Détection OS/arch, vérification SHA256 binaire, installation systemd/launchd, cleanup trap | `kickstart.sh` YouCloud avec cascade d'installation et enrollment en deux phases |
+| **Netdata kickstart.sh** | Détection OS/arch, vérification SHA256 binaire, installation systemd/launchd, cleanup trap | `kickstart.sh` Vigile avec cascade d'installation et enrollment en deux phases |
 | **Dozzle** | Streaming de logs Docker via WebSocket, chunking, buffer circulaire | Plugin `LOG_STREAM` du Worker |
 
 ---
@@ -103,13 +103,13 @@ PHASE 1 — Installation (kickstart.sh)
    c. Télécharge le hash     : /api/nodes/binary/{os}/{arch}/worker.sha256
    d. Vérifie SHA256 → abort si mismatch
    e. Installe le binaire comme service natif (systemd/launchd/rc.d)
-   f. Stocke le JOIN_TOKEN dans /etc/youcloud/enrollment.token (chmod 600)
+   f. Stocke le JOIN_TOKEN dans /etc/vigile/enrollment.token (chmod 600)
    g. Démarre le service
    h. trap EXIT → cleanup /tmp systématique
 
 PHASE 2 — Claiming (Worker → Master, au démarrage du service)
 ─────────────────────────────────────────────────────────────
-1. Worker génère une paire Ed25519 (clé privée /etc/youcloud/worker.key, chmod 400)
+1. Worker génère une paire Ed25519 (clé privée /etc/vigile/worker.key, chmod 400)
 2. Worker ouvre une connexion WSS vers master/ws/worker/join
 3. Worker envoie :
    { type: "ENROLLMENT_REQUEST",
@@ -405,7 +405,7 @@ Résultat renvoyé au Master → Audit Trail signé
 ## Structure des Dossiers
 
 ```
-youcloud/
+vigile/
 ├── master/
 │   ├── main.py
 │   ├── config.py                    # Settings depuis env vars

@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Async SQLite Connection Manager
+Vigile — Async SQLite Connection Manager
 Provides a context-managed aiosqlite connection with WAL mode enabled.
 """
 

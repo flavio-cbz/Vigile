@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Authentication API
+Vigile — Authentication API
 
 Endpoints:
   POST /api/auth/login    → username + password → access_token + refresh_token

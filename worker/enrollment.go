@@ -16,7 +16,7 @@ var b64enc = base64.URLEncoding
 
 // KeyPaths for the Ed25519 keypair.
 const (
-	keyDir         = "/etc/youcloud"
+	keyDir         = "/etc/vigile"
 	privateKeyPath = keyDir + "/worker.key"
 	publicKeyPath  = keyDir + "/worker.key.pub"
 	tokenPath      = keyDir + "/enrollment.token"

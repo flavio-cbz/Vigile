@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouCloud AI Admin — Sprint 2 Plugin Test Suite
+Vigile — Sprint 2 Plugin Test Suite
 
 Tests all Master-side plugins in isolation via the PluginManager.
 No server or WebSocket required.

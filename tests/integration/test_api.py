@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouCloud AI Admin — API Integration Tests
+Vigile — API Integration Tests
 Teste toutes les routes de l'API REST contre un serveur en cours d'exécution.
 Assurez-vous que le serveur tourne sur http://localhost:8000.
 """

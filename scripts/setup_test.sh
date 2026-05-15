@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YouCloud AI Admin — Test Environment Setup
+# Vigile — Test Environment Setup
 #
 # Automates: start Master → generate tokens → start Workers
 #
@@ -29,7 +29,7 @@ if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up ==="
   # Stop all worker containers
   for i in $(seq 1 10); do
-    docker rm -f "youcloud-worker-$i" 2>/dev/null || true
+    docker rm -f "vigile-worker-$i" 2>/dev/null || true
   done
   docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
   echo "Done."
@@ -38,7 +38,7 @@ fi
 
 # ── 1. Build and start Master ─────────────────────────────────────────
 echo "========================================="
-echo "  YouCloud Test Environment Setup"
+echo "  Vigile Test Environment Setup"
 echo "========================================="
 echo ""
 echo "=== Building images ==="
@@ -93,16 +93,16 @@ for i in $(seq 1 "$WORKERS"); do
   echo "  Node ID: $NODE_ID"
 
   # Stop existing container if any
-  docker rm -f "youcloud-$NODE" 2>/dev/null || true
+  docker rm -f "vigile-$NODE" 2>/dev/null || true
 
   # Start worker container with the token
   docker compose -f "$COMPOSE_FILE" run -d \
-    --name "youcloud-$NODE" \
+    --name "vigile-$NODE" \
     -e "JOIN_TOKEN=$TOKEN" \
     --rm \
     worker
 
-  echo "  Worker started as youcloud-$NODE"
+  echo "  Worker started as vigile-$NODE"
 done
 
 # ── 4. Summary ────────────────────────────────────────────────────────

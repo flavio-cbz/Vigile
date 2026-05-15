@@ -1,4 +1,4 @@
-# YouCloud AI Admin — Master Node
+# Vigile — Master Node
 # Dockerfile for the Python/FastAPI backend
 
 FROM python:3.12-slim

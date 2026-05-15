@@ -1,4 +1,4 @@
-// YouCloud AI Admin — Worker Node
+// Vigile — Worker Node
 //
 // Autonomous agent that connects to the Master via WebSocket,
 // authenticates with Ed25519, and executes whitelisted actions.
@@ -7,12 +7,12 @@
 //
 // Usage:
 //
-//	youcloud-worker --master http://master:8000 --token <JOIN_TOKEN>
+//	vigile-worker --master http://master:8000 --token <JOIN_TOKEN>
 //
 // Or use persisted config:
 //
-//	/etc/youcloud/master_url
-//	/etc/youcloud/enrollment.token
+//	/etc/vigile/master_url
+//	/etc/vigile/enrollment.token
 package main
 
 import (
@@ -24,7 +24,7 @@ import (
 )
 
 // Logger for structured output (stdout for journald collection).
-var logger = log.New(os.Stdout, "[youcloud-worker] ", log.Ldate|log.Ltime|log.Lmsgprefix)
+var logger = log.New(os.Stdout, "[vigile-worker] ", log.Ldate|log.Ltime|log.Lmsgprefix)
 
 func main() {
 	// ── CLI flags ────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ func main() {
 	// ── Resolve master URL ───────────────────────────────────────────────
 	url := getMasterURL(*masterURL)
 	if url == "" {
-		logger.Fatal("MASTER_URL is required. Set --master flag or write to /etc/youcloud/master_url")
+		logger.Fatal("MASTER_URL is required. Set --master flag or write to /etc/vigile/master_url")
 	}
 	// Normalize: ensure http:// scheme for WebSocket upgrade
 	if url[:4] != "http" {
@@ -48,7 +48,7 @@ func main() {
 		}
 	}
 
-	logger.Printf("YouCloud Worker starting")
+	logger.Printf("Vigile Worker starting")
 	logger.Printf("Master URL: %s", url)
 
 	// ── Resolve join token ───────────────────────────────────────────────

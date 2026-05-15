@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Shared FastAPI Dependencies
+Vigile — Shared FastAPI Dependencies
 
 Provides reusable dependency-injected objects:
   - get_db()           : active aiosqlite connection

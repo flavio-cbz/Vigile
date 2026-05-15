@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Node Manager
+Vigile — Node Manager
 
 Manages the lifecycle of all Worker Nodes:
   - State machine (PENDING → ENROLLING → CONNECTED → LOST → STALE → REVOKED)

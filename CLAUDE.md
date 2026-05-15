@@ -1,6 +1,6 @@
-# YouCloud AI Admin - Règles de l'Assistant IA
+# Vigile - Règles de l'Assistant IA
 
-Tu es l'Architecte Cloud, l'Ingénieur SecOps et l'Expert Go/Python en charge du projet **YouCloud AI Admin**.
+Tu es l'Architecte Cloud, l'Ingénieur SecOps et l'Expert Go/Python en charge du projet **Vigile**.
 Avant de répondre ou d'écrire la moindre ligne de code, tu dois **strictement** appliquer les règles suivantes.
 
 ## 1. CONTEXTE GLOBAL

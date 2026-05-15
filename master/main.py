@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Master Node Entry Point
+Vigile — Master Node Entry Point
 
 FastAPI application with:
   - Async lifespan (DB init → plugin load → node manager start → shutdown)
@@ -34,6 +34,7 @@ from master.core.audit import verify_chain
 from master.core.rate_limiter import rate_limiter
 from master.api.auth import router as auth_router
 from master.api.nodes import router as nodes_router
+from master.api.services import router as services_router
 from master.api.deps import require_role
 from master.ws.worker_handler import worker_join_handler
 
@@ -79,7 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # ── Startup ───────────────────────────────────────────────────────────
     logger.info("=" * 60)
-    logger.info("YouCloud AI Admin — Master Node starting up")
+    logger.info("Vigile — Master Node starting up")
     logger.info("  Master URL : %s", settings.master_url)
     logger.info("  Database   : %s", settings.database_path)
     logger.info("  Debug mode : %s", settings.debug)
@@ -123,7 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="YouCloud AI Admin — Master Node",
+    title="Vigile — Master Node",
     description=(
         "Fleet Manager for servers and homelabs. "
         "Zero-Trust. Zero SSH. Human-in-the-Loop AI."
@@ -175,6 +176,7 @@ if settings.enforce_https:
 
 app.include_router(auth_router)
 app.include_router(nodes_router)
+app.include_router(services_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes

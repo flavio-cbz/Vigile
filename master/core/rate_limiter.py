@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — In-Memory Rate Limiter
+Vigile — In-Memory Rate Limiter
 
 Sliding-window rate limiter per IP per endpoint.
 No external dependencies — pure Python stdlib.

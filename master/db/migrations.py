@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Database Migrations & Seeding
+Vigile — Database Migrations & Seeding
 
 Runs at application startup (idempotent — safe to run on every restart).
 Creates all tables if not exists, then seeds the default admin user.

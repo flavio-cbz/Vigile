@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Plugin Manager
+Vigile — Plugin Manager
 
 Native implementation of a hook-based plugin system, inspired by Pluggy (pytest).
 Zero dependency on the Pluggy library itself.
@@ -197,7 +197,7 @@ class PluginManager:
 
             try:
                 spec = importlib.util.spec_from_file_location(
-                    f"youcloud.plugins.{plugin_name}", plugin_path
+                    f"vigile.plugins.{plugin_name}", plugin_path
                 )
                 if spec is None or spec.loader is None:
                     raise ImportError(f"Could not load spec for {plugin_path}")

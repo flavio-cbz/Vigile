@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Configuration
+Vigile — Configuration
 Loads all settings from environment variables with sensible defaults.
 """
 
@@ -19,7 +19,7 @@ class Settings(BaseModel):
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # --- Database ---
-    database_path: str = os.getenv("DATABASE_PATH", "./data/youcloud.db")
+    database_path: str = os.getenv("DATABASE_PATH", "./data/vigile.db")
 
     # --- Security: Server Secret (HMAC signing for JOIN_TOKENs) ---
     server_secret_key: str = os.getenv("SERVER_SECRET_KEY", "")

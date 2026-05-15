@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Metrics Plugin
+Vigile — Metrics Plugin
 
 Normalizes and validates STATUS_REPORT messages from Workers.
 

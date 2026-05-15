@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,11 +17,9 @@ const dockerSocket = "/var/run/docker.sock"
 // dockerClient is an HTTP client that talks to the Docker daemon via Unix socket.
 var dockerClient = &http.Client{
 	Transport: &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout: 5 * time.Second,
-		}).DialContext,
-		Dial: func(proto, addr string) (net.Conn, error) {
-			return net.Dial("unix", dockerSocket)
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", dockerSocket)
 		},
 	},
 	Timeout: 30 * time.Second,

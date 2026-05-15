@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Audit Trail
+Vigile — Audit Trail
 
 Implements an append-only, chained SHA256 audit log.
 Every entry includes the hash of the previous entry, making

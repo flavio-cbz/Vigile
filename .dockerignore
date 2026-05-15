@@ -1,4 +1,4 @@
-# YouCloud AI Admin — Docker Build Context Exclusions
+# Vigile — Docker Build Context Exclusions
 .venv/
 .git/
 .gitignore

@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Worker WebSocket Handler
+Vigile — Worker WebSocket Handler
 
 Implements the full two-phase enrollment and operational WebSocket protocol.
 

@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — SQL Schema Definitions
+Vigile — SQL Schema Definitions
 All table DDL in one place. No ORM — pure aiosqlite SQL.
 
 Tables:

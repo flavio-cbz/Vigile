@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouCloud AI Admin — Sprint 1 Smoke Test Suite
+Vigile — Sprint 1 Smoke Test Suite
 Validates all core modules without requiring a running server.
 """
 

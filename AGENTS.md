@@ -1,10 +1,18 @@
-# YouCloud AI Admin — Agent Guide
+# Vigile — Agent Guide
 
 ## Session start
 
 Read `docs/SESSION_INIT.md` first — it has the current sprint status.
 Read `CLAUDE.md` for project rules (zero-dependency, security).
 Read `docs/LIMITS.md` for known bugs and architectural limits.
+
+## Commit & Push policy
+
+**Never commit or push without explicit approval.**
+At the end of each sprint or feature, ask the user for permission:
+  1. Present the summary of changes (files changed, tests passed)
+  2. Wait for a "go ahead" before committing
+  3. Only push after the commit is confirmed
 
 ## Project structure
 
@@ -16,7 +24,7 @@ master/api/              # auth.py, nodes.py (REST), deps.py (FastAPI dependenci
 master/ws/               # worker_handler.py (WebSocket enrollment + operational)
 master/db/               # database.py, models.py (pure SQL), migrations.py
 master/plugins/          # metrics_plugin.py (CPU/RAM/disque/swap/uptime), + à venir
-tests/unit/              # test_core.py (57), test_worker_handler.py (15), test_plugins.py (88) = 160 tests
+tests/unit/              # test_core.py (57), test_worker_handler.py (15), test_plugins.py (88), test_logs_api.py (22), test_services_api.py (36) = 218 tests
 tests/integration/       # test_api.py (22 tests, requires running server)
 docs/                    # INIT.md (architecture plan), SESSION_INIT.md, LIMITS.md
 worker/                  # Go binary (stdlib only, zero imports)

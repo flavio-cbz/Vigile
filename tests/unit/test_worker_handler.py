@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouCloud AI Admin — WebSocket Handler Tests
+Vigile — WebSocket Handler Tests
 Tests the full enrollment handshake and operational loop.
 """
 

@@ -1,4 +1,4 @@
-# YouCloud AI Admin — Limites Connues et Surveillance
+# Vigile — Limites Connues et Surveillance
 
 Ce fichier documente les limites actuelles du projet, les bugs potentiels à surveiller,
 et les décisions architecturales qui pourraient devenir problématiques en évoluant.

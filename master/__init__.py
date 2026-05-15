@@ -1,1 +1,1 @@
-# YouCloud AI Admin — Master Node
+# Vigile AI Admin — Master Node

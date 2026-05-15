@@ -1,5 +1,5 @@
 """
-YouCloud AI Admin — Security Manager
+Vigile — Security Manager
 
 The cryptographic core of the Master Node. All token generation,
 signature verification, and RBAC enforcement happens here.
