@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/deepseek-v4-flash-free",
+  "plugin": [
+    "opencode-supermemory@latest",
+    "opencode-pty@latest",
+    "opencode-websearch-cited@latest",
+    "opencode-dynamic-context-pruning@latest",
+    "opencode-snip@latest",
+    "opencode-tokenscope@latest",
+    "opencode-ignore@latest",
+    "opencode-shell-strategy@latest",
+    "opencode-notify@latest",
+    "opencode-sentry-monitor@latest",
+    "antigravity-auth@latest"
+  ]
+}

@@ -1,0 +1,63 @@
+# Vigile — Docker Compose Test Environment
+#
+# Fully isolated test stack. Run on any Docker host.
+#
+# Quick start:
+#   docker compose build
+#   docker compose up -d master
+#   ./scripts/setup_test.sh --workers 2
+#
+# Cleanup:
+#   docker compose down -v
+
+services:
+
+  # ── Master Node ──────────────────────────────────────────────────────
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - vigile_data:/app/data
+    environment:
+      - MASTER_URL=http://localhost:8000
+      - DATABASE_PATH=/app/data/vigile.db
+      - MASTER_KEY_PATH=/app/data/master_ed25519.key
+      - PYTHONPATH=/app
+      - DEBUG=true
+      - LLM_BASE_URL=https://chat.youcloud.ovh
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=deepseek/deepseek-v4-flash
+      # Secrets auto-generated on first start (dev mode)
+    healthcheck:
+      test: ["CMD", "curl", "-s", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── Worker (base service, supports multiple instances) ───────────────
+  worker:
+    build: ./worker
+    restart: unless-stopped
+    depends_on:
+      master:
+        condition: service_healthy
+    volumes:
+      - /proc:/host/proc:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - MASTER_URL=http://master:8000
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep vigile-worker || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Use: docker compose run --rm -e JOIN_TOKEN=xxx worker
+
+volumes:
+  vigile_data:
