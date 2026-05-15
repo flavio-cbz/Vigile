@@ -1,0 +1,52 @@
+# YouCloud AI Admin — Docker Compose Test Environment
+#
+# Fully isolated test stack. Run on any Docker host.
+#
+# Quick start:
+#   docker compose build
+#   docker compose up -d master
+#   ./scripts/setup_test.sh --workers 2
+#
+# Cleanup:
+#   docker compose down -v
+
+services:
+
+  # ── Master Node ──────────────────────────────────────────────────────
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    ports:
+      - "8000:8000"
+    volumes:
+      - youcloud_data:/app/data
+    environment:
+      - MASTER_URL=http://localhost:8000
+      - DATABASE_PATH=/app/data/youcloud.db
+      - MASTER_KEY_PATH=/app/data/master_ed25519.key
+      - PYTHONPATH=/app
+      - DEBUG=true
+      # Secrets auto-generated on first start (dev mode)
+    healthcheck:
+      test: ["CMD", "curl", "-s", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── Worker (base service, supports multiple instances) ───────────────
+  worker:
+    build: ./worker
+    depends_on:
+      master:
+        condition: service_healthy
+    volumes:
+      - /proc:/host/proc:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - MASTER_URL=http://master:8000
+    # Use: docker compose run --rm -e JOIN_TOKEN=xxx worker
+
+volumes:
+  youcloud_data:
