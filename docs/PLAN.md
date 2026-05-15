@@ -19,12 +19,14 @@ Le différenciateur n'est pas la liste de features. C'est la confiance : chaque 
 La règle est simple. Pour chaque partie complexe du système, on identifie le projet open source de référence, on étudie son code source, on extrait le pattern, on l'implémente nativement. Pas d'installation de la librairie. Pas de `pip install litellm`. Pas de `npm install open-webui`.
 
 Ce que ça garantit :
+
 - **Zéro supply chain attack** sur le core
 - **Binaire Worker autonome** sans aucune dépendance système
 - **Auditabilité totale** : chaque ligne est la nôtre
 - **Déploiement trivial** : un seul binaire, zéro configuration d'environnement
 
 Les seules dépendances acceptées sont les fondations bas-niveau stables et incontournables :
+
 - Master : `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`, `passlib`, `httpx`
 - Worker : **zéro import externe** — stdlib Go uniquement (`net/http`, `crypto/ed25519`, `encoding/json`, `os/exec`)
 - Frontend : React, TailwindCSS, shadcn/ui
@@ -34,7 +36,7 @@ Les seules dépendances acceptées sont les fondations bas-niveau stables et inc
 ## Sources d'Inspiration (Code Étudié, Pas Installé)
 
 | Projet Open Source | Ce qu'on étudie | Ce qu'on implémente nativement |
-|---|---|---|
+| --- | --- | --- |
 | **LiteLLM** | Abstraction universelle provider, format OpenAI-compatible, gestion Base URL + headers | `LLMClient` : classe Python 150 lignes, httpx, stream SSE, zéro vendor lock |
 | **Open WebUI** | Format message chat, streaming SSE côté React, gestion historique de conversation | Composant `ChatPanel` React natif, SSE reader, store de conversation |
 | **Instructor** | Boucle retry sur structured outputs, validation Pydantic, prompt engineering | `StructuredLLM` : wrapper qui force un schéma Pydantic avec 3 tentatives max |
@@ -48,7 +50,7 @@ Les seules dépendances acceptées sont les fondations bas-niveau stables et inc
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                      MASTER NODE                        │
 │                                                         │
@@ -89,7 +91,7 @@ Les seules dépendances acceptées sont les fondations bas-niveau stables et inc
 
 ### Flux complet d'enrollment en deux phases
 
-```
+```text
 PHASE 1 — Installation (kickstart.sh)
 ─────────────────────────────────────
 1. L'Admin clique "Ajouter un Node" dans l'UI
@@ -153,7 +155,7 @@ def generate_join_token(node_id: str, ip_prefix: str) -> str:
 
 ### WORKER_TOKEN (cycle de vie)
 
-```
+```text
 issued_at      ←─────────────── maintenant
 rotation_due   ←─────────────── +7 jours  (soft: Master envoie nouveau token à la prochaine connexion)
 expires_at     ←─────────────── +30 jours (hard: connexion refusée)
@@ -164,7 +166,7 @@ Règle de sécurité : si le même WORKER_TOKEN est présenté depuis deux IPs s
 
 ### États du Node (NodeManager)
 
-```
+```text
 ENROLLING    → Handshake Ed25519 en cours
 CONNECTED    → WSS active, heartbeat OK (toutes les 30s)
 RECONNECTING → Connexion perdue, backoff exponentiel (5s → 10s → 20s → ... → 5min max)
@@ -176,7 +178,7 @@ REVOKED      → Révocation manuelle ou sécurité, toute connexion refusée
 ### RBAC
 
 | Rôle | Lire les stats | Voir les logs | Approuver une action | Gérer les nodes | Gérer les users |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | **Viewer** | ✓ | ✓ | ✗ | ✗ | ✗ |
 | **Operator** | ✓ | ✓ | ✓ | ✗ | ✗ |
 | **Admin** | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -466,6 +468,7 @@ vigile/
 ## Sprints
 
 ### Sprint 1 — Core Sécurisé et Enrollment
+
 - `SecurityManager` : JOIN_TOKEN HMAC, challenge Ed25519, WORKER_TOKEN avec cycle de vie
 - `NodeManager` : registre des nodes, machine à états, dictionnaire WebSockets
 - `PluginManager` : chargement dynamique, système de hooks
@@ -475,6 +478,7 @@ vigile/
 - Worker Go : enrollment Ed25519, heartbeat, reconnexion backoff, dispatcher whitelist
 
 ### Sprint 2 — Plugins OS et Métriques
+
 - Plugin `metrics` : CPU, RAM, disque, uptime (cross-platform, sans dépendance)
 - Plugin `docker` : list containers, restart, logs (si Docker détecté dynamiquement)
 - Plugin `systemd` : list services, status, restart (si Linux)
@@ -482,6 +486,7 @@ vigile/
 - API : `GET /api/nodes`, `GET /api/nodes/{id}/stats`, `GET /api/nodes/{id}/logs`
 
 ### Sprint 3 — Couche IA et Human-in-the-Loop
+
 - `LLMClient` natif : complete + stream SSE
 - `StructuredLLM` : boucle retry + validation Pydantic
 - Modèle `ActionProposal` : action, params, reasoning, risk_level
@@ -489,6 +494,7 @@ vigile/
 - Audit Trail : hash chaîné, stockage immuable
 
 ### Sprint 4 — Frontend
+
 - Application React standalone (vite + TailwindCSS + shadcn/ui)
 - `ChatPanel` : streaming SSE natif, historique de conversation
 - `ActionProposal` : carte d'approbation avec contexte et niveau de risque
@@ -499,6 +505,7 @@ vigile/
 - **Plugin Catalogue** : page d'accueil des plugins disponibles avec installation en 1 clic (prépare le terrain pour Sprint 5)
 
 ### Sprint 5 — Plugin Ecosystem (Home Assistant-like)
+
 - **Format de plugin standardisé** : métadonnées, dépendances, hooks, configuration
 - **Plugin Registry** : catalogue de plugins téléchargeables (GitHub / registre local)
 - **Installation frontend** : browse, install, activate, configure depuis l'UI
@@ -511,6 +518,7 @@ vigile/
 - Exemples de plugins : backup, uptime monitoring, alerting Slack/Discord, DNS updater
 
 ### Sprint 6 — Production Hardening
+
 - Rate limiting sur les endpoints sensibles
 - Rotation automatique WORKER_TOKEN
 - Mode offline (binaires préchargés pour réseau isolé)
@@ -526,6 +534,7 @@ Le chemin vers un système entièrement autonome où l'IA gère les opérations
 courantes et n'escalade que l'inconnu.
 
 ### Sprint 7 — Autonomie Graduée
+
 - **Niveaux de confiance par action** : LOW=auto, MEDIUM=notification, HIGH=approbation humaine
 - **Profiling du comportement humain** : l'IA apprend des patterns d'approbation/rejet pour
   ajuster ses futurs niveaux de confiance
@@ -533,6 +542,7 @@ courantes et n'escalade que l'inconnu.
 - **Table `confidence_history`** : enregistre chaque décision (proposé → approuvé/rejeté → appris)
 
 ### Sprint 8 — Détection Proactive
+
 - **Anomaly detection** : baseline automatique des métriques (CPU, RAM, disque, processus)
   → écart = alerte avant la panne
 - **Analyse de logs temps réel** : l'IA scanne les logs en continu et remonte les patterns suspects
@@ -540,6 +550,7 @@ courantes et n'escalade que l'inconnu.
 - **Alerting prédictif** : notifications avant que le problème n'arrive, pas après
 
 ### Sprint 9 — Runbooks & Auto-Healing
+
 - **Bibliothèque de runbooks** : scénarios de résolution pré-approuvés stockés en base
   (exemple : "si nginx down → restart → si toujours down → appeler l'humain")
 - **Auto-healing des pannes courantes** : l'IA exécute les runbooks sans intervention
@@ -549,6 +560,7 @@ courantes et n'escalade que l'inconnu.
   précédent
 
 ### Sprint 10 — Coordination Multi-Nœuds
+
 - **Gestion des dépendances inter-services** : l'IA comprend que "si je restart docker.service,
   tous les containers seront impactés"
 - **Déploiement gradué** : actions sur un worker test → validation → propagation à la flotte
@@ -556,6 +568,7 @@ courantes et n'escalade que l'inconnu.
 - **Topologie de service** : graphe des dépendances découvert automatiquement
 
 ### Sprint 11 — Apprentissage & Mémoire
+
 - **Base de connaissances** : indexation de tous les incidents passés (cause → action → résultat)
 - **Fine-tuning du LLM** : adaptation du modèle sur l'historique du projet (privé, pas de données
   envoyées à l'extérieur)

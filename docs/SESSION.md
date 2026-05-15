@@ -151,7 +151,7 @@ PYTHONPATH="." .venv/bin/python tests/integration/test_api.py
 - ✅ Plugin `systemd` + `docker` — déclarent les actions supportées via `get_supported_actions`
 - ✅ API systemd : `GET /services`, `GET /services/{name}`, `POST /services/{name}/restart`
 - ✅ API Docker : `GET /containers`, `POST /containers/{id}/restart`
-- ✅ **218 tests unitaires** (57 core + 88 plugins + 15 WS + 22 logs + 36 services)
+- ✅ **285 tests** (tous niveaux : unitaires + intégration + simulation)
 - ✅ **Déploiement sur youcloud.ovh, test end-to-end complet**
   - 45 services systemd listés, ssh.service actif/enabled
   - 39 containers Docker listés (via socket Unix fixé)
@@ -159,7 +159,7 @@ PYTHONPATH="." .venv/bin/python tests/integration/test_api.py
   - Métriques CPU/MEM/DISK via STATUS_REPORT 60s
   - Bug `containers.go:DialContext` fixé (écrasait le socket Unix par TCP)
 
-**Sprint 3 : Couche IA et Human-in-the-Loop (Terminé ✅)**
+**Sprint 3 : Couche IA et Human-in-the-Loop (Terminé ✅ — validé niveaux 1, 2, 3, 4)**
 - `LLMClient` natif : complete + stream SSE
 - `StructuredLLM` : boucle retry + validation Pydantic
 - `ActionProposal` : modèle Pydantic + table DB (PENDING→APPROVED→EXECUTED|FAILED)

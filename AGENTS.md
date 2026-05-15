@@ -14,13 +14,14 @@ négociables. Applique-les à chaque ligne écrite.
 
 **Never commit or push without explicit approval.**
 At the end of each sprint or feature, ask the user for permission:
+
   1. Present the summary of changes (files changed, tests passed)
   2. Wait for a "go ahead" before committing
   3. Only push after the commit is confirmed
 
 ## Project structure
 
-```
+```text
 master/main.py           # FastAPI entrypoint
 master/config.py         # Settings from env vars (.env.example)
 master/core/             # SecurityManager, NodeManager, PluginManager, audit, rate_limiter
@@ -110,7 +111,7 @@ PYTHONPATH="." uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
 ## Reference files
 
 | File | Purpose |
-|------|---------|
+| ------ | --------- |
 | `CLAUDE.md` | **Coding standards, DI rules, typing, tests, security, zero-dependency** |
 | `docs/PLAN.md` | Full architecture plan, protocol specs, future sprints (Sprints 1→11) |
 | `docs/LIMITS.md` | Known bugs, races, scalability limits |
