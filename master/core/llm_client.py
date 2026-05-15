@@ -54,20 +54,6 @@ class LLMClient:
     # Public API
     # -----------------------------------------------------------------------
 
-    # -----------------------------------------------------------------------
-    # Testability hooks — overridden by tests to avoid real HTTP calls
-    # -----------------------------------------------------------------------
-
-    async def _session_post(self, url: str, headers: dict, json_body: dict) -> Any:
-        """Make an HTTP POST. Extracted for testability (override in tests)."""
-        async with httpx.AsyncClient(timeout=self.timeout) as session:
-            return await session.post(url, headers=headers, json=json_body)
-
-    async def _session_stream(self, url: str, headers: dict, json_body: dict) -> Any:
-        """Make a streaming HTTP POST. Extracted for testability (override in tests)."""
-        async with httpx.AsyncClient(timeout=self.timeout) as session:
-            return await session.stream("POST", url, headers=headers, json=json_body)
-
     async def complete(
         self,
         messages: list[dict[str, Any]],
@@ -80,16 +66,15 @@ class LLMClient:
         Raises LLMError on HTTP errors or timeouts.
         """
         body = self._build_body(messages, stream=False, **kwargs)
-        try:
-            resp = await self._session_post(
-                f"{self.base_url}/chat/completions",
-                self._build_headers(),
-                body,
-            )
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"LLM request timed out after {self.timeout}s") from exc
-        except httpx.ConnectError as exc:
-            raise LLMError(f"LLM connection failed: {exc}") from exc
+        url = f"{self.base_url}/chat/completions"
+        headers = self._build_headers()
+        async with httpx.AsyncClient(timeout=self.timeout) as session:
+            try:
+                resp = await session.post(url, headers=headers, json=body)
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"LLM request timed out after {self.timeout}s") from exc
+            except httpx.ConnectError as exc:
+                raise LLMError(f"LLM connection failed: {exc}") from exc
 
         if resp.status_code >= 400:
             detail = f"LLM returned HTTP {resp.status_code}"
@@ -116,55 +101,57 @@ class LLMClient:
           - "detail": str (for error type)
         """
         body = self._build_body(messages, stream=True, **kwargs)
+        url = f"{self.base_url}/chat/completions"
+        headers = self._build_headers()
 
-        try:
-            resp = await self._session_stream(
-                f"{self.base_url}/chat/completions",
-                self._build_headers(),
-                body,
-            )
-        except httpx.TimeoutException:
-            yield {"type": "error", "detail": f"LLM stream timed out after {self.timeout}s"}
-            return
-        except httpx.ConnectError as exc:
-            yield {"type": "error", "detail": f"LLM connection failed: {exc}"}
-            return
-
-        if resp.status_code >= 400:
-            detail = f"LLM returned HTTP {resp.status_code}"
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, read=120)) as session:
             try:
-                detail += f": {resp.text[:200]}"
-            except Exception:
-                pass
-            yield {"type": "error", "detail": detail}
-            return
-
-        async for line in resp.aiter_lines():
-            if not line.startswith("data: "):
-                continue
-            payload = line[6:]
-            if payload.strip() == "[DONE]":
-                yield {"type": "done"}
+                resp = await session.send(
+                    session.build_request("POST", url, headers=headers, json=body),
+                    stream=True,
+                )
+            except httpx.TimeoutException:
+                yield {"type": "error", "detail": f"LLM stream timed out"}
+                return
+            except httpx.ConnectError as exc:
+                yield {"type": "error", "detail": f"LLM connection failed: {exc}"}
                 return
 
-            try:
-                chunk = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
+            if resp.status_code >= 400:
+                detail = f"LLM returned HTTP {resp.status_code}"
+                try:
+                    detail += f": {resp.text[:200]}"
+                except Exception:
+                    pass
+                yield {"type": "error", "detail": detail}
+                return
 
-            choices = chunk.get("choices", [])
-            if not choices:
-                continue
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    yield {"type": "done"}
+                    return
 
-            delta = choices[0].get("delta", {})
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
 
-            content = delta.get("content")
-            if content:
-                yield {"type": "token", "content": content}
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
 
-            tool_calls = delta.get("tool_calls")
-            if tool_calls:
-                yield {"type": "tool_call", "tool_calls": tool_calls}
+                delta = choices[0].get("delta", {})
+
+                content = delta.get("content")
+                if content:
+                    yield {"type": "token", "content": content}
+
+                tool_calls = delta.get("tool_calls")
+                if tool_calls:
+                    yield {"type": "tool_call", "tool_calls": tool_calls}
 
     # -----------------------------------------------------------------------
     # Internal helpers

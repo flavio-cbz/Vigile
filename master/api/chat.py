@@ -19,6 +19,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from master.api.deps import (
     DB,
@@ -103,7 +104,8 @@ async def chat(
                     tool_calls_detected.append(event["tool_calls"])
 
                 elif event["type"] == "done":
-                    yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
+                    # LLM stream done — continue to proposal extraction below
+                    pass
 
                 elif event["type"] == "error":
                     yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
@@ -126,7 +128,9 @@ async def chat(
                             'reasoning': proposal.reasoning,
                         }, separators=(',', ':'))}\n\n"
                     )
-                    yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
+
+            # Final done event
+            yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
 
         except Exception as exc:
             logger.exception("Chat streaming error")
@@ -419,6 +423,14 @@ async def _build_chat_context(
     return base + "\n".join(f"- {line}" for line in context_parts)
 
 
+class _ProposalRequest(BaseModel):
+    """Simplified model for LLM to fill — only needs action/reasoning/risk."""
+    action: str = ""
+    params: dict[str, Any] = {}
+    reasoning: str = ""
+    risk_level: str = "MEDIUM"
+
+
 async def _try_extract_proposal(
     sllm: StructuredLLM,
     node_id: str,
@@ -431,37 +443,37 @@ async def _try_extract_proposal(
     from the conversation context.
     """
     try:
-        proposal = await sllm.create(
-            ActionProposal,
+        req = await sllm.create(
+            _ProposalRequest,
             [
-                {
-                    "role": "system",
-                    "content": (
-                        "Based on the conversation, determine if a server action is needed. "
-                        "If yes, output a JSON with action, params, reasoning, and risk_level. "
-                        "If no action is needed, set action to 'NONE'."
-                    ),
-                },
+                {"role": "system", "content": (
+                    "Based on the conversation, determine if a server action is needed. "
+                    "If yes, output action, params, reasoning, and risk_level as JSON. "
+                    "Set action to 'NONE' if no action is needed."
+                )},
                 {"role": "user", "content": user_message},
                 {"role": "assistant", "content": ai_response},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Is a {_list_available_actions()} action needed? "
-                        "If yes, propose it with the exact action name and params. "
-                        "If not, set action to 'NONE'."
-                    ),
-                },
+                {"role": "user", "content": (
+                    f"Is a {_list_available_actions()} action needed? "
+                    "Reply with JSON only."
+                )},
             ],
             temperature=0.1,
+            max_retries=2,
         )
-        if proposal.action == "NONE":
+        if not req.action or req.action == "NONE":
             return None
-        proposal.node_id = node_id
-        proposal.created_by = "ai"
+        proposal = ActionProposal(
+            node_id=node_id,
+            action=req.action,
+            params=req.params,
+            reasoning=req.reasoning,
+            risk_level=req.risk_level or "MEDIUM",
+            created_by="ai",
+        )
         return proposal
     except Exception as exc:
-        logger.debug("Could not extract proposal: %s", exc)
+        logger.warning("Could not extract proposal: %s", exc)
         return None
 
 

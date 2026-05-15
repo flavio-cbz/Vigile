@@ -13,8 +13,6 @@ PROJECT_ROOT = str(pathlib.Path(__file__).parent.parent.parent)
 sys.path.insert(0, PROJECT_ROOT)
 
 # Mock httpx before any imports that use it
-import unittest.mock as mock
-
 PASS = "\033[92m\u2713\033[0m"
 FAIL = "\033[91m\u2717\033[0m"
 results = []
@@ -28,87 +26,73 @@ def check(name, condition, detail=""):
 from master.core.llm_client import LLMClient, LLMError
 
 
-def _make_mock_response(status=200, json_body=None, text=""):
-    """Create a minimal mock object that behaves like httpx.Response for tests."""
-    class _MockHTTPXResponse:
-        def __init__(self):
-            self.status_code = status
-            self._json_body = json_body or {}
-            self.text = text or json.dumps(json_body) if json_body else ""
-
-        def json(self):
-            return self._json_body
-
-    return _MockHTTPXResponse()
-
-
 class _MockStreamResponse:
     """Simulates a streaming httpx response for the stream method."""
     def __init__(self, lines, status=200):
         self.status_code = status
         self._lines = lines
-        self.text = "\n".join(lines)
 
     async def aiter_lines(self):
         for line in self._lines:
             yield line
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        pass
-
 
 async def test_complete_success():
-    """LLMClient.complete() returns parsed response on success."""
-    body = {"choices": [{"message": {"content": "Hello world"}}]}
-    mock_resp = _make_mock_response(200, body)
-    original_post = LLMClient._session_post
-    async def _fake_post(self, url, headers, json_body):
-        return mock_resp
-    LLMClient._session_post = _fake_post
-    try:
+    """LLMClient.complete() — mock httpx.AsyncClient.post."""
+    import unittest.mock as mock
+    mock_resp = mock.AsyncMock()
+    mock_resp.status_code = 200
+    mock_resp.json = lambda: {"choices": [{"message": {"content": "Hello world"}}]}
+
+    with mock.patch("httpx.AsyncClient") as MockClient:
+        inst = mock.AsyncMock()
+        MockClient.return_value = inst
+        inst.__aenter__.return_value = inst
+        inst.post.return_value = mock_resp
+
         client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
         result = await client.complete([{"role": "user", "content": "Hi"}])
         check("complete: returns choices", "choices" in result)
         check("complete: has content",
               result["choices"][0]["message"]["content"] == "Hello world")
-    finally:
-        LLMClient._session_post = original_post
 
 
 async def test_complete_timeout():
     """LLMClient.complete() raises LLMError on timeout."""
-    async def _fake_timeout(self, url, headers, json_body):
-        raise __import__("httpx").TimeoutException("timeout")
-    client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
-    original_post = LLMClient._session_post
-    LLMClient._session_post = _fake_timeout
-    try:
-        await client.complete([{"role": "user", "content": "Hi"}])
-        check("complete timeout: no exception raised", False)
-    except LLMError as e:
-        check("complete timeout: raises LLMError", "timed out" in str(e).lower())
-    finally:
-        LLMClient._session_post = original_post
+    import unittest.mock as mock
+    with mock.patch("httpx.AsyncClient") as MockClient:
+        inst = mock.AsyncMock()
+        MockClient.return_value = inst
+        inst.__aenter__.return_value = inst
+        inst.post.side_effect = __import__("httpx").TimeoutException("timeout")
+
+        client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
+        try:
+            await client.complete([{"role": "user", "content": "Hi"}])
+            check("complete timeout: no exception raised", False)
+        except LLMError as e:
+            check("complete timeout: raises LLMError", "timed out" in str(e).lower())
 
 
 async def test_complete_http_error():
     """LLMClient.complete() raises LLMError on HTTP 4xx/5xx."""
-    mock_resp = _make_mock_response(401, {"error": "unauthorized"}, text='{"error": "unauthorized"}')
-    async def _fake_401(self, url, headers, json_body):
-        return mock_resp
-    client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
-    original_post = LLMClient._session_post
-    LLMClient._session_post = _fake_401
-    try:
-        await client.complete([{"role": "user", "content": "Hi"}])
-        check("complete 401: no exception raised", False)
-    except LLMError as e:
-        check("complete 401: raises LLMError", "401" in str(e))
-    finally:
-        LLMClient._session_post = original_post
+    import unittest.mock as mock
+    mock_resp = mock.AsyncMock()
+    mock_resp.status_code = 401
+    mock_resp.text = json.dumps({"error": "unauthorized"})
+
+    with mock.patch("httpx.AsyncClient") as MockClient:
+        inst = mock.AsyncMock()
+        MockClient.return_value = inst
+        inst.__aenter__.return_value = inst
+        inst.post.return_value = mock_resp
+
+        client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
+        try:
+            await client.complete([{"role": "user", "content": "Hi"}])
+            check("complete 401: no exception raised", False)
+        except LLMError as e:
+            check("complete 401: raises LLMError", "401" in str(e))
 
 
 async def test_stream_tokens():
@@ -118,14 +102,15 @@ async def test_stream_tokens():
         f"data: {json.dumps({'choices': [{'delta': {'content': ' world'}}]})}",
         "data: [DONE]",
     ]
+    import unittest.mock as mock
 
-    async def _fake_stream(self, url, headers, json_body):
-        return _MockStreamResponse(chunks, 200)
+    with mock.patch("httpx.AsyncClient") as MockClient:
+        inst = mock.AsyncMock()
+        MockClient.return_value = inst
+        inst.__aenter__.return_value = inst
+        inst.send.return_value = _MockStreamResponse(chunks, 200)
 
-    client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
-    original_stream = LLMClient._session_stream
-    LLMClient._session_stream = _fake_stream
-    try:
+        client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
         tokens = []
         async for event in client.stream([{"role": "user", "content": "Hi"}]):
             tokens.append(event)
@@ -133,41 +118,39 @@ async def test_stream_tokens():
         if len(tokens) >= 2:
             check("stream: first token content",
                   tokens[0]["type"] == "token" and tokens[0]["content"] == "Hello")
-    finally:
-        LLMClient._session_stream = original_stream
 
 
 async def test_stream_done():
     """LLMClient.stream() yields done event."""
-    async def _fake_stream(self, url, headers, json_body):
-        return _MockStreamResponse(["data: [DONE]"], 200)
-    client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
-    original_stream = LLMClient._session_stream
-    LLMClient._session_stream = _fake_stream
-    try:
+    import unittest.mock as mock
+    with mock.patch("httpx.AsyncClient") as MockClient:
+        inst = mock.AsyncMock()
+        MockClient.return_value = inst
+        inst.__aenter__.return_value = inst
+        inst.send.return_value = _MockStreamResponse(["data: [DONE]"], 200)
+
+        client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
         events = []
         async for event in client.stream([{"role": "user", "content": "Hi"}]):
             events.append(event)
         check("stream: done event", any(e["type"] == "done" for e in events))
-    finally:
-        LLMClient._session_stream = original_stream
 
 
 async def test_stream_http_error():
     """LLMClient.stream() yields error event on HTTP error."""
-    async def _fake_stream(self, url, headers, json_body):
-        return _MockStreamResponse([], 500)
-    client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
-    original_stream = LLMClient._session_stream
-    LLMClient._session_stream = _fake_stream
-    try:
+    import unittest.mock as mock
+    with mock.patch("httpx.AsyncClient") as MockClient:
+        inst = mock.AsyncMock()
+        MockClient.return_value = inst
+        inst.__aenter__.return_value = inst
+        inst.send.return_value = _MockStreamResponse([], 500)
+
+        client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
         events = []
         async for event in client.stream([{"role": "user", "content": "Hi"}]):
             events.append(event)
         check("stream: error on HTTP 500",
               any(e["type"] == "error" and "500" in e.get("detail", "") for e in events))
-    finally:
-        LLMClient._session_stream = original_stream
 
 
 print("\n\U0001f916 LLMClient Tests")

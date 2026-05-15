@@ -15,6 +15,7 @@ Design:
 The hash function is pure Python stdlib (hashlib) — no dependencies.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -25,6 +26,9 @@ from typing import Any
 import aiosqlite
 
 logger = logging.getLogger(__name__)
+
+# Serialize writes to prevent sequence collision
+_audit_lock = asyncio.Lock()
 
 # Sentinel for the first entry in the chain
 GENESIS_HASH = "0" * 64
@@ -91,9 +95,10 @@ async def log_action(
     timestamp = time.time()
     entry_id = str(uuid.uuid4())
 
-    # BEGIN IMMEDIATE serializes writes — prevents sequence collision under concurrency
-    await db.execute("BEGIN IMMEDIATE")
-    try:
+    # Serialized via asyncio.Lock to prevent sequence collision under concurrency.
+    # (BEGIN IMMEDIATE alone isn't sufficient because await points inside the
+    # critical section allow other coroutines to interleave.)
+    async with _audit_lock:
         async with db.execute(
             "SELECT sequence, entry_hash FROM audit_log ORDER BY sequence DESC LIMIT 1"
         ) as cursor:
@@ -129,9 +134,6 @@ async def log_action(
             ),
         )
         await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
 
     logger.info(
         "AUDIT seq=%d action=%s user=%s node=%s",
