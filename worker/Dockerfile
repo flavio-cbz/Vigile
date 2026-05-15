@@ -12,7 +12,8 @@ RUN go build -o vigile-worker .
 # ── Stage 2: Runtime ────────────────────────────────────────────────────
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata docker-cli util-linux-misc
+RUN apk add --no-cache ca-certificates tzdata docker-cli util-linux util-linux-misc || \
+    apk add --no-cache ca-certificates tzdata docker-cli util-linux
 
 RUN mkdir -p /etc/vigile /var/log && echo "Vigile syslog bootstrap" > /var/log/syslog
 

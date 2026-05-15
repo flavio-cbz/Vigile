@@ -37,8 +37,13 @@ def check(name: str, condition: bool, detail: str = ""):
 # ─── 1. SecurityManager ──────────────────────────────────────────────────────
 print("\n🔐 SecurityManager")
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from master.core.security_manager import SecurityManager
-sec = SecurityManager()
+sec = SecurityManager(
+    server_secret="test_secret",
+    jwt_secret="test_jwt",
+    master_private_key=Ed25519PrivateKey.generate(),
+)
 
 # JOIN_TOKEN round-trip (now returns tuple)
 token, payload = sec.generate_join_token("node-123", "10.0.0.")

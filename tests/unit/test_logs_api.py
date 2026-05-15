@@ -33,9 +33,18 @@ def check(name: str, condition: bool, detail: str = ""):
 from master.db.database import init_db, close_db, reset_db
 from master.db.migrations import run_migrations
 from master.core.node_manager import node_manager, NodeState
-from master.core.security_manager import security
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from master.core.security_manager import init_security, get_security_instance
 from master.main import app
 from master.api import deps
+
+
+init_security(
+    server_secret=os.environ["SERVER_SECRET_KEY"],
+    jwt_secret=os.environ["JWT_SECRET_KEY"],
+    master_private_key=Ed25519PrivateKey.generate(),
+)
+security = get_security_instance()
 
 
 def _make_token(role: str = "admin") -> str:

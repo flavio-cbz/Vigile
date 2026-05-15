@@ -3,8 +3,12 @@
 ## Session start
 
 Read `docs/SESSION_INIT.md` first — it has the current sprint status.
-Read `CLAUDE.md` for project rules (zero-dependency, security).
-Read `docs/LIMITS.md` for known bugs and architectural limits.
+Read `CLAUDE.md` second — **CODING STANDARDS, architecture rules, DI rules**.
+Read `docs/LIMITS.md` third — known bugs and architectural limits.
+
+**IMPORTANT :** `CLAUDE.md` contient les règles strictes de qualité de code,
+d'injection de dépendances, de typage, et de tests. Ces règles ne sont pas
+négociables. Applique-les à chaque ligne écrite.
 
 ## Commit & Push policy
 
@@ -107,7 +111,7 @@ PYTHONPATH="." uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
 
 | File | Purpose |
 |------|---------|
-| `CLAUDE.md` | Project rules, security, zero-dependency |
+| `CLAUDE.md` | **Coding standards, DI rules, typing, tests, security, zero-dependency** |
 | `docs/INIT.md` | Full architecture plan, protocol specs, future sprints |
 | `docs/LIMITS.md` | Known bugs, races, scalability limits |
 | `.env.example` | All configurable env vars with defaults |

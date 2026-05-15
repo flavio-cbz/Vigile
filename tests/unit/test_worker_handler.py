@@ -91,7 +91,7 @@ class MockWebSocket:
 
 from master.db.database import reset_db, init_db, close_db
 from master.db.migrations import run_migrations
-from master.core.security_manager import security
+from master.core.security_manager import init_security, get_security_instance
 from master.core.node_manager import node_manager, NodeState
 from master.ws import worker_handler as ws_handler
 from master.ws.worker_handler import worker_join_handler
@@ -103,6 +103,14 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 worker_priv = Ed25519PrivateKey.generate()
 worker_pub_bytes = worker_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
 worker_pub_b64 = base64.urlsafe_b64encode(worker_pub_bytes).decode()
+
+# Initialize SecurityManager singleton for test
+init_security(
+    server_secret=os.environ["SERVER_SECRET_KEY"],
+    jwt_secret=os.environ["JWT_SECRET_KEY"],
+    master_private_key=Ed25519PrivateKey.generate(),
+)
+security = get_security_instance()
 
 
 async def setup_token(name: str = "test-node") -> tuple[str, str, str]:

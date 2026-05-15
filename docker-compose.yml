@@ -17,6 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.master
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
@@ -38,6 +39,7 @@ services:
   # ── Worker (base service, supports multiple instances) ───────────────
   worker:
     build: ./worker
+    restart: unless-stopped
     depends_on:
       master:
         condition: service_healthy
@@ -46,6 +48,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MASTER_URL=http://master:8000
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep vigile-worker || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     # Use: docker compose run --rm -e JOIN_TOKEN=xxx worker
 
 volumes:

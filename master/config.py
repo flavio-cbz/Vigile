@@ -44,10 +44,10 @@ class Settings(BaseModel):
     master_key_path: str = os.getenv("MASTER_KEY_PATH", "./data/master_ed25519.key")
 
     # --- CORS ---
-    cors_origins: list[str] = []
+    cors_origins: list[str] = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
 
     # --- Security: Trusted proxies for X-Forwarded-For ---
-    trusted_proxies: list[str] = []
+    trusted_proxies: list[str] = os.getenv("TRUSTED_PROXIES", "").split(",") if os.getenv("TRUSTED_PROXIES") else []
 
     # --- Security: HTTPS enforcement ---
     enforce_https: bool = os.getenv("ENFORCE_HTTPS", "false").lower() == "true"
@@ -71,10 +71,14 @@ class Settings(BaseModel):
 
     def model_post_init(self, __context) -> None:
         """Generate secrets if not provided (dev convenience, NOT for production)."""
+        import logging
+        _log = logging.getLogger(__name__)
         if not self.server_secret_key:
             self.server_secret_key = secrets.token_hex(32)
+            _log.warning("SERVER_SECRET_KEY auto-generated (dev mode). Set it in production.")
         if not self.jwt_secret_key:
             self.jwt_secret_key = secrets.token_hex(32)
+            _log.warning("JWT_SECRET_KEY auto-generated (dev mode). Set it in production.")
 
 
 # Singleton

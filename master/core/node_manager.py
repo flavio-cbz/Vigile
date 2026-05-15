@@ -31,7 +31,6 @@ from typing import Any
 import aiosqlite
 from fastapi import WebSocket
 
-from master.config import settings
 from master.db.database import get_db_conn
 
 logger = logging.getLogger(__name__)
@@ -119,16 +118,25 @@ class NodeManager:
         self._lock: asyncio.Lock = asyncio.Lock()
         # Pending intent futures: intent_id → asyncio.Future
         self._pending_intents: dict[str, asyncio.Future] = {}
+        # Track which node owns each pending intent (for cleanup on disconnect)
+        self._intent_nodes: dict[str, str] = {}
         self._monitor_task: asyncio.Task | None = None
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
     # -----------------------------------------------------------------------
 
-    async def start(self) -> None:
-        """Start the background heartbeat monitor. Called at app startup."""
+    async def start(
+        self,
+        heartbeat_interval: int = 30,
+        lost_threshold: int = 300,
+        stale_threshold: int = 86400,
+    ) -> None:
+        """Start the background heartbeat monitor. Called at app startup.
+        Thresholds are injected here — no config coupling inside the loop."""
         self._monitor_task = asyncio.create_task(
-            self._heartbeat_monitor(), name="heartbeat_monitor"
+            self._heartbeat_monitor(heartbeat_interval, lost_threshold, stale_threshold),
+            name="heartbeat_monitor",
         )
         logger.info("NodeManager started. Heartbeat monitor running.")
 
@@ -291,9 +299,18 @@ class NodeManager:
         return conn
 
     async def unregister_connection(self, node_id: str) -> None:
-        """Remove a node from the active connections registry."""
+        """Remove a node from the active connections registry.
+        Also cancels any pending intents for this node to prevent memory leaks."""
         async with self._lock:
             self._connections.pop(node_id, None)
+        # Clean up pending intents for this node
+        # Iterate a copy to avoid mutation during iteration
+        for intent_id, nid in list(self._intent_nodes.items()):
+            if nid == node_id:
+                self._intent_nodes.pop(intent_id, None)
+                future = self._pending_intents.pop(intent_id, None)
+                if future is not None and not future.done():
+                    future.cancel()
         logger.info("Node %s WebSocket unregistered.", node_id)
 
     async def get_connection(self, node_id: str) -> ActiveConnection | None:
@@ -319,6 +336,7 @@ class NodeManager:
 
     async def resolve_intent(self, intent_id: str, result: dict[str, Any]) -> None:
         """Resolve a pending intent with the Worker's response."""
+        self._intent_nodes.pop(intent_id, None)
         future = self._pending_intents.pop(intent_id, None)
         if future is not None and not future.done():
             future.set_result(result)
@@ -363,6 +381,7 @@ class NodeManager:
 
             future: asyncio.Future = asyncio.get_running_loop().create_future()
             self._pending_intents[intent_id] = future
+            self._intent_nodes[intent_id] = node_id
 
             # Send type last to prevent intent dict from overwriting the message type
             await conn.websocket.send_json({**intent, "type": "INTENT"})
@@ -373,6 +392,7 @@ class NodeManager:
             result = await asyncio.wait_for(future, timeout=timeout)
             return result
         except asyncio.TimeoutError:
+            self._intent_nodes.pop(intent_id, None)
             self._pending_intents.pop(intent_id, None)
             raise TimeoutError(
                 f"Node {node_id} did not respond to intent {intent_id} within {timeout}s"
@@ -382,14 +402,13 @@ class NodeManager:
     # Background heartbeat monitor
     # -----------------------------------------------------------------------
 
-    async def _heartbeat_monitor(self) -> None:
+    async def _heartbeat_monitor(
+        self, interval: int, lost_threshold: int, stale_threshold: int
+    ) -> None:
         """
-        Background task that runs every heartbeat_interval seconds.
-        Checks all connected nodes for missed heartbeats and updates states.
+        Background task that runs every `interval` seconds.
+        Thresholds are injected — no config coupling inside the loop.
         """
-        lost_threshold = settings.heartbeat_lost_threshold
-        stale_threshold = settings.heartbeat_stale_threshold
-        interval = settings.heartbeat_interval
 
         logger.info(
             "Heartbeat monitor: interval=%ds lost=%ds stale=%ds",

@@ -48,8 +48,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from master.config import settings
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -62,6 +60,10 @@ def _pad_b64(s: str) -> str:
     remainder = len(s) % 4
     return s + "=" * (4 - remainder) if remainder else s
 
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -87,49 +89,44 @@ class SecurityManager:
     Centralizes all cryptographic operations for the Master Node.
 
     Instantiated once at startup and injected via FastAPI dependency.
-    The master Ed25519 keypair is loaded/generated at construction time.
+    The master Ed25519 keypair must be pre-loaded and passed by the caller (edge layer).
+    All TTL values are frozen at construction time — runtime config changes are invisible.
     """
 
-    def __init__(self) -> None:
-        self._server_secret: bytes = settings.server_secret_key.encode()
-        self._jwt_secret: str = settings.jwt_secret_key
-        self._master_private_key: Ed25519PrivateKey = self._load_or_generate_master_key()
+    def __init__(
+        self,
+        server_secret: str,
+        jwt_secret: str,
+        jwt_algorithm: str = "HS256",
+        join_token_ttl: int = 1800,
+        worker_token_ttl: int = 2592000,
+        worker_token_rotation: int = 604800,
+        jwt_access_token_ttl: int = 3600,
+        jwt_refresh_token_ttl: int = 86400,
+        master_private_key: Ed25519PrivateKey | None = None,
+    ) -> None:
+        self._server_secret: bytes = server_secret.encode()
+        self._jwt_secret: str = jwt_secret
+        self._jwt_algorithm: str = jwt_algorithm
+        self._join_token_ttl: int = join_token_ttl
+        self._worker_token_ttl: int = worker_token_ttl
+        self._worker_token_rotation: int = worker_token_rotation
+        self._jwt_access_token_ttl: int = jwt_access_token_ttl
+        self._jwt_refresh_token_ttl: int = jwt_refresh_token_ttl
+
+        # Keypair: caller provides a pre-loaded Ed25519PrivateKey
+        # If None, a fresh keypair is generated (dev mode, NOT for production)
+        if master_private_key is None:
+            master_private_key = Ed25519PrivateKey.generate()
+            logger.warning("No master key provided — generated ephemeral key (dev mode)")
+        self._master_private_key: Ed25519PrivateKey = master_private_key
         self._master_public_key: Ed25519PublicKey = self._master_private_key.public_key()
-        # Cache the base64 public key (computed once)
+
         raw = self._master_public_key.public_bytes(
             encoding=Encoding.Raw, format=PublicFormat.Raw
         )
         self._master_public_key_b64: str = base64.urlsafe_b64encode(raw).decode()
-        logger.info("SecurityManager initialized. Master public key: %s", self._master_public_key_b64)
-
-    # -----------------------------------------------------------------------
-    # Master Ed25519 keypair
-    # -----------------------------------------------------------------------
-
-    def _load_or_generate_master_key(self) -> Ed25519PrivateKey:
-        """Load the persisted master Ed25519 private key, or generate and save it."""
-        key_path = settings.master_key_path
-
-        if os.path.exists(key_path):
-            with open(key_path, "rb") as f:
-                raw = f.read()
-            private_key = Ed25519PrivateKey.from_private_bytes(raw)
-            logger.info("Master Ed25519 key loaded from %s", key_path)
-        else:
-            private_key = Ed25519PrivateKey.generate()
-            raw = private_key.private_bytes(
-                encoding=Encoding.Raw,
-                format=PrivateFormat.Raw,
-                encryption_algorithm=NoEncryption(),
-            )
-            # Write with restrictive permissions (owner read-only)
-            os.makedirs(os.path.dirname(os.path.abspath(key_path)), exist_ok=True)
-            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(raw)
-            logger.warning("New master Ed25519 keypair generated and saved to %s", key_path)
-
-        return private_key
+        logger.info("SecurityManager initialized.")
 
     @property
     def master_public_key_b64(self) -> str:
@@ -154,7 +151,7 @@ class SecurityManager:
         """
         payload = {
             "node_id": node_id,
-            "expires_at": int(time.time()) + settings.join_token_ttl,
+            "expires_at": int(time.time()) + self._join_token_ttl,
             "ip_prefix": ip_prefix,
             "single_use": True,
             "jti": str(uuid.uuid4()),
@@ -265,8 +262,8 @@ class SecurityManager:
         now = time.time()
         lifecycle = {
             "issued_at": now,
-            "rotation_due": now + settings.worker_token_rotation,
-            "expires_at": now + settings.worker_token_ttl,
+            "rotation_due": now + self._worker_token_rotation,
+            "expires_at": now + self._worker_token_ttl,
         }
         claims = {
             "sub": node_id,
@@ -276,7 +273,7 @@ class SecurityManager:
             "rotation_due": int(lifecycle["rotation_due"]),
             "jti": str(uuid.uuid4()),
         }
-        token = jwt.encode(claims, self._jwt_secret, algorithm=settings.jwt_algorithm)
+        token = jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
         return token, lifecycle
 
     def verify_worker_token(self, token: str) -> dict[str, Any]:
@@ -286,7 +283,7 @@ class SecurityManager:
         For DB revocation checking, use verify_worker_token_async().
         """
         try:
-            claims = jwt.decode(token, self._jwt_secret, algorithms=[settings.jwt_algorithm])
+            claims = jwt.decode(token, self._jwt_secret, algorithms=[self._jwt_algorithm])
         except JWTError as exc:
             raise ValueError(f"Invalid worker token: {exc}") from exc
 
@@ -299,29 +296,7 @@ class SecurityManager:
         self, token: str, db: "aiosqlite.Connection"
     ) -> dict[str, Any]:
         """
-        Verify a WORKER_TOKEN and check revocation status in the database.
-        Raises ValueError on any failure.
-        """
-        claims = jwt.decode(token, self._jwt_secret, algorithms=[settings.jwt_algorithm])
-        if claims.get("type") != "worker":
-            raise ValueError("Token type mismatch: expected 'worker'")
-        token_hash = self.worker_token_hash(token)
-        async with db.execute(
-            "SELECT revoked FROM worker_tokens WHERE token_hash = ?",
-            (token_hash,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        if row is None:
-            raise ValueError("Worker token not found in database")
-        if row["revoked"]:
-            raise ValueError("Worker token has been revoked")
-        return claims
-
-    async def verify_worker_token_async(
-        self, token: str, db: "aiosqlite.Connection"
-    ) -> dict[str, Any]:
-        """
-        Async version of verify_worker_token that also checks DB revocation.
+        Verify a WORKER_TOKEN and check revocation in DB.
         """
         claims = self.verify_worker_token(token)
         token_hash = self.worker_token_hash(token)
@@ -353,10 +328,10 @@ class SecurityManager:
             "role": role,
             "type": "access",
             "iat": now,
-            "exp": now + settings.jwt_access_token_ttl,
+            "exp": now + self._jwt_access_token_ttl,
             "jti": str(uuid.uuid4()),
         }
-        return jwt.encode(claims, self._jwt_secret, algorithm=settings.jwt_algorithm)
+        return jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
 
     def create_refresh_token(self, user_id: str) -> str:
         """Create a long-lived refresh token (opaque — just a JWT with limited claims)."""
@@ -365,15 +340,15 @@ class SecurityManager:
             "sub": user_id,
             "type": "refresh",
             "iat": now,
-            "exp": now + settings.jwt_refresh_token_ttl,
+            "exp": now + self._jwt_refresh_token_ttl,
             "jti": str(uuid.uuid4()),
         }
-        return jwt.encode(claims, self._jwt_secret, algorithm=settings.jwt_algorithm)
+        return jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
 
     def verify_access_token(self, token: str) -> dict[str, Any]:
         """Decode and verify a user access token. Raises HTTPException on failure."""
         try:
-            claims = jwt.decode(token, self._jwt_secret, algorithms=[settings.jwt_algorithm])
+            claims = jwt.decode(token, self._jwt_secret, algorithms=[self._jwt_algorithm])
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -390,7 +365,7 @@ class SecurityManager:
     def verify_refresh_token(self, token: str) -> dict[str, Any]:
         """Decode and verify a refresh token."""
         try:
-            claims = jwt.decode(token, self._jwt_secret, algorithms=[settings.jwt_algorithm])
+            claims = jwt.decode(token, self._jwt_secret, algorithms=[self._jwt_algorithm])
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -481,7 +456,74 @@ class SecurityManager:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton
+# Standalone helper: load/generate master Ed25519 key from disk
+# This is an edge function — called from main.py lifespan, not from the class.
 # ---------------------------------------------------------------------------
 
-security = SecurityManager()
+
+def load_or_generate_master_key(key_path: str) -> Ed25519PrivateKey:
+    """Load the persisted master Ed25519 private key, or generate and save it.
+    Safe to call multiple times (idempotent read/write)."""
+    if os.path.exists(key_path):
+        with open(key_path, "rb") as f:
+            raw = f.read()
+        private_key = Ed25519PrivateKey.from_private_bytes(raw)
+        logger.info("Master Ed25519 key loaded from %s", key_path)
+    else:
+        private_key = Ed25519PrivateKey.generate()
+        raw = private_key.private_bytes(
+            encoding=Encoding.Raw,
+            format=PrivateFormat.Raw,
+            encryption_algorithm=NoEncryption(),
+        )
+        os.makedirs(os.path.dirname(os.path.abspath(key_path)), exist_ok=True)
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        logger.warning("New master Ed25519 keypair generated and saved to %s", key_path)
+    return private_key
+
+
+# ---------------------------------------------------------------------------
+# Module-level instance (lazily initialized via init_security())
+# ---------------------------------------------------------------------------
+
+_security_instance: SecurityManager | None = None
+
+
+def init_security(
+    server_secret: str,
+    jwt_secret: str,
+    jwt_algorithm: str = "HS256",
+    join_token_ttl: int = 1800,
+    worker_token_ttl: int = 2592000,
+    worker_token_rotation: int = 604800,
+    jwt_access_token_ttl: int = 3600,
+    jwt_refresh_token_ttl: int = 86400,
+    master_private_key: Ed25519PrivateKey | None = None,
+) -> SecurityManager:
+    """Initialize the SecurityManager singleton with explicit parameters."""
+    global _security_instance
+    if _security_instance is not None:
+        raise RuntimeError("SecurityManager already initialized")
+    _security_instance = SecurityManager(
+        server_secret=server_secret,
+        jwt_secret=jwt_secret,
+        jwt_algorithm=jwt_algorithm,
+        join_token_ttl=join_token_ttl,
+        worker_token_ttl=worker_token_ttl,
+        worker_token_rotation=worker_token_rotation,
+        jwt_access_token_ttl=jwt_access_token_ttl,
+        jwt_refresh_token_ttl=jwt_refresh_token_ttl,
+        master_private_key=master_private_key,
+    )
+    return _security_instance
+
+
+def get_security_instance() -> SecurityManager:
+    """Return the initialized SecurityManager or raise."""
+    if _security_instance is None:
+        raise RuntimeError(
+            "SecurityManager not initialized. Call init_security() first."
+        )
+    return _security_instance

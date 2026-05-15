@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from master.api.deps import CurrentUser, DB, get_security
+from master.config import settings
 from master.core.security_manager import SecurityManager
 from master.core.rate_limiter import rate_limiter
 
@@ -124,7 +125,6 @@ async def login(
 
     logger.info("User '%s' (role=%s) logged in.", user["username"], user["role"])
 
-    from master.config import settings
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -170,7 +170,6 @@ async def refresh_token(
     # Issue a fresh refresh token (simple rotation)
     new_refresh_token = sec.create_refresh_token(user_id=user["id"])
 
-    from master.config import settings
     return TokenResponse(
         access_token=access_token,
         refresh_token=new_refresh_token,

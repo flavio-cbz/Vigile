@@ -42,7 +42,7 @@ from master.config import settings
 from master.core.audit import log_action
 from master.core.node_manager import NodeManager, NodeState, node_manager
 from master.core.plugin_manager import plugin_manager
-from master.core.security_manager import SecurityManager, security
+from master.core.security_manager import SecurityManager, get_security_instance
 from master.db.database import get_db_conn, transaction
 
 logger = logging.getLogger(__name__)
@@ -148,7 +148,7 @@ async def _run_enrollment(
 
     # ── Step 2: Validate JOIN_TOKEN (HMAC + TTL) ────────────────────────────
     try:
-        payload = security.decode_join_token(join_token)
+        payload = get_security_instance().decode_join_token(join_token)
     except ValueError as exc:
         raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, str(exc)) from exc
 
@@ -164,7 +164,7 @@ async def _run_enrollment(
         raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "IP prefix restriction violated")
 
     # ── Step 4: Validate token in DB (existence + consumed + expiry) ───────
-    token_hash = security.join_token_hash(join_token)
+    token_hash = get_security_instance().join_token_hash(join_token)
 
     async with db.execute(
         "SELECT consumed, expires_at FROM join_tokens WHERE token_hash = ? AND node_id = ?",
@@ -200,7 +200,7 @@ async def _run_enrollment(
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
 
     # ── Step 7: Generate and send CHALLENGE ─────────────────────────────────
-    challenge = security.generate_challenge()
+    challenge = get_security_instance().generate_challenge()
     await _send(websocket, {"type": "ENROLLMENT_CHALLENGE", "challenge": challenge})
 
     # ── Step 8: Receive ENROLLMENT_RESPONSE ─────────────────────────────────
@@ -211,7 +211,7 @@ async def _run_enrollment(
         raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing signature in response")
 
     # ── Step 9: Verify Ed25519 signature ────────────────────────────────────
-    if not security.verify_ed25519_signature(public_key_b64, challenge, signature_b64):
+    if not get_security_instance().verify_ed25519_signature(public_key_b64, challenge, signature_b64):
         logger.warning(
             "Ed25519 signature verification FAILED: node_id=%s remote=%s",
             node_id, remote,
@@ -255,8 +255,8 @@ async def _run_enrollment(
             (hostname, machine_id, arch, os_name, public_key_b64, now, now, node_id),
         )
 
-        worker_token, lifecycle = security.generate_worker_token(node_id)
-        worker_token_hash = security.worker_token_hash(worker_token)
+        worker_token, lifecycle = get_security_instance().generate_worker_token(node_id)
+        worker_token_hash = get_security_instance().worker_token_hash(worker_token)
         token_id = str(uuid.uuid4())
 
         await db.execute(
@@ -293,7 +293,7 @@ async def _run_enrollment(
     await _send(websocket, {
         "type": "ENROLLMENT_SUCCESS",
         "worker_token": worker_token,
-        "master_public_key": security.master_public_key_b64,
+        "master_public_key": get_security_instance().master_public_key_b64,
         "node_id": node_id,
         "heartbeat_interval": settings.heartbeat_interval,
     })

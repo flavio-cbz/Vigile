@@ -91,13 +91,11 @@ Le plugin apparaît dans `loaded_plugins` mais ses hooks ne s'exécutent jamais.
 
 **Solution documentaire :** toujours utiliser `async_call()` pour les hooks asynchrones.
 
-### Aucune isolation d'erreur dans la boucle heartbeat (LOST→STALE)
+### ~~Aucune isolation d'erreur dans la boucle heartbeat (LOST→STALE)~~ ✅ Corrigé
 `master/core/node_manager.py:424-436`
 
-La deuxième boucle du heartbeat monitor (LOST→STALE) n'isole pas les erreurs par nœud.
-Si un `transition_state` échoue, tous les nœuds suivants sont sautés pour ce cycle.
-
-**Solution :** ajouter un try/except par nœud dans la deuxième boucle (comme c'est déjà fait dans la première).
+**Résolu dans Sprint 2.6** — le try/except par nœud est déjà présent dans la deuxième boucle.
+Le code était correct avant la détection dans l'audit. La doc LIMITS.md était obsolète.
 
 ---
 

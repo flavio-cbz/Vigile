@@ -21,9 +21,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from master.api.deps import CurrentUser, DB, get_security, require_role
+from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role
+from master.config import settings
 from master.core.audit import log_action
-from master.core.node_manager import NodeManager, node_manager, NodeState
+from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ async def generate_join_token(
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
     sec: SecurityManager = Depends(get_security),
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> JoinTokenResponse:
     """
     Generate a JOIN_TOKEN for a new Worker Node.
@@ -247,8 +248,6 @@ async def generate_join_token(
 
     The token is single-use and expires in 30 minutes.
     """
-    from master.config import settings
-
     # 1. Pre-create node
     node_id = await nm.create_node(db, name=body.name, ip_prefix=body.ip_prefix)
 
@@ -317,8 +316,6 @@ async def get_kickstart_script(request: Request) -> PlainTextResponse:
     without pre-authentication. Security comes from the JOIN_TOKEN validation
     in Phase 2 of the enrollment process.
     """
-    from master.config import settings
-
     # Sanitize: escape $ to prevent bash variable expansion in the generated script
     safe_url = settings.master_url.replace("$", "\\$")
     script = KICKSTART_TEMPLATE.replace("$master_url", safe_url)
@@ -338,7 +335,7 @@ async def list_nodes(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     state: str | None = Query(default=None, description="Filter by state"),
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> list[NodeResponse]:
     """Return a list of all registered nodes, optionally filtered by state."""
     nodes = await nm.list_nodes(db, state=state)
@@ -354,7 +351,7 @@ async def get_node(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> NodeResponse:
     """Fetch detailed information for a single node."""
     node = await nm.get_node(db, node_id)
@@ -372,7 +369,7 @@ async def revoke_node(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> None:
     """
     Revoke a node: disconnect it, invalidate its tokens, and mark it REVOKED.
@@ -457,7 +454,7 @@ async def get_node_stats(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     limit: Annotated[int, Query(ge=1, le=100, description="Number of snapshots to return")] = 10,
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
     """Return the latest metrics snapshots for a node, ordered by time descending."""
     # Verify node exists
@@ -503,7 +500,7 @@ async def get_node_logs(
     lines: Annotated[int, Query(ge=1, le=500, description="Number of log lines")] = 50,
     service: Annotated[str | None, Query(description="systemd service name (uses journalctl)")] = None,
     path: Annotated[str | None, Query(description="Log file path on the worker (/var/log/ only)")] = None,
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> LogsResponse:
     """
     Fetch live logs from a Worker via INTENT.

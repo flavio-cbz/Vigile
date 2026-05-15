@@ -19,8 +19,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
 
-from master.api.deps import DB, CurrentUser, require_role
-from master.core.node_manager import NodeManager, node_manager
+from master.api.deps import DB, CurrentUser, get_node_manager, require_role
+from master.core.node_manager import NodeManager
 from master.plugins.systemd_plugin import (
     ServiceInfo,
     ServiceStatus,
@@ -124,7 +124,7 @@ async def list_services(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceListResponse:
     """Fetch the list of all systemd services from a Worker."""
     await _get_node_or_404(nm, db, node_id)
@@ -156,7 +156,7 @@ async def get_service_status(
     service_name: Annotated[str, Path(description="Systemd service name (e.g. ssh.service)")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceStatusResponse:
     """Fetch the status of a specific systemd service on a Worker."""
     await _get_node_or_404(nm, db, node_id)
@@ -188,7 +188,7 @@ async def restart_service(
     service_name: Annotated[str, Path(description="Systemd service name (e.g. nginx.service)")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceActionResponse:
     """Restart a systemd service on a Worker (requires admin role)."""
     await _get_node_or_404(nm, db, node_id)
@@ -216,7 +216,7 @@ async def list_containers(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerListResponse:
     """Fetch the list of all Docker containers from a Worker."""
     await _get_node_or_404(nm, db, node_id)
@@ -249,7 +249,7 @@ async def restart_container(
     container_id: Annotated[str, Path(description="Container ID or name")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
-    nm: NodeManager = Depends(lambda: node_manager),
+    nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerActionResponse:
     """Restart a Docker container on a Worker (requires admin role)."""
     await _get_node_or_404(nm, db, node_id)

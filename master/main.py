@@ -32,6 +32,7 @@ from master.core.node_manager import node_manager
 from master.core.plugin_manager import plugin_manager
 from master.core.audit import verify_chain
 from master.core.rate_limiter import rate_limiter
+from master.core.security_manager import init_security, load_or_generate_master_key
 from master.api.auth import router as auth_router
 from master.api.nodes import router as nodes_router
 from master.api.services import router as services_router
@@ -69,8 +70,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Startup order:
       1. Open SQLite database
       2. Run migrations (idempotent)
-      3. Load plugins
-      4. Start NodeManager heartbeat monitor
+      3. Initialize SecurityManager (DI from settings)
+      4. Load plugins
+      5. Start NodeManager heartbeat monitor
 
     Shutdown order (reverse):
       4. Stop NodeManager (close active WebSockets)
@@ -99,12 +101,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Migrations
     await run_migrations(db)
 
-    # 3. Load plugins
+    # 3. Initialize SecurityManager (with explicit DI from settings)
+    master_key = load_or_generate_master_key(settings.master_key_path)
+    init_security(
+        server_secret=settings.server_secret_key,
+        jwt_secret=settings.jwt_secret_key,
+        jwt_algorithm=settings.jwt_algorithm,
+        join_token_ttl=settings.join_token_ttl,
+        worker_token_ttl=settings.worker_token_ttl,
+        worker_token_rotation=settings.worker_token_rotation,
+        jwt_access_token_ttl=settings.jwt_access_token_ttl,
+        jwt_refresh_token_ttl=settings.jwt_refresh_token_ttl,
+        master_private_key=master_key,
+    )
+    logger.info("SecurityManager initialized.")
+
+    # 5. Load plugins
     loaded = plugin_manager.load_plugins_from_dir(settings.plugins_dir)
     logger.info("Plugins loaded: %s", loaded or "none")
 
-    # 4. Node Manager
-    await node_manager.start()
+    # 6. Node Manager
+    await node_manager.start(
+        heartbeat_interval=settings.heartbeat_interval,
+        lost_threshold=settings.heartbeat_lost_threshold,
+        stale_threshold=settings.heartbeat_stale_threshold,
+    )
 
     app.state.startup_time = time.time()
     logger.info("Master Node ready. 🚀")
