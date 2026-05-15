@@ -52,6 +52,11 @@ class Settings(BaseModel):
     # --- Security: HTTPS enforcement ---
     enforce_https: bool = os.getenv("ENFORCE_HTTPS", "false").lower() == "true"
 
+    # --- LLM Provider ---
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "")
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
     # --- Plugins ---
     plugins_dir: str = os.getenv("PLUGINS_DIR", "./master/plugins")
 

@@ -1,0 +1,192 @@
+"""
+Vigile — LLM Client
+
+Native OpenAI-compatible HTTP client using httpx.
+Zero dependencies beyond the project whitelist.
+
+Supports:
+  - complete()     : full response (non-streaming)
+  - stream()       : SSE streaming with token-by-token yield
+  - Tool calling   : parses tool_calls from OpenAI-format responses
+  - Any provider   : OpenAI, NVIDIA NIM, Ollama, OpenRouter, vLLM, etc.
+
+Usage:
+    client = LLMClient(base_url="...", api_key="...", model="...")
+    reply = await client.complete([{"role": "user", "content": "Hello"}])
+    async for token in client.stream([{"role": "user", "content": "Hi"}]):
+        print(token)
+"""
+
+import json
+import logging
+from typing import Any, AsyncIterator
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+class LLMError(Exception):
+    """Raised when the LLM provider returns an error or times out."""
+
+
+class LLMClient:
+    """
+    OpenAI-compatible LLM client.
+
+    The constructor takes all configuration explicitly (no settings coupling).
+    Works with any provider exposing an OpenAI-compatible /v1/chat/completions.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = "",
+        model: str = "gpt-4o-mini",
+        timeout: int = 30,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+
+    # -----------------------------------------------------------------------
+    # Public API
+    # -----------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------
+    # Testability hooks — overridden by tests to avoid real HTTP calls
+    # -----------------------------------------------------------------------
+
+    async def _session_post(self, url: str, headers: dict, json_body: dict) -> Any:
+        """Make an HTTP POST. Extracted for testability (override in tests)."""
+        async with httpx.AsyncClient(timeout=self.timeout) as session:
+            return await session.post(url, headers=headers, json=json_body)
+
+    async def _session_stream(self, url: str, headers: dict, json_body: dict) -> Any:
+        """Make a streaming HTTP POST. Extracted for testability (override in tests)."""
+        async with httpx.AsyncClient(timeout=self.timeout) as session:
+            return await session.stream("POST", url, headers=headers, json=json_body)
+
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Send a chat completion request and return the full response.
+
+        Returns the response JSON dict (OpenAI format).
+        Raises LLMError on HTTP errors or timeouts.
+        """
+        body = self._build_body(messages, stream=False, **kwargs)
+        try:
+            resp = await self._session_post(
+                f"{self.base_url}/chat/completions",
+                self._build_headers(),
+                body,
+            )
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"LLM request timed out after {self.timeout}s") from exc
+        except httpx.ConnectError as exc:
+            raise LLMError(f"LLM connection failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            detail = f"LLM returned HTTP {resp.status_code}"
+            try:
+                detail += f": {resp.text[:200]}"
+            except Exception:
+                pass
+            raise LLMError(detail)
+
+        return resp.json()
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """
+        Stream a chat completion via SSE.
+
+        Yields dicts with keys:
+          - "type": "token" | "tool_call" | "done" | "error"
+          - "content": str (for token type)
+          - "tool_calls": [...] (for tool_call type)
+          - "detail": str (for error type)
+        """
+        body = self._build_body(messages, stream=True, **kwargs)
+
+        try:
+            resp = await self._session_stream(
+                f"{self.base_url}/chat/completions",
+                self._build_headers(),
+                body,
+            )
+        except httpx.TimeoutException:
+            yield {"type": "error", "detail": f"LLM stream timed out after {self.timeout}s"}
+            return
+        except httpx.ConnectError as exc:
+            yield {"type": "error", "detail": f"LLM connection failed: {exc}"}
+            return
+
+        if resp.status_code >= 400:
+            detail = f"LLM returned HTTP {resp.status_code}"
+            try:
+                detail += f": {resp.text[:200]}"
+            except Exception:
+                pass
+            yield {"type": "error", "detail": detail}
+            return
+
+        async for line in resp.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:]
+            if payload.strip() == "[DONE]":
+                yield {"type": "done"}
+                return
+
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta", {})
+
+            content = delta.get("content")
+            if content:
+                yield {"type": "token", "content": content}
+
+            tool_calls = delta.get("tool_calls")
+            if tool_calls:
+                yield {"type": "tool_call", "tool_calls": tool_calls}
+
+    # -----------------------------------------------------------------------
+    # Internal helpers
+    # -----------------------------------------------------------------------
+
+    def _build_headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _build_body(
+        self,
+        messages: list[dict[str, Any]],
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+        }
+        # Pass through any additional kwargs (temperature, tools, etc.)
+        body.update(kwargs)
+        return body

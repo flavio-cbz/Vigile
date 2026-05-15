@@ -9,6 +9,7 @@ Tables:
   - users             : human operators with RBAC roles
   - audit_log         : append-only action log with chained SHA256 hashes
   - metrics_snapshots : periodic status reports from Workers
+  - action_proposals  : Human-in-the-Loop action lifecycle
 """
 
 # ---------------------------------------------------------------------------
@@ -142,6 +143,30 @@ CREATE TABLE IF NOT EXISTS metrics_snapshots (
 """
 
 # ---------------------------------------------------------------------------
+# action_proposals  (Human-in-the-Loop action lifecycle)
+# ---------------------------------------------------------------------------
+CREATE_PROPOSALS = """
+CREATE TABLE IF NOT EXISTS action_proposals (
+    id                TEXT PRIMARY KEY,
+    node_id           TEXT NOT NULL,
+    action            TEXT NOT NULL,
+    params_json       TEXT NOT NULL DEFAULT '{}',
+    reasoning         TEXT NOT NULL,
+    risk_level        TEXT NOT NULL DEFAULT 'MEDIUM',
+    status            TEXT NOT NULL DEFAULT 'PENDING',
+    created_by        TEXT NOT NULL,
+    approved_by       TEXT,
+    rejected_by       TEXT,
+    rejection_reason  TEXT,
+    created_at        REAL NOT NULL,
+    updated_at        REAL NOT NULL,
+    executed_at       REAL,
+    result_json       TEXT,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+# ---------------------------------------------------------------------------
 # Indexes for common query patterns
 # ---------------------------------------------------------------------------
 CREATE_INDEXES = [
@@ -154,6 +179,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_audit_log_node_id ON audit_log(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_metrics_snapshots_node_time ON metrics_snapshots(node_id, collected_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_proposals_status ON action_proposals(status)",
+    "CREATE INDEX IF NOT EXISTS idx_proposals_node ON action_proposals(node_id)",
 ]
 
 # All CREATE statements in dependency order
@@ -164,4 +191,5 @@ ALL_TABLES = [
     CREATE_USERS,
     CREATE_AUDIT_LOG,
     CREATE_METRICS_SNAPSHOTS,
+    CREATE_PROPOSALS,
 ]

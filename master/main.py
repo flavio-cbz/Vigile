@@ -36,6 +36,7 @@ from master.core.security_manager import init_security, load_or_generate_master_
 from master.api.auth import router as auth_router
 from master.api.nodes import router as nodes_router
 from master.api.services import router as services_router
+from master.api.chat import router as chat_router
 from master.api.deps import require_role
 from master.ws.worker_handler import worker_join_handler
 
@@ -198,6 +199,7 @@ if settings.enforce_https:
 app.include_router(auth_router)
 app.include_router(nodes_router)
 app.include_router(services_router)
+app.include_router(chat_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes
