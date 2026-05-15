@@ -9,7 +9,7 @@ Concepts:
   - Implementation: a callable registered to a hook
   - Plugin: a Python module with a register(pm) function
 
-Features beyond the INIT.md sketch:
+Features beyond the PLAN.md sketch:
   - Async-aware: async_call() awaits coroutine implementations
   - Registration metadata: track which plugin registered which hook
   - Thread/task safety: locks protect the hook registry during load

@@ -1,7 +1,8 @@
-# Vigile — Plan Technique Révisé v2
+# Vigile — Plan Technique
 
 > Fleet Manager intelligent pour serveurs et homelabs.
 > Zero-Trust. Zéro Dépendance Tierce sur le Core. Zéro SSH.
+> Vision long terme : système autonome dirigé par l'IA (Sprints 7→11).
 
 ---
 
@@ -516,6 +517,52 @@ vigile/
 - Build pipeline : cross-compile Worker pour Linux/Darwin/FreeBSD × x86_64/arm64/armv7
 - Health checks, métriques Master (`/metrics` Prometheus-compatible, natif)
 - Documentation déploiement
+
+---
+
+## Vision Long Terme — Système Autonome Dirigé par l'IA
+
+Le chemin vers un système entièrement autonome où l'IA gère les opérations
+courantes et n'escalade que l'inconnu.
+
+### Sprint 7 — Autonomie Graduée
+- **Niveaux de confiance par action** : LOW=auto, MEDIUM=notification, HIGH=approbation humaine
+- **Profiling du comportement humain** : l'IA apprend des patterns d'approbation/rejet pour
+  ajuster ses futurs niveaux de confiance
+- **Escalade intelligente** : l'IA sait quand déranger l'humain et quand agir seule
+- **Table `confidence_history`** : enregistre chaque décision (proposé → approuvé/rejeté → appris)
+
+### Sprint 8 — Détection Proactive
+- **Anomaly detection** : baseline automatique des métriques (CPU, RAM, disque, processus)
+  → écart = alerte avant la panne
+- **Analyse de logs temps réel** : l'IA scanne les logs en continu et remonte les patterns suspects
+- **Prédiction saturation** : extrapolation courbe d'utilisation → "disque plein dans 3 jours"
+- **Alerting prédictif** : notifications avant que le problème n'arrive, pas après
+
+### Sprint 9 — Runbooks & Auto-Healing
+- **Bibliothèque de runbooks** : scénarios de résolution pré-approuvés stockés en base
+  (exemple : "si nginx down → restart → si toujours down → appeler l'humain")
+- **Auto-healing des pannes courantes** : l'IA exécute les runbooks sans intervention
+- **Rolling remediation** : cascade d'actions (si X → alors Y → puis Z) avec arrêt sécurisé
+  si une étape échoue
+- **Rollback automatique** : si une action de restauration empire la situation, retour à l'état
+  précédent
+
+### Sprint 10 — Coordination Multi-Nœuds
+- **Gestion des dépendances inter-services** : l'IA comprend que "si je restart docker.service,
+  tous les containers seront impactés"
+- **Déploiement gradué** : actions sur un worker test → validation → propagation à la flotte
+- **Coordination de flotte** : actions simultanées sur plusieurs nœuds avec gestion des conflits
+- **Topologie de service** : graphe des dépendances découvert automatiquement
+
+### Sprint 11 — Apprentissage & Mémoire
+- **Base de connaissances** : indexation de tous les incidents passés (cause → action → résultat)
+- **Fine-tuning du LLM** : adaptation du modèle sur l'historique du projet (privé, pas de données
+  envoyées à l'extérieur)
+- **Feedback loop continue** : chaque action exécutée enrichit la base de connaissances
+- **Mémoire conversationnelle** : l'IA se souvient des conversations précédentes et du contexte
+  de chaque nœud
+- **Auto-évaluation** : l'IA analyse ses propres décisions passées et ajuste sa stratégie
 
 ---
 

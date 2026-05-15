@@ -179,4 +179,5 @@ PYTHONPATH="." .venv/bin/python tests/integration/test_api.py
 - Rate limiting, rotation tokens, cross-compile Worker
 
 ---
-*Fin du résumé. Fournis ce fichier comme contexte en début de chaque nouvelle session.*
+*Fin du résumé. Fournis ce fichier comme contexte en début de chaque nouvelle session.
+Voir aussi `docs/PLAN.md` pour la vision long terme (Sprints 7→11).*

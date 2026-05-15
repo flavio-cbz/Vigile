@@ -2,7 +2,7 @@
 
 ## Session start
 
-Read `docs/SESSION_INIT.md` first — it has the current sprint status.
+Read `docs/SESSION.md` first — it has the current sprint status.
 Read `CLAUDE.md` second — **CODING STANDARDS, architecture rules, DI rules**.
 Read `docs/LIMITS.md` third — known bugs and architectural limits.
 
@@ -30,7 +30,7 @@ master/db/               # database.py, models.py (pure SQL), migrations.py
 master/plugins/          # metrics_plugin.py (CPU/RAM/disque/swap/uptime), + à venir
 tests/unit/              # test_core.py (57), test_worker_handler.py (15), test_plugins.py (88), test_logs_api.py (22), test_services_api.py (36) = 218 tests
 tests/integration/       # test_api.py (22 tests, requires running server)
-docs/                    # INIT.md (architecture plan), SESSION_INIT.md, LIMITS.md
+docs/                    # PLAN.md (architecture plan), SESSION.md, LIMITS.md
 worker/                  # Go binary (stdlib only, zero imports)
   main.go               # Entrypoint, CLI flags, signal handling
   wsclient.go            # WebSocket client — RFC 6455 pur stdlib
@@ -112,6 +112,6 @@ PYTHONPATH="." uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
 | File | Purpose |
 |------|---------|
 | `CLAUDE.md` | **Coding standards, DI rules, typing, tests, security, zero-dependency** |
-| `docs/INIT.md` | Full architecture plan, protocol specs, future sprints |
+| `docs/PLAN.md` | Full architecture plan, protocol specs, future sprints (Sprints 1→11) |
 | `docs/LIMITS.md` | Known bugs, races, scalability limits |
 | `.env.example` | All configurable env vars with defaults |
