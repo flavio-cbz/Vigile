@@ -341,6 +341,82 @@ Sidebar 220px, fond `#0a0a0a`. Liens sans fond au hover — uniquement `text-mut
 
 ---
 
+## 6. Philosophie de design — Pourquoi ces choix
+
+Cette section explique le raisonnement derrière la direction visuelle.
+Elle est ici pour que tu puisses prendre des décisions cohérentes
+quand tu rencontres un cas non couvert par les specs.
+
+### Le problème du "AI aesthetic"
+
+La majorité des interfaces générées par IA aujourd'hui partagent les mêmes
+marqueurs visuels : gradients violet-bleu, orbes lumineux en arrière-plan,
+cartes avec `shadow-lg` coloré, icônes dans des ronds colorés, grille de
+3 features symétrique, boutons en gradient. Ces patterns sont devenus un
+signal immédiat de "template SaaS généré". Quand un utilisateur voit cette
+esthétique, il ne ressent pas l'outil — il ressent le template.
+
+L'objectif ici est l'inverse : une interface qui ressemble à quelque chose
+qu'un ingénieur avec du goût aurait construit pour lui-même.
+
+### Le principe de la contrainte comme identité
+
+Un bon design n'est pas celui qui a le plus d'options visuelles — c'est
+celui qui a fait des choix irréversibles assumés.
+
+- **Une seule couleur d'accent** (vert terminal `#00ff87`), jamais utilisée
+  de façon décorative — uniquement pour signaler "actif" ou "action principale"
+- **Typographie monospace** pour toutes les données machine — parce que
+  c'est sémantiquement juste, pas pour faire "hacker"
+- **Noir quasi-total** plutôt que gris slate — parce que le gris slate
+  c'est le défaut shadcn, et le défaut n'a pas d'identité
+
+Ces contraintes créent une cohérence immédiate : chaque fois que tu vois
+du vert, tu sais que c'est important. Chaque fois que tu vois de la
+monospace, tu sais que c'est une donnée machine.
+
+### La règle du fond neutre + moment d'accent
+
+L'œil humain est attiré par le contraste. Si tout est coloré, rien n'est
+important. Si la quasi-totalité de l'interface est monochrome et dense,
+alors un seul élément vert suffit à diriger l'attention vers l'action
+critique. C'est la raison pour laquelle le bouton **Approve** est le seul
+élément vraiment vert de toute l'interface — quand tu arrives sur la
+Dialog de validation, tu n'as aucun doute sur quoi cliquer.
+
+### Densité comme respect de l'utilisateur
+
+Une interface ops n'est pas une landing page. L'utilisateur n'a pas besoin
+d'être guidé avec des illustrations et du padding généreux — il sait
+pourquoi il est là. La densité signale : cet outil te fait confiance.
+
+De l'espacement excessif sur un dashboard signale l'inverse : on a peur
+que tu sois perdu. Espacement serré, typo petite, information maximale
+par viewport — c'est un choix de respect, pas une économie de travail.
+
+### Ce qu'il faut éviter à tout prix
+
+Si à un moment tu te demandes "est-ce que ça fait trop générique ?",
+applique ce test : est-ce que ce pattern pourrait se retrouver sur
+n'importe quel starter template shadcn/ui sur GitHub ? Si oui, c'est
+à supprimer ou à tordre.
+
+Les patterns les plus dangereux :
+- Icône dans un rond coloré pour illustrer une feature
+- Section centrée avec titre + sous-titre + 3 cards symétriques
+- Top bar avec avatar, cloche de notification, et barre de recherche
+- Sidebar avec accordéon de catégories
+- Toast pour signaler un succès important (le feedback doit être inline,
+  dans le contexte de l'action)
+
+### La référence mentale à garder
+
+Imagine que **htop** et **Linear.app** ont eu un enfant. La densité de l'un,
+le soin typographique de l'autre. Tout ce qui ne serait pas dans l'un ou
+l'autre de ces deux outils est probablement superflu.
+
+---
+
 ## Comportements critiques (prototype)
 
 - **Badge statut nœud** : polling. Se met à jour sans reload
