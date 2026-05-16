@@ -4,10 +4,12 @@
 
 ```
 Vite + React 19 + TypeScript
-TailwindCSS v4 + shadcn/ui (Radix primitives)
-React Router v7 (routing)
+Tailwind CSS v4
+shadcn/ui (primitives Radix uniquement — pas le design par défaut)
+JetBrains Mono + Inter (fonts)
+Tabler Icons (icônes en text-muted, 14px max, sans fond)
+React Router v7
 EventSource (SSE natif, zero lib)
-Tabler Icons ou Lucide React
 ```
 
 ## Architecture de déploiement
@@ -17,8 +19,43 @@ Navigateur ── HTTPS ── Nginx Proxy Manager ──┬── /api/* ──
                                               └── /*    ──→ fichiers statiques React
 ```
 
-Le frontend est servi par Nginx en tant que site statique. Les appels `/api/*`
-sont proxifiés vers le master. Pas de CORS, pas de port supplémentaire.
+Frontend servi par Nginx en statique. Appels `/api/*` proxifiés vers master.
+Pas de CORS, pas de port supplémentaire.
+
+---
+
+## Direction visuelle — Terminal Brutalism
+
+### Palette (monochrome stricte + un seul accent)
+
+```
+Background  #0a0a0a   (noir quasi-total, pas gris)
+Surface     #111111   (cartes, panels)
+Border      #1f1f1f   (séparateurs discrets)
+Text        #e4e4e4   (primaire)
+Text muted  #555555   (secondaire)
+Accent      #00ff87   (vert terminal — UNIQUEMENT états actifs, CTAs, badges CONNECTED)
+Danger      #ff4444   (FAILED, erreurs critiques)
+Warning     #f5a623   (LOST, dégradés)
+```
+
+Pas de bleu. Pas de violet. Pas de gradient. Zéro.
+
+### Typographie
+
+| Usage | Font |
+|---|---|
+| Données (IP, metrics, logs, timestamps, statuts) | `JetBrains Mono` 13px |
+| Prose (descriptions, chat, labels) | `Inter` 13px |
+
+Pas d'icônes dans des cercles colorés. Icônes en `text-muted` 14px max, sans fond.
+
+### Layout
+
+- Sidebar fixe gauche 220px — logo + 4 liens max, pas de catégories
+- Pas de header (logo dans la sidebar)
+- Contenu : grille dense, `gap-2` à `gap-4` max
+- Pas de padding excessif
 
 ---
 
@@ -37,363 +74,288 @@ sont proxifiés vers le master. Pas de CORS, pas de port supplémentaire.
 
 ---
 
-## Design System
+## Maquettes
 
-### Palette (dark theme first — serveur, faut pas se brûler les yeux)
-
-```
-Fond principal      #0f172a  (slate-900)
-Fond secondaire     #1e293b  (slate-800)
-Bordure             #334155  (slate-700)
-Texte principal     #f1f5f9  (slate-100)
-Texte secondaire    #94a3b8  (slate-400)
-Succès              #22c55e  (green-500)
-Avertissement       #f59e0b  (amber-500)
-Erreur              #ef4444  (red-500)
-Info                #3b82f6  (blue-500)
-```
-
-### Composants shadcn/ui utilisés
+### Barre latérale
 
 ```
-Button, Input, Card, Badge, Table, Dialog, Tabs,
-DropdownMenu, Sheet, Tooltip, Progress, Select,
-Switch, Separator, Skeleton, ScrollArea
+┌──────────┬──────────────────────────────────────────────┐
+│          │                                              │
+│  Vigile  │         CONTENU PRINCIPAL                    │
+│  (logo)  │                                              │
+│          │                                              │
+│  ■       │                                              │
+│  Nodes   │                                              │
+│          │                                              │
+│  💬      │                                              │
+│  Chat    │                                              │
+│          │                                              │
+│  □       │                                              │
+│  Actions │                                              │
+│          │                                              │
+│  ...     │                                              │
+│  Audit   │                                              │
+│          │                                              │
+└──────────┴──────────────────────────────────────────────┘
 ```
+
+Sidebar 220px, fond `#0a0a0a`. Liens sans fond au hover — uniquement `text-muted` → `text`. Aucune catégorie.
 
 ---
 
-## Maquettes par page
-
-### 1. Login
+### Login
 
 ```
-╔══════════════════════════════════════════════════╗
-║                                                  ║
-║                    Vigile                         ║
-║           Your self-hosted server guardian        ║
-║                                                  ║
-║  ┌──────────────────────────────────────────┐    ║
-║  │                                          │    ║
-║  │  Nom d'utilisateur                       │    ║
-║  │  ┌────────────────────────────────────┐  │    ║
-║  │  │ admin                              │  │    ║
-║  │  └────────────────────────────────────┘  │    ║
-║  │                                          │    ║
-║  │  Mot de passe                           │    ║
-║  │  ┌────────────────────────────────────┐  │    ║
-║  │  │ •••••••••                          │  │    ║
-║  │  └────────────────────────────────────┘  │    ║
-║  │                                          │    ║
-║  │  ┌────────────────────────────────────┐  │    ║
-║  │  │        Se connecter                │  │    ║
-║  │  └────────────────────────────────────┘  │    ║
-║  └──────────────────────────────────────────┘    ║
-║                                                  ║
-╚══════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════╗
+║                                              ║
+║                    Vigile                     ║
+║            Server fleet guardian              ║
+║                                              ║
+║  ┌────────────────────────────────────────┐  ║
+║  │  Username                              │  ║
+║  │  ┌──────────────────────────────────┐  │  ║
+║  │  │                                  │  │  ║
+║  │  └──────────────────────────────────┘  │  ║
+║  │                                        │  ║
+║  │  Password                              │  ║
+║  │  ┌──────────────────────────────────┐  │  ║
+║  │  │                                  │  │  ║
+║  │  └──────────────────────────────────┘  │  ║
+║  │                                        │  ║
+║  │  ┌──────────────────────────────────┐  │  ║
+║  │  │         Sign in                  │  │  ║
+║  │  └──────────────────────────────────┘  │  ║
+║  └────────────────────────────────────────┘  ║
+║                                              ║
+╚══════════════════════════════════════════════╝
 ```
 
-- Champs : username + password
-- Bouton "Se connecter" avec loading state
-- Message d'erreur si credentials invalides
-- Stocke le JWT dans localStorage, redirect vers `/`
+- Bouton Sign in : bordure `#1f1f1f`, text `#e4e4e4`, pas de fond coloré
+- L'input focus a une bordure `#00ff87` (seul endroit où le vert apparaît sur cette page)
 
 ---
 
-### 2. Dashboard
+### Dashboard
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  🔲 Vigile                               admin  ⚙️  🚪    │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  📊 Aperçu de la flotte                                     │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
-│  │  3       │ │  2       │ │  12h     │ │  0       │      │
-│  │  Nœuds   │ │  En ligne│ │  Uptime  │ │  Alertes │      │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
-│                                                             │
-│  🖥️ Nœuds enregistrés                                       │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  ● sim-prod   🟢 CONNECTED   Debian 12  ▶              │ │
-│  │  CPU ████████░░ 72%  RAM ████░░░░ 32%                  │ │
-│  │  DISK ████████░░ 47%  2 failed services                 │ │
-│  ├────────────────────────────────────────────────────────┤ │
-│  │  ● web-01     🔴 LOST        Ubuntu 24.04  ▶           │ │
-│  │  Dernier contact : il y a 3h                            │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                             │
-│  💬 Assistant IA                                            │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  Bonjour, que puis-je faire pour votre flotte ?        │ │
-│  │  ┌──────────────────────────────────┐  ✨              │ │
-│  │  │  Posez votre question...         │                  │ │
-│  │  └──────────────────────────────────┘                  │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │                                                     │
+│  Vigile  │  Nodes                       (3)                    │
+│          │                                                     │
+│  ■  Nodes│  ┌──────────────────────────────────────────────┐   │
+│  💬  Chat│  │  sim-prod  ● CONNECTED     Debian 12  x86_64 │   │
+│  □  Actns│  │  CPU 72%  ████████░░  RAM 32%  ████░░░░      │   │
+│  ...     │  │  DISK 47%  ████████░░  2 failed services     │   │
+│  Audit   │  ├──────────────────────────────────────────────┤   │
+│          │  │  web-01  ○ LOST     Ubuntu 24.04             │   │
+│          │  │  Last contact: 3h ago                        │   │
+│          │  └──────────────────────────────────────────────┘   │
+│          │                                                     │
+│          │  ┌────────────────────────────────────────────┐     │
+│          │  │ 💬 Ask AI...                  ▶            │     │
+│          │  └────────────────────────────────────────────┘     │
+│          │                                                     │
+└──────────┴─────────────────────────────────────────────────────┘
 ```
 
-- Barre latérale (ou header) avec navigation
-- Cartes de statistiques globales
-- Liste des nœuds avec état en temps réel
-- Mini chat IA en bas (ouvre vers /chat)
+- Stats cards : pas de cards. Juste le nombre en haut (`Nodes (3)`)
+- Node list : cartes denses, bordure `#1f1f1f`, padding `p-3`
+- Badge CONNECTED : border `#00ff87`, text `#00ff87`, pas de fond
+- Badge LOST : border `#f5a623`, text `#f5a623`
+- Mini chat input en bas : barre de recherche simple, pas de card
 
 ---
 
-### 3. Node Detail
+### Node Detail
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ← Dashboard  /  sim-prod                                  │
-├─────────────────────────────────────────────────────────────┤
-│  🟢 CONNECTED   sim-prod                                    │
-│  Debian 12  |  x86_64  |  hostname: debian-01              │
-│                                                             │
-│  ┌───────┐ ┌───────┐ ┌───────┐ ┌──────┐                   │
-│  │ CPU   │ │ RAM   │ │ DISK  │ │UPTIME│                   │
-│  │ 72%   │ │ 32%   │ │ 47%   │ │ 12h  │                   │
-│  └───────┘ └───────┘ └───────┘ └──────┘                   │
-│                                                             │
-│  ┌─ Stats ──┬─ Services ──┬─ Containers ─┬─ Logs ─┬─ Chat┐ │
-│  │                                                       │ │
-│  │  📈 CPU / RAM / DISK (graphique 24h)                 │ │
-│  │                                                       │ │
-│  │  ▁▃▄▆█▇▆▄▃▁▂▃▅▇█▇▆▅▄▃▂▁▂▃▄▅▆▇█                       │ │
-│  │  ▄▆█▇▆▅▄▃▂▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▂▃▄▅▆▇█▇▆                    │ │
-│  │                                                       │ │
-│  └───────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │  ← Nodes  /  sim-prod                               │
+│          │                                                     │
+│          │  ● CONNECTED  sim-prod                              │
+│          │  Debian 12  x86_64                                  │
+│          │                                                     │
+│          │  CPU  72%   RAM  32%   DISK  47%   Uptime  12h     │
+│          │  ──────────────────────────────────────────────     │
+│          │  [ Stats ]  [ Services ]  [ Containers ]  [ Logs ]  │
+│          │                                                     │
+│          │  ┌──────────────────────────────────────────────┐   │
+│          │  │ ● ssh.service     active  running            │   │
+│          │  │ ● nginx.service   active  running            │   │
+│          │  │ ● docker.service  active  running            │   │
+│          │  │ ● mysql.service   failed  failed    [Restart] │   │
+│          │  │ ○ apache2.service inactive dead              │   │
+│          │  │ ● prometheus.svc  failed  failed    [Restart] │   │
+│          │  └──────────────────────────────────────────────┘   │
+│          │                                                     │
+└──────────┴─────────────────────────────────────────────────────┘
 ```
 
-**Onglet Services :**
+- Metrics en ligne (pas de gauges, pas de graphiques pour le prototype)
+- Tabs underline style — pas de fond sur le tab actif, juste bordure bottom `#00ff87`
+- Services list : chaque ligne compacte, texte `JetBrains Mono`
+
+#### Logs tab
+
 ```
-┌─ Stats ──┬─ Services ─┬─ Containers ─┬─ Logs ─┬─ Chat ┐
-│                                                       │
-│  🔍 Filtrer...                                        │
-│                                                       │
-│  Statut  Nom                    ACTIVE   SUB          │
-│  ─────── ────────────────────── ──────── ──────       │
-│  ●       ssh.service            active   running      │
-│  ●       nginx.service          active   running      │
-│  ●       docker.service         active   running      │
-│  🔴      mysql.service          failed   failed       │
-│  🔴      prometheus.service     failed   failed       │
-│  ○       apache2.service        inactive dead         │
-│  ○       backup.service         inactive dead         │
-│                                                       │
-│  [Restart] [Start] [Stop]                             │
-└───────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │  [ Stats ]  [ Services ]  [ Containers ]  [ Logs ]  │
+│          │                                                     │
+│          │  Service: [ssh.service ▼]  Lines: [50 ▼]           │
+│          │                                                     │
+│          │  ┌──────────────────────────────────────────────┐   │
+│          │  │ May 15 06:12:01 sshd[1123]: Failed password  │   │
+│          │  │ May 15 06:12:05 sshd[1124]: Failed password  │   │
+│          │  │ May 15 09:00:00 sshd[1250]: Accepted pubkey │   │
+│          │  │ May 15 09:45:10 sshd[1280]: Invalid user    │   │
+│          │  │                                          │   │   │
+│          │  └──────────────────────────────────────────────┘   │
+│          │                                                     │
+└──────────┴─────────────────────────────────────────────────────┘
 ```
 
-**Onglet Logs :**
-```
-┌─ Stats ──┬─ Services ─┬─ Containers ─┬─ Logs ─┬─ Chat ┐
-│                                                       │
-│  Service : [ssh.service ▼]  Lignes : [50 ▼]  🔍      │
-│                                                       │
-│  ┌──────────────────────────────────────────────────┐ │
-│  │ May 15 06:12:01 sshd[1123]: Failed password      │ │
-│  │ May 15 06:12:05 sshd[1124]: Failed password      │ │
-│  │ May 15 09:00:00 sshd[1250]: Accepted publickey   │ │
-│  │ May 15 09:45:10 sshd[1280]: Invalid user admin   │ │
-│  │ ...                                               │ │
-│  │                                                  │ │
-│  └──────────────────────────────────────────────────┘ │
-└───────────────────────────────────────────────────────┘
-```
-
-- Terminal-like LogViewer avec police monospace
-- ScrollArea illimité
-- Service selector pour journalctl
-- Refresh automatique
+- LogViewer = `ScrollArea` avec fond `#0a0a0a`, texte `JetBrains Mono` 12px
+- Auto-scroll vers le bas, bouton "pause" si l'utilisateur remonte
+- Bordure fine `#1f1f1f`, pas d'ombre
 
 ---
 
-### 4. Chat IA
+### Chat IA
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  💬 Assistant IA Vigile                      [Nouveau chat] │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ 👤 Moi                                   10:32         │ │
-│  │ Le serveur nginx semble lent, que faire ?              │ │
-│  ├────────────────────────────────────────────────────────┤ │
-│  │ 🤖 Vigile                               10:33          │ │
-│  │ Je vais vérifier l'état de nginx.                     │ │
-│  │                                                        │ │
-│  │  📊 STATUT : nginx.service is active (running)        │ │
-│  │  📋 LOGS : aucune erreur récente détectée              │ │
-│  │                                                        │ │
-│  │ 💡 Proposition : RESTART_SERVICE                       │ │
-│  │  Action : Redémarrer nginx                             │ │
-│  │  Risque : LOW                                          │ │
-│  │  Raison : Permet de recharger la configuration         │ │
-│  │                                                        │ │
-│  │  ┌──────────┐  ┌──────────┐                            │ │
-│  │  │ ✓ Valider│  │ ✗ Refuser│                            │ │
-│  │  └──────────┘  └──────────┘                            │ │
-│  ├────────────────────────────────────────────────────────┤ │
-│  │ 👤 Moi                                   10:35         │ │
-│  │ Oui redémarre-le.                                      │ │
-│  ├────────────────────────────────────────────────────────┤ │
-│  │ 🤖 Vigile                               10:36          │ │
-│  │ ✅ nginx.service redémarré avec succès.                │ │
-│  │ Résultat : Service nginx restarted                     │ │
-│  │                                                        │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  Posez votre question...                   📎  🎤  ▶ │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │  💬 Assistant                       [New chat]      │
+│          │                                                     │
+│          │  ┌──────────────────────────────────────────────┐   │
+│          │  │  Moi                            10:32        │   │
+│          │  │  │ Le serveur nginx semble lent             │   │
+│          │  ├──────────────────────────────────────────────┤   │
+│          │  │  Vigile                         10:33        │   │
+│          │  │  │  Je vais vérifier nginx...               │   │
+│          │  │  │  STATUT : nginx.service active (running) │   │
+│          │  │  │                                           │   │
+│          │  │  │  ┌────────────────────────────────────┐  │   │
+│          │  │  │  │ 💡 RESTART_SERVICE  risk: LOW     │  │   │
+│          │  │  │  │ Redémarrer nginx pour recharger   │  │   │
+│          │  │  │  │ la configuration                  │  │   │
+│          │  │  │  │ [Approve]       [Reject]          │  │   │
+│          │  │  │  └────────────────────────────────────┘  │   │
+│          │  ├──────────────────────────────────────────────┤   │
+│          │  │  Moi                            10:35        │   │
+│          │  │  │ Oui redémarre                            │   │
+│          │  ├──────────────────────────────────────────────┤   │
+│          │  │  Vigile                         10:36        │   │
+│          │  │  │ ✅ nginx.service restarted               │   │
+│          │  │  │ Result: Service nginx restarted          │   │
+│          │  └──────────────────────────────────────────────┘   │
+│          │                                                     │
+│          │  ┌──────────────────────────────────────────────┐   │
+│          │  │ Ask...                                     ▶ │   │
+│          │  └──────────────────────────────────────────────┘   │
+│          │                                                     │
+└──────────┴─────────────────────────────────────────────────────┘
 ```
 
-- SSE streaming en temps réel
-- Cartes d'ActionProposal inline
-- Historique de conversation
-- Boutons Approve/Reject dans les cartes
-- Indicateur de streaming (cursor clignotant ou points)
+- Messages IA distingués par `border-left: 1px solid #1f1f1f` — pas de bulle colorée
+- Messages utilisateur sans bordure
+- Proposal card : bordure `#1f1f1f`, pas de fond. Bouton Approve = seul élément `#00ff87` de toute l'interface
+- Loading state : spinner discret `JetBrains Mono` + points, pas de skeleton
+- Streaming SSE : curseur clignotant pendant la génération
 
 ---
 
-### 5. Propositions
+### Proposals
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  📋 Propositions d'actions              [Tous] [En attente] │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  🔴 HIGH  Restart mysql.service          sim-prod   10:32  │
-│  MySQL a crashé (OOM). Redémarrage nécessaire.             │
-│  ┌──────────┐  ┌──────────┐                                │
-│  │ ✓ Valider│  │ ✗ Refuser│  💬 Voir contexte              │
-│  └──────────┘  └──────────┘                                │
-│                                                             │
-│  🟡 MEDIUM  LIST_SERVICES                 sim-prod   10:30 │
-│  Lister les services pour diagnostic.                      │
-│  ┌──────────┐  ┌──────────┐                                │
-│  │ ✓ Valider│  │ ✗ Refuser│                                │
-│  └──────────┘  └──────────┘                                │
-│                                                             │
-│  ✅ APPROUVÉ  Restart nginx                web-01   09:15  │
-│  Redémarré avec succès. Résultat : OK                     │
-│                                                             │
-│  ❌ REJETÉ  READ_LOGS                     sim-prod   08:45 │
-│  Raison : Pas nécessaire pour le moment                    │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │  Actions                         [Pending] [All]    │
+│          │                                                     │
+│          │  ● mysql.service  ──  RESTART_SERVICE               │
+│          │  MySQL a crashé (OOM). Redémarrage nécessaire.      │
+│          │  10:32  ·  sim-prod          [Approve]  [Reject]   │
+│          │                                                     │
+│          │  ○ LIST_SERVICES                                    │
+│          │  Diagnostic de routine.                             │
+│          │  10:30  ·  sim-prod          [Approve]  [Reject]   │
+│          │                                                     │
+│          │  ✓ nginx.service  ──  RESTART_SERVICE               │
+│          │  Redémarré avec succès.   09:15  ·  web-01          │
+│          │                                                     │
+│          │  ✗ READ_LOGS                                        │
+│          │  Pas nécessaire.   08:45  ·  sim-prod               │
+│          └─────────────────────────────────────────────────────┘
 ```
 
-- Filtre par statut (PENDING, APPROVED, REJECTED, ALL)
-- Tri par date / risque
-- Carte de proposition avec risque coloré (LOW/MEDIUM/HIGH/CRITICAL)
-- Action rapide Valider/Refuser
-- Lien vers le contexte de la conversation
+- Pas de cartes — chaque proposition est une ligne dense
+- Filtre Pending/All en haut (Select ou tabs simples)
+- Risque pas affiché (c'est dans la carte détaillée du chat)
+- Action rapide Approve/Reject inline
 
 ---
 
-### 6. Audit Log
+### Audit Log
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  📜 Audit Trail                            🔍 Filtrer...   │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  #   Date       Action              User        Node       │
-│  ─── ───────── ──────────────────── ────────── ────────── │
-│  42  10:32:15  PROPOSAL_APPROVED   flavio      sim-prod    │
-│                → RESTART_SERVICE sur nginx.service          │
-│  41  10:30:22  PROPOSAL_CREATED    ai          sim-prod    │
-│                → RESTART_SERVICE (risk: LOW)               │
-│  40  10:30:10  INTENT_RESULT       system      sim-prod    │
-│                → LIST_SERVICES success=true (45 services)  │
-│  39  10:29:00  CHAT_MESSAGE        flavio      sim-prod    │
-│                → "Liste les services"                      │
-│  38  09:15:00  NODE_ENROLLED       system      web-01     │
-│  37  08:00:00  LOGIN               admin       -           │
-│                                                             │
-│  ✅ Chaîne SHA256 intacte — 42 entrées vérifiées           │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │  Audit Trail                     🔍 Filter         │
+│          │                                                     │
+│          │  #42  10:32  PROPOSAL_APPROVED  flavio  sim-prod   │
+│          │       → RESTART_SERVICE nginx.service              │
+│          │  #41  10:30  PROPOSAL_CREATED   ai      sim-prod   │
+│          │       → RESTART_SERVICE (LOW)                      │
+│          │  #40  10:30  INTENT_RESULT      system  sim-prod   │
+│          │       → LIST_SERVICES (45 services)                │
+│          │                                                     │
+│          │  ✅ SHA256 chain intact — 42 entries                │
+│          └─────────────────────────────────────────────────────┘
 ```
 
 - Liste chronologique inversée
-- Badge de vérification d'intégrité de la chaîne
-- Détail extensible par ligne
-- Filtres par type d'action, utilisateur, nœud, date
+- Badge de vérification d'intégrité en bas
+- Police `JetBrains Mono` pour les IDs et timestamps
 
 ---
 
-### 7. Plugin Catalogue
+### Plugin Catalogue
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  🧩 Catalogue de plugins                                    │
-├─────────────────────────────────────────────────────────────┤
-│  🔍 Rechercher un plugin...                                 │
-│                                                             │
-│  ┌──────────────────┐ ┌──────────────────┐                  │
-│  │ 📊 Metrics        │ │ 🐳 Docker         │                  │
-│  │ Collecte CPU/RAM  │ │ Gestion containers│                  │
-│  │ ✅ Activé         │ │ ✅ Activé         │                  │
-│  ├──────────────────┤ ├──────────────────┤                  │
-│  │ ⚙️ Systemd        │ │ ☁️ Backup         │                  │
-│  │ Gestion services  │ │ Sauvegarde auto   │                  │
-│  │ ✅ Activé         │ │ 📥 Installer      │                  │
-│  ├──────────────────┤ ├──────────────────┤                  │
-│  │ 🔔 Alerting       │ │ 📧 Mail Report    │                  │
-│  │ Notifications     │ │ Rapport hebdo     │                  │
-│  │ 📥 Installer      │ │ 📥 Installer      │                  │
-│  └──────────────────┘ └──────────────────┘                  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────┬─────────────────────────────────────────────────────┐
+│          │  Plugins                         🔍 Search         │
+│          │                                                     │
+│          │  ┌────────────────────┐ ┌────────────────────┐     │
+│          │  │ 📊 Metrics         │ │ 🐳 Docker           │     │
+│          │  │ CPU/RAM/DISK       │ │ Container mgmt     │     │
+│          │  │ ● Active           │ │ ● Active           │     │
+│          │  └────────────────────┘ └────────────────────┘     │
+│          │                                                     │
+│          │  ┌────────────────────┐ ┌────────────────────┐     │
+│          │  │ ⚙️ Systemd         │ │ ☁️ Backup           │     │
+│          │  │ Service management │ │ Auto backup         │     │
+│          │  │ ● Active           │ │ ○ Install           │     │
+│          │  └────────────────────┘ └────────────────────┘     │
+│          └─────────────────────────────────────────────────────┘
 ```
 
-- Grille de cartes
-- Chaque carte : icône, nom, description, statut (activé/installer)
-- Bouton d'installation en un clic
-- Page de détail du plugin (config, hooks, logs)
+- Grille simple de cards sans fioritures
+- Statut : `● Active` (text `#00ff87`) ou `○ Install` (text muted)
 
 ---
 
-### 8. Barre latérale (structure pour toutes les pages)
+## Comportements critiques (prototype)
 
-```
-┌──────────┬──────────────────────────────────────────────────┐
-│ 🔲       │  Header : Vigile              admin  ⚙️  🚪    │
-│          │                                                  │
-│  📊      │                                                  │
-│  Dashboard│            CONTENU PRINCIPAL                    │
-│          │                                                  │
-│  🖥️      │                                                  │
-│  Nœuds   │                                                  │
-│          │                                                  │
-│  💬      │                                                  │
-│  Chat    │                                                  │
-│          │                                                  │
-│  📋      │                                                  │
-│  Actions │                                                  │
-│          │                                                  │
-│  📜      │                                                  │
-│  Audit   │                                                  │
-│          │                                                  │
-│  🧩      │                                                  │
-│  Plugins │                                                  │
-│          │                                                  │
-└──────────┴──────────────────────────────────────────────────┘
-```
+- **Badge statut nœud** : polling. Se met à jour sans reload
+- **Approve button** : désactivé pendant exécution, loading discret (JetBrains Mono + spinner), résultat inline — pas de toast
+- **Logs panel** : auto-scroll bas. Bouton "pause" si remonte
+- **Chat** : messages IA distingués par `border-left` seulement (pas de bulle). Streaming visible avec curseur clignotant
 
 ---
 
-## API à utiliser
+## API utilisée
 
 | Endpoint | Usage |
 |---|---|
 | `POST /api/auth/login` | Login |
-| `GET /api/auth/me` | Vérifier token |
-| `GET /api/nodes` | Liste des nœuds |
+| `GET /api/nodes` | Liste nœuds |
 | `GET /api/nodes/{id}` | Détail nœud |
 | `GET /api/nodes/{id}/stats` | Métriques |
 | `GET /api/nodes/{id}/services` | Services |
@@ -404,11 +366,10 @@ Switch, Separator, Skeleton, ScrollArea
 | `POST /api/chat/proposals/{id}/approve` | Approuver |
 | `POST /api/chat/proposals/{id}/reject` | Rejeter |
 | `GET /api/admin/audit-verify` | Vérifier audit |
-| `GET /api/admin/nodes/connections` | Connexions actives |
 
 ---
 
-## Structure des fichiers
+## Structure fichiers
 
 ```
 frontend/
@@ -417,44 +378,37 @@ frontend/
 ├── tsconfig.json
 ├── tailwind.config.ts
 ├── index.html
-├── public/
-│   └── favicon.svg
 └── src/
     ├── main.tsx
     ├── App.tsx
+    ├── index.css           # Pal个人化 theme (tailwind config + fonts)
     ├── lib/
     │   ├── api.ts          # Client HTTP (fetch wrapper)
     │   ├── auth.ts         # Gestion token JWT
-    │   └── sse.ts          # EventSource pour SSE
+    │   └── sse.ts          # EventSource SSE
     ├── hooks/
     │   ├── useAuth.ts
     │   ├── useNodes.ts
     │   ├── useChat.ts
     │   └── useProposals.ts
     ├── components/
-    │   ├── ui/             # shadcn/ui components
+    │   ├── ui/             # shadcn primitives (reconfigurées)
     │   ├── layout/
-    │   │   ├── Sidebar.tsx
-    │   │   └── Header.tsx
+    │   │   └── Sidebar.tsx
     │   ├── dashboard/
-    │   │   ├── StatsCards.tsx
-    │   │   └── NodeList.tsx
-    │   ├── node/
     │   │   ├── NodeCard.tsx
-    │   │   ├── MetricsPanel.tsx
+    │   │   └── NodeStatusBadge.tsx
+    │   ├── node/
+    │   │   ├── MetricsBar.tsx
     │   │   ├── ServiceList.tsx
     │   │   ├── ContainerList.tsx
-    │   │   └── BackendLogViewer.tsx
+    │   │   └── LogViewer.tsx
     │   ├── chat/
     │   │   ├── ChatPanel.tsx
     │   │   ├── ChatMessage.tsx
     │   │   └── ProposalCard.tsx
-    │   ├── proposals/
-    │   │   └── ProposalList.tsx
-    │   ├── audit/
-    │   │   └── AuditLog.tsx
-    │   └── plugins/
-    │       └── PluginCatalogue.tsx
+    │   └── audit/
+    │       └── AuditLog.tsx
     └── pages/
         ├── LoginPage.tsx
         ├── DashboardPage.tsx
@@ -468,32 +422,29 @@ frontend/
 
 ---
 
-## Ordre d'implémentation proposé
+## Ordre d'implémentation
 
 | Étape | Composant | Dépend de |
 |---|---|---|
-| 1 | Setup Vite + Tailwind + shadcn/ui | Rien |
-| 2 | Layout (Sidebar + Header) | Rien |
+| 1 | Setup Vite + Tailwind + shadcn/ui custom theme | Rien |
+| 2 | Layout (Sidebar) + Router | Rien |
 | 3 | LoginPage + auth | Layout |
-| 4 | DashboardPage + NodeList | Layout, auth |
-| 5 | NodeDetailPage + Metrics + Services + Containers | Dashboard |
+| 4 | DashboardPage + NodeCard | Layout, auth |
+| 5 | NodeDetailPage + MetricsBar + ServiceList | Dashboard |
 | 6 | LogViewer | NodeDetail |
-| 7 | ChatPage + SSE streaming | Layout, auth |
-| 8 | ProposalList + ActionProposalCard | Chat |
+| 7 | ChatPage + SSE streaming + ProposalCard | Layout, auth |
+| 8 | ProposalsPage | Chat |
 | 9 | AuditLog | Layout, auth |
-| 10 | PluginCatalogue | Layout, auth |
-| 11 | SettingsPage | Layout, auth |
-| 12 | Intégration Nginx + déploiement | Tout |
+| 10 | PluginsPage + SettingsPage | Layout, auth |
+| 11 | Déploiement (build → Nginx) | Tout |
 
----
+## Estimation
 
-## Durée estimée
-
-| Phase | Temps |
+| Phase | Sessions |
 |---|---|
-| Setup + Layout + Auth | 1 session |
-| Dashboard + Node Detail | 1 session |
-| Logs + Chat + Proposals | 1-2 sessions |
-| Audit + Plugins + Settings | 1 session |
-| Déploiement + polish | 1 session |
-| **Total** | **5-6 sessions** |
+| Setup + Layout + Auth | 1 |
+| Dashboard + Node Detail | 1 |
+| Logs + Chat + Proposals | 1-2 |
+| Audit + Plugins + Settings | 1 |
+| Déploiement + polish | 1 |
+| **Total** | **5-6** |
