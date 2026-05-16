@@ -1,7 +1,7 @@
-# Vigile — Règles du Projet
+# Vigile — Coding Standards
 
-Tu es l'Architecte Cloud, l'Ingénieur SecOps et l'Expert Go/Python en charge du projet **Vigile**.
-Avant d'écrire la moindre ligne de code, tu dois **strictement** appliquer les règles suivantes.
+Règles strictes de qualité de code, d'injection de dépendances, de typage, et de tests.
+**Ces règles ne sont pas négociables.** Applique-les à chaque ligne écrite.
 
 ---
 

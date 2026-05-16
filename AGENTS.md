@@ -3,10 +3,10 @@
 ## Session start
 
 Read `docs/SESSION.md` first — it has the current sprint status.
-Read `CLAUDE.md` second — **CODING STANDARDS, architecture rules, DI rules**.
+Read `RULES.md` second — **coding standards, DI rules, typing, tests**.
 Read `docs/LIMITS.md` third — known bugs and architectural limits.
 
-**IMPORTANT :** `CLAUDE.md` contient les règles strictes de qualité de code,
+**IMPORTANT :** `RULES.md` contient les règles strictes de qualité de code,
 d'injection de dépendances, de typage, et de tests. Ces règles ne sont pas
 négociables. Applique-les à chaque ligne écrite.
 
@@ -29,9 +29,10 @@ master/api/              # auth.py, nodes.py (REST), deps.py (FastAPI dependenci
 master/ws/               # worker_handler.py (WebSocket enrollment + operational)
 master/db/               # database.py, models.py (pure SQL), migrations.py
 master/plugins/          # metrics_plugin.py (CPU/RAM/disque/swap/uptime), + à venir
-tests/unit/              # test_core.py (57), test_worker_handler.py (15), test_plugins.py (88), test_logs_api.py (22), test_services_api.py (36) = 218 tests
+tests/unit/              # test_core.py (57), test_worker_handler.py (15), test_plugins.py (88), test_logs_api.py (22), test_services_api.py (36), test_llm_client.py (8), test_structured_llm.py (8), test_action_proposal.py (25), test_chat_api.py (26) = 285 tests
 tests/integration/       # test_api.py (22 tests, requires running server)
-docs/                    # PLAN.md (architecture plan), SESSION.md, LIMITS.md
+docs/                    # PLAN.md (architecture plan), SESSION.md (sprint status), LIMITS.md (bugs)
+RULES.md                 # Coding standards, DI, typing, tests
 worker/                  # Go binary (stdlib only, zero imports)
   main.go               # Entrypoint, CLI flags, signal handling
   wsclient.go            # WebSocket client — RFC 6455 pur stdlib
@@ -52,14 +53,6 @@ docker-compose.yml       # Full test stack (Master + Workers)
 
 `worker/` (Go binary) — implémenté en Sprint 2, zéro dépendance externe.
 
-## Zero-dependency rule
-
-**Never add a pip/go dependency without explicit permission.**
-Whitelist (master): `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`, `passlib`, `httpx`, `pydantic`
-Whitelist (worker): Go stdlib only — zero imports.
-
-Implement patterns natively (PluginManager, RateLimiter, LLMClient, StructuredLLM are all hand-written, inspired by OSS but zero imports).
-
 ## Key architecture facts
 
 - **No ORM** — pure SQL via aiosqlite. All DDL in `master/db/models.py`.
@@ -70,6 +63,7 @@ Implement patterns natively (PluginManager, RateLimiter, LLMClient, StructuredLL
 - **Ed25519 handshake** for Worker enrollment (challenge/response over WebSocket).
 - **JOIN_TOKEN** = HMAC-SHA256, single-use, 30-min TTL. Atomic consumption via `UPDATE ... WHERE consumed=0`.
 - **Rate limiter** in-memory sliding window (60 req/min per route, 10 req/min on `/login`).
+- **Zero-dependency rule** : voir `RULES.md` section 12.
 
 ## Commands
 
@@ -112,7 +106,8 @@ PYTHONPATH="." uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
 
 | File | Purpose |
 | ------ | --------- |
-| `CLAUDE.md` | **Coding standards, DI rules, typing, tests, security, zero-dependency** |
+| `RULES.md` | **Coding standards, DI rules, typing, tests, security, zero-dependency** |
 | `docs/PLAN.md` | Full architecture plan, protocol specs, future sprints (Sprints 1→11) |
+| `docs/SESSION.md` | Current sprint status |
 | `docs/LIMITS.md` | Known bugs, races, scalability limits |
 | `.env.example` | All configurable env vars with defaults |
