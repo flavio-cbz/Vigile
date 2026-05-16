@@ -3,24 +3,36 @@
 ## Stack technique
 
 ```
-Vite + React 19 + TypeScript
-Tailwind CSS v4
-shadcn/ui (primitives Radix uniquement — pas le design par défaut)
-JetBrains Mono + Inter (fonts)
-Tabler Icons (icônes en text-muted, 14px max, sans fond)
-React Router v7
-EventSource (SSE natif, zero lib)
+FastAPI + Jinja2Templates (SSR)
+HTMX (interactivité sans JS custom)
+Tailwind CSS v4 (build npm + css-cli)
+JetBrains Mono + Inter (Google Fonts)
+Tabler Icons (SVG inline, text-muted, 14px max)
+EventSource JS (SSE streaming chat — le seul JS custom)
 ```
 
 ## Architecture de déploiement
 
 ```
-Navigateur ── HTTPS ── Nginx Proxy Manager ──┬── /api/* ──→ master:8002
-                                              └── /*    ──→ fichiers statiques React
+Navigateur ── HTTPS ── Nginx Proxy Manager ──→ master:8002
 ```
 
-Frontend servi par Nginx en statique. Appels `/api/*` proxifiés vers master.
-Pas de CORS, pas de port supplémentaire.
+Tout est servi par le master FastAPI lui-même :
+- Les templates Jinja2 sont rendus par FastAPI
+- HTMX gère les mises à jour dynamiques (polling, navigation, formulaires)
+- SSE pour le streaming chat (EventSource JS)
+- Pas de build séparé, pas de CORS, pas de port supplémentaire
+
+---
+
+### Principe HTMX
+
+- **Navigation** : liens `<a hx-get="/nodes/..." hx-target="#main" hx-push-url="true">`
+- **Polling statuts** : `<div hx-get="/api/nodes/..." hx-trigger="every 10s" hx-swap="outerHTML">`
+- **Formulaires** : `<form hx-post="/api/..." hx-target="#result" hx-swap="innerHTML">`
+- **Chat SSE** : `<div hx-sse="connect:/api/chat?stream=true" hx-trigger="sse:token">`
+- **Pagination logs** : `hx-get="/api/nodes/{id}/logs?offset=..." hx-trigger="revealed"`
+- **Aucun JS custom** sauf un EventSource pour le streaming chat (pas gérable en HTMX pur)
 
 ---
 
@@ -54,23 +66,35 @@ Pas d'icônes dans des cercles colorés. Icônes en `text-muted` 14px max, sans 
 
 - Sidebar fixe gauche 220px — logo + 4 liens max, pas de catégories
 - Pas de header (logo dans la sidebar)
-- Contenu : grille dense, `gap-2` à `gap-4` max
+- Contenu `#main` : grille dense, `gap-2` à `gap-4` max
 - Pas de padding excessif
+- HTMX swap dans `#main` pour toute navigation
+- Un seul squelette HTML (`base.html`) avec blocks Jinja2
 
 ---
 
-## Pages & Routing
+## Pages & Routing (FastAPI + HTMX)
 
-| Route | Page | Accès |
-|---|---|---|
-| `/login` | Login | Public |
-| `/` | Dashboard (nodes, santé globale) | Auth |
-| `/nodes/:id` | Node detail (stats, services, containers, logs) | Auth |
-| `/chat` | Chat IA | Operator+ |
-| `/proposals` | Propositions d'actions | Operator+ |
-| `/audit` | Audit log | Admin |
-| `/plugins` | Catalogue de plugins | Admin |
-| `/settings` | Configuration (LLM, users) | Admin |
+Toutes les routes sont servies par le master. Les templates Jinja2 sont rendus côté serveur.
+HTMX injecte le contenu dans `#main` sans rechargement complet.
+
+| Route | Méthode | Template | Description | Auth |
+|---|---|---|---|---|
+| `GET /login` | GET | `login.html` | Page de login | Public |
+| `POST /login` | POST | — | Soumission login (redirect) | Public |
+| `GET /` | GET | `dashboard.html` | Dashboard, liste nœuds | Auth |
+| `GET /nodes/{id}` | GET | `node.html` | Détail nœud | Auth |
+| `GET /nodes/{id}/services` | GET | `_services.html` | Liste services (HTMX swap) | Auth |
+| `GET /nodes/{id}/logs` | GET | `_logs.html` | Logs panel (HTMX swap) | Auth |
+| `GET /chat` | GET | `chat.html` | Page chat IA | Operator+ |
+| `GET /chat/stream` | GET | — | SSE streaming (EventSource JS) | Operator+ |
+| `GET /proposals` | GET | `proposals.html` | Propositions | Operator+ |
+| `GET /audit` | GET | `audit.html` | Audit log | Admin |
+| `GET /plugins` | GET | `plugins.html` | Catalogue plugins | Admin |
+| `GET /settings` | GET | `settings.html` | Configuration | Admin |
+
+Les templates préfixés par `_` sont des fragments HTML partiels (pas de `<html>`/`<body>`)
+destinés à être injectés par HTMX dans le layout principal.
 
 ---
 
@@ -426,11 +450,35 @@ l'autre de ces deux outils est probablement superflu.
 
 ---
 
-## API utilisée
+## API + Routes frontend
+
+L'API REST existante (`/api/*`) reste inchangée. Les pages frontend sont servies
+par de nouvelles routes Jinja2 dans un routeur dédié `master/api/frontend.py`.
+
+### Routes frontend (nouvelles)
+
+| Route | Méthode | Template | Rôle |
+|---|---|---|---|
+| `GET /login` | GET | `login.html` | Page login |
+| `POST /login` | POST | — | Submit login → redirect / |
+| `GET /` | GET | `dashboard.html` | Dashboard |
+| `GET /nodes/{id}` | GET | `node.html` | Détail nœud |
+| `GET /nodes/{id}/services` | GET | `_services.html` | Fragment services |
+| `GET /nodes/{id}/containers` | GET | `_containers.html` | Fragment containers |
+| `GET /nodes/{id}/logs` | GET | `_logs.html` | Fragment logs |
+| `GET /nodes/{id}/metrics` | GET | `_metrics.html` | Fragment stats (poll) |
+| `GET /chat` | GET | `chat.html` | Page chat |
+| `GET /chat/stream` | GET | SSE | Streaming chat (EventSource) |
+| `GET /proposals` | GET | `proposals.html` | Propositions |
+| `GET /audit` | GET | `audit.html` | Audit |
+| `GET /plugins` | GET | `plugins.html` | Plugins |
+| `GET /settings` | GET | `settings.html` | Settings |
+
+### API REST (existante, utilisée par templates)
 
 | Endpoint | Usage |
 |---|---|
-| `POST /api/auth/login` | Login |
+| `POST /api/auth/login` | Login (form action) |
 | `GET /api/nodes` | Liste nœuds |
 | `GET /api/nodes/{id}` | Détail nœud |
 | `GET /api/nodes/{id}/stats` | Métriques |
@@ -448,53 +496,40 @@ l'autre de ces deux outils est probablement superflu.
 ## Structure fichiers
 
 ```
-frontend/
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-├── tailwind.config.ts
-├── index.html
-└── src/
-    ├── main.tsx
-    ├── App.tsx
-    ├── index.css           # Pal个人化 theme (tailwind config + fonts)
-    ├── lib/
-    │   ├── api.ts          # Client HTTP (fetch wrapper)
-    │   ├── auth.ts         # Gestion token JWT
-    │   └── sse.ts          # EventSource SSE
-    ├── hooks/
-    │   ├── useAuth.ts
-    │   ├── useNodes.ts
-    │   ├── useChat.ts
-    │   └── useProposals.ts
-    ├── components/
-    │   ├── ui/             # shadcn primitives (reconfigurées)
-    │   ├── layout/
-    │   │   └── Sidebar.tsx
-    │   ├── dashboard/
-    │   │   ├── NodeCard.tsx
-    │   │   └── NodeStatusBadge.tsx
-    │   ├── node/
-    │   │   ├── MetricsBar.tsx
-    │   │   ├── ServiceList.tsx
-    │   │   ├── ContainerList.tsx
-    │   │   └── LogViewer.tsx
-    │   ├── chat/
-    │   │   ├── ChatPanel.tsx
-    │   │   ├── ChatMessage.tsx
-    │   │   └── ProposalCard.tsx
-    │   └── audit/
-    │       └── AuditLog.tsx
-    └── pages/
-        ├── LoginPage.tsx
-        ├── DashboardPage.tsx
-        ├── NodeDetailPage.tsx
-        ├── ChatPage.tsx
-        ├── ProposalsPage.tsx
-        ├── AuditPage.tsx
-        ├── PluginsPage.tsx
-        └── SettingsPage.tsx
+master/
+├── main.py
+├── config.py
+├── core/            # (inchangé)
+├── api/             # (inchangé)
+├── ws/              # (inchangé)
+├── db/              # (inchangé)
+├── plugins/         # (inchangé)
+└── templates/       # ← NOUVEAU : templates Jinja2
+    ├── base.html            # Squelette (sidebar + #main)
+    ├── login.html
+    ├── dashboard.html
+    ├── node.html            # Détail nœud (tabs)
+    ├── _services.html       # Fragment liste services (HTMX)
+    ├── _containers.html     # Fragment liste containers (HTMX)
+    ├── _logs.html           # Fragment logs (HTMX)
+    ├── _metrics.html        # Fragment stats bar (HTMX poll)
+    ├── chat.html
+    ├── _chat_messages.html  # Fragment messages chat (SSE)
+    ├── proposals.html
+    ├── audit.html
+    ├── plugins.html
+    └── settings.html
+
+static/             # ← NOUVEAU : fichiers statiques
+├── css/
+│   └── app.css     # Tailwind build
+├── js/
+│   └── chat.js     # EventSource SSE (seul JS custom)
+└── fonts/          # JetBrains Mono + Inter (woff2)
 ```
+
+**Principe HTMX** : les vues sont des templates Jinja2. Les fragments `_*.html` sont
+rendus sans layout, injectés dans `#main` par HTMX. Pas de build React, pas de bundle.
 
 ---
 
@@ -502,25 +537,24 @@ frontend/
 
 | Étape | Composant | Dépend de |
 |---|---|---|
-| 1 | Setup Vite + Tailwind + shadcn/ui custom theme | Rien |
-| 2 | Layout (Sidebar) + Router | Rien |
-| 3 | LoginPage + auth | Layout |
-| 4 | DashboardPage + NodeCard | Layout, auth |
-| 5 | NodeDetailPage + MetricsBar + ServiceList | Dashboard |
-| 6 | LogViewer | NodeDetail |
-| 7 | ChatPage + SSE streaming + ProposalCard | Layout, auth |
-| 8 | ProposalsPage | Chat |
-| 9 | AuditLog | Layout, auth |
-| 10 | PluginsPage + SettingsPage | Layout, auth |
-| 11 | Déploiement (build → Nginx) | Tout |
+| 1 | Setup Tailwind + static files + base template | Rien |
+| 2 | Sidebar + layout `base.html` | Rien |
+| 3 | Login page + auth + session cookie | Layout |
+| 4 | Dashboard template + node list + polling HTMX | Layout, auth |
+| 5 | Node detail template + tabs (services, containers, metrics) | Dashboard |
+| 6 | LogViewer template + lazy load HTMX | NodeDetail |
+| 7 | Chat page + SSE EventSource (+ chat.js) | Layout, auth |
+| 8 | Proposals page + approve/reject HTMX | Chat |
+| 9 | Audit page | Layout, auth |
+| 10 | Plugins + Settings pages | Layout, auth |
+| 11 | Routeur frontend `master/api/frontend.py` + intégration main.py | Tout |
 
 ## Estimation
 
 | Phase | Sessions |
 |---|---|
-| Setup + Layout + Auth | 1 |
-| Dashboard + Node Detail | 1 |
+| Setup Tailwind + base template | 1 |
+| Login + Dashboard + Node Detail | 1 |
 | Logs + Chat + Proposals | 1-2 |
-| Audit + Plugins + Settings | 1 |
-| Déploiement + polish | 1 |
-| **Total** | **5-6** |
+| Audit + Plugins + Settings + routage | 1 |
+| **Total** | **4-5** |
