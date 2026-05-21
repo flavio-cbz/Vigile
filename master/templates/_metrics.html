@@ -1,0 +1,98 @@
+{% if metrics %}
+<div class="node-grid fade-in">
+  {# CPU #}
+  <div class="glass p-4">
+    <div class="section-header mb-2">
+      <div class="section-title" style="font-size:0.75rem;">CPU</div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="gauge" style="--gauge-color: var(--accent);">
+        <div class="gauge-ring" style="--pct: {{ metrics.cpu_percent }}%; --gauge-color: var(--accent);"></div>
+        <span class="text-sm font-bold relative z-10" style="color: var(--accent); font-family: 'Fraunces', serif;">
+          {{ "%.0f"|format(metrics.cpu_percent) }}
+        </span>
+      </div>
+      <div class="text-[10px] leading-tight" style="color: var(--ink-dim);">
+        {% if metrics.cpu_load_1m is not none %}
+        Load: {{ "%.2f"|format(metrics.cpu_load_1m) }}
+        {% endif %}
+        {% if metrics.cpu_cores %}
+        <br>{{ metrics.cpu_cores }} cores
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# RAM #}
+  <div class="glass p-4">
+    <div class="section-header mb-2">
+      <div class="section-title" style="font-size:0.75rem;">RAM</div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="gauge" style="--gauge-color: var(--green);">
+        <div class="gauge-ring" style="--pct: {{ metrics.mem_percent }}%; --gauge-color: var(--green);"></div>
+        <span class="text-sm font-bold relative z-10" style="color: var(--green); font-family: 'Fraunces', serif;">
+          {{ "%.0f"|format(metrics.mem_percent) }}
+        </span>
+      </div>
+      <div class="text-[10px] leading-tight" style="color: var(--ink-dim);">
+        {% if metrics.mem_used_bytes and metrics.mem_total_bytes %}
+        {{ "%.1f"|format(metrics.mem_used_bytes / 1073741824) }}/{{ "%.1f"|format(metrics.mem_total_bytes / 1073741824) }} GB
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Disk #}
+  <div class="glass p-4">
+    <div class="section-header mb-2">
+      <div class="section-title" style="font-size:0.75rem;">Disk</div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="gauge" style="--gauge-color: var(--amber);">
+        <div class="gauge-ring" style="--pct: {{ metrics.disk_percent }}%; --gauge-color: var(--amber);"></div>
+        <span class="text-sm font-bold relative z-10" style="color: var(--amber); font-family: 'Fraunces', serif;">
+          {{ "%.0f"|format(metrics.disk_percent) }}
+        </span>
+      </div>
+      <div class="text-[10px] leading-tight" style="color: var(--ink-dim);">
+        {% if metrics.disk_used_bytes and metrics.disk_total_bytes %}
+        {{ "%.1f"|format(metrics.disk_used_bytes / 1073741824) }}/{{ "%.0f"|format(metrics.disk_total_bytes / 1073741824) }} GB
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Uptime #}
+  <div class="glass p-4">
+    <div class="section-header mb-2">
+      <div class="section-title" style="font-size:0.75rem;">Uptime</div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center justify-center w-[42px] h-[42px]" style="border: 1.5px solid var(--border-strong); color: var(--ink-dim);">
+        <i class="ti ti-clock-edit text-lg"></i>
+      </div>
+      <div>
+        <div class="text-sm font-bold uptime-display" data-seconds="{{ metrics.uptime_seconds }}" style="font-family: 'Fraunces', serif; color: var(--ink);">
+          <script>
+            document.currentScript.parentElement.textContent = formatUptime({{ metrics.uptime_seconds }});
+          </script>
+        </div>
+        {% if metrics.processes %}
+        <div class="text-[10px]" style="color: var(--ink-dim);">{{ metrics.processes }} procs</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="flex flex-col items-center justify-center py-12 text-center fade-in">
+  <i class="ti ti-chart-bar-off text-3xl" style="color: var(--ink-muted);"></i>
+  <p class="mt-3 text-sm font-medium" style="color: var(--ink-muted);">En attente des premières métriques</p>
+  <p class="mt-1 text-xs" style="color: var(--ink-dim);">Les métriques apparaîtront dès le premier rapport du worker.</p>
+  <span class="mt-4 inline-flex items-center gap-2 text-[10px]" style="color: var(--accent);">
+    <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: var(--accent); animation: pulseGlow 2s ease-in-out infinite;"></span>
+    Surveillance active
+  </span>
+</div>
+{% endif %}

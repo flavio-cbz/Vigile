@@ -333,8 +333,25 @@ class SecurityManager:
         }
         return jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
 
-    def create_refresh_token(self, user_id: str) -> str:
-        """Create a long-lived refresh token (opaque — just a JWT with limited claims)."""
+    @property
+    def jwt_access_token_ttl(self) -> int:
+        """Return the configured JWT access token TTL."""
+        return self._jwt_access_token_ttl
+
+    @property
+    def jwt_refresh_token_ttl(self) -> int:
+        """Return the configured JWT refresh token TTL."""
+        return self._jwt_refresh_token_ttl
+
+    @staticmethod
+    def hash_refresh_token(token: str) -> str:
+        """SHA256 fingerprint of the raw refresh token (for DB storage)."""
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def create_refresh_token(self, user_id: str, family_id: str | None = None) -> tuple[str, str]:
+        """Create a long-lived refresh token. Returns (token_str, family_id)."""
+        if family_id is None:
+            family_id = str(uuid.uuid4())
         now = int(time.time())
         claims = {
             "sub": user_id,
@@ -342,8 +359,10 @@ class SecurityManager:
             "iat": now,
             "exp": now + self._jwt_refresh_token_ttl,
             "jti": str(uuid.uuid4()),
+            "family_id": family_id,
         }
-        return jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
+        token = jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
+        return token, family_id
 
     def verify_access_token(self, token: str) -> dict[str, Any]:
         """Decode and verify a user access token. Raises HTTPException on failure."""

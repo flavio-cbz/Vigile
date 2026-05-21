@@ -134,6 +134,7 @@ class NodeManager:
     ) -> None:
         """Start the background heartbeat monitor. Called at app startup.
         Thresholds are injected here — no config coupling inside the loop."""
+        self.heartbeat_interval = heartbeat_interval
         self._monitor_task = asyncio.create_task(
             self._heartbeat_monitor(heartbeat_interval, lost_threshold, stale_threshold),
             name="heartbeat_monitor",
@@ -414,15 +415,36 @@ class NodeManager:
             "Heartbeat monitor: interval=%ds lost=%ds stale=%ds",
             interval, lost_threshold, stale_threshold,
         )
+        intent_cleanup_counter = 0
 
         while True:
             try:
                 await asyncio.sleep(interval)
                 await self._check_heartbeats(lost_threshold, stale_threshold)
+                # Clean up stale pending intents every ~10 cycles
+                intent_cleanup_counter += 1
+                if intent_cleanup_counter >= 10:
+                    intent_cleanup_counter = 0
+                    self._cleanup_stale_intents()
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("Heartbeat monitor error (will retry)")
+
+    def _cleanup_stale_intents(self, max_age: float = 120.0) -> int:
+        """Remove pending intents that have been waiting longer than max_age seconds."""
+        now = time.time()
+        stale_ids: list[str] = []
+        for intent_id, future in self._pending_intents.items():
+            if future.done():
+                stale_ids.append(intent_id)
+        for intent_id in stale_ids:
+            self._intent_nodes.pop(intent_id, None)
+            self._pending_intents.pop(intent_id, None)
+        count = len(stale_ids)
+        if count:
+            logger.warning("Cleaned up %d stale pending intents.", count)
+        return count
 
     async def _check_heartbeats(
         self, lost_threshold: float, stale_threshold: float
@@ -479,15 +501,23 @@ class NodeManager:
         return d
 
     async def list_nodes(
-        self, db: aiosqlite.Connection, *, state: str | None = None
+        self, db: aiosqlite.Connection, *, state: str | None = None,
+        limit: int | None = None, offset: int | None = None,
     ) -> list[dict[str, Any]]:
-        """List all nodes, optionally filtered by state."""
+        """List nodes, optionally filtered by state, with pagination."""
         if state:
             sql = "SELECT * FROM nodes WHERE state = ? ORDER BY created_at DESC"
-            params = (state,)
+            params: list[Any] = [state]
         else:
             sql = "SELECT * FROM nodes ORDER BY created_at DESC"
-            params = ()
+            params = []
+
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        if offset is not None:
+            sql += " OFFSET ?"
+            params.append(offset)
 
         rows = []
         async with db.execute(sql, params) as cursor:

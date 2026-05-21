@@ -102,5 +102,22 @@ class RateLimiter:
         return _dep
 
 
+    def start_cleanup_task(self, app: FastAPI, interval: int = 300) -> asyncio.Task:
+        """Start a background task that periodically cleans up expired buckets."""
+        async def _cleanup_loop() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(interval)
+                    await self.cleanup_expired()
+                    logger.debug("Rate limiter cleanup: expired buckets removed.")
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    logger.exception("Rate limiter cleanup error (will retry)")
+        task = asyncio.create_task(_cleanup_loop(), name="rate_limiter_cleanup")
+        logger.info("Rate limiter cleanup task started (interval=%ds).", interval)
+        return task
+
+
 # Module-level singleton
 rate_limiter = RateLimiter()

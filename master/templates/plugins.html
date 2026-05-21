@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Plugins{% endblock %}
+{% block heading %}Plugins{% endblock %}
+{% block breadcrumb %}
+<span>Dashboard</span>
+<span class="breadcrumb__sep">/</span>
+<span class="breadcrumb__current">Plugins</span>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+.skeleton {
+  background: linear-gradient(90deg, var(--border-strong) 0%, rgba(255,255,255,0.05) 50%, var(--border-strong) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 3px;
+}
+.skeleton-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r);
+  padding: 1.1rem;
+  overflow: hidden;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .plugin-card {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 0.5rem;
+  }
+  .plugin-card .flex-1 {
+    width: 100%;
+  }
+  .plugin-hook-entry {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .plugin-hook-entry span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="section-pad">
+  {# ── Skeleton plugins (shown during HTMX loading) ── #}
+  <div class="section-block htmx-indicator" aria-hidden="true" style="display:none;">
+    <div class="glass p-4">
+      <div class="skeleton" style="width:160px;height:16px;margin-bottom:0.75rem;"></div>
+      <div class="space-y-2">
+        {% for _ in range(3) %}
+        <div class="flex items-center gap-3 p-3" style="background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--r);">
+          <div class="skeleton" style="width:20px;height:20px;"></div>
+          <div class="flex-1">
+            <div class="skeleton" style="width:55%;height:12px;"></div>
+          </div>
+          <div class="skeleton" style="width:50px;height:18px;"></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {# Loaded Plugins section #}
+  <div class="section-block">
+    <div class="glass p-4">
+      <h3 class="section-title" style="margin-bottom: 0.75rem;">
+        Loaded Plugins
+        <span class="section-title__sub">({{ loaded_plugins|length }})</span>
+      </h3>
+      {% if loaded_plugins %}
+      <div class="space-y-2">
+        {% for plugin in loaded_plugins %}
+        <div class="flex items-center gap-3 p-3 plugin-card" style="background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--r);">
+          <i class="ti ti-plug" style="font-size: 1rem; color: var(--accent);"></i>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium" style="color: var(--ink);">{{ plugin }}</div>
+          </div>
+          <span class="text-xs px-2 py-0.5 font-medium" style="background: var(--accent-soft); color: var(--accent); border: 1.5px solid var(--accent-border); border-radius: var(--r);">active</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      {# Empty state #}
+      <div class="flex flex-col items-center justify-center py-12 text-center fade-in">
+        <i class="ti ti-plug-off text-3xl" style="color: var(--ink-muted);"></i>
+        <p class="mt-3 text-sm font-medium" style="color: var(--ink-muted);">Aucun plugin chargé</p>
+        <p class="mt-1 text-xs" style="color: var(--ink-dim);">Les plugins s'enregistrent automatiquement au démarrage.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Registered Hooks section #}
+  <div class="section-block">
+    <div class="glass p-4">
+      <h3 class="section-title" style="margin-bottom: 0.75rem;">
+        Registered Hooks
+        <span class="section-title__sub">({{ hooks|length }})</span>
+      </h3>
+      {% if hooks %}
+      <div class="space-y-1">
+        {% for hook_name, hook_list in hooks.items() %}
+        <div class="p-2 flex items-center gap-2 plugin-hook-entry" style="background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--r);">
+          <i class="ti ti-link" style="font-size: 0.75rem; color: var(--ink-muted);"></i>
+          <span class="text-xs font-mono" style="color: var(--accent);">{{ hook_name }}</span>
+          <span class="text-xs" style="color: var(--ink-muted);">({{ hook_list|length }} handler{{ 's' if hook_list|length != 1 }})</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      {# Empty state #}
+      <div class="flex flex-col items-center justify-center py-12 text-center fade-in">
+        <i class="ti ti-link-off text-3xl" style="color: var(--ink-muted);"></i>
+        <p class="mt-3 text-sm font-medium" style="color: var(--ink-muted);">Aucun hook enregistré</p>
+        <p class="mt-1 text-xs" style="color: var(--ink-dim);">Les hooks apparaîtront lorsque des plugins seront chargés.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

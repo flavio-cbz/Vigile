@@ -16,14 +16,18 @@ Run with:
 import logging
 import sys
 import time
+from datetime import datetime
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI, Request, Response, WebSocket
+from fastapi import Depends, FastAPI, Request, Response, WebSocket, HTTPException
 from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 from master.config import settings
 from master.db.database import close_db, init_db
@@ -37,6 +41,8 @@ from master.api.auth import router as auth_router
 from master.api.nodes import router as nodes_router
 from master.api.services import router as services_router
 from master.api.chat import router as chat_router
+from master.api.frontend import router as frontend_router
+from master.api.audit import router as audit_router
 from master.api.deps import require_role
 from master.ws.worker_handler import worker_join_handler
 
@@ -96,13 +102,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     # 1. Init DB
-    db = await init_db()
+    db = await init_db(settings.database_path)
     logger.info("Database connection established.")
 
     # 2. Migrations
     await run_migrations(db)
 
-    # 3. Initialize SecurityManager (with explicit DI from settings)
+    # 3. Initialize Jinja2 templates and static files
+    from jinja2 import Environment, FileSystemLoader
+    from starlette.templating import _TemplateResponse
+    jinja_env = Environment(
+        loader=FileSystemLoader("master/templates"),
+        autoescape=True,
+        cache_size=0,
+    )
+    jinja_env.globals["now"] = datetime.utcnow
+    class _Templates:
+        def __init__(self, env):
+            self.env = env
+        def TemplateResponse(self, name, context, status_code=200, headers=None):
+            template = self.env.get_template(name)
+            return _TemplateResponse(template, context, status_code=status_code, headers=headers)
+    app.state.templates = _Templates(jinja_env)
+    logger.info("Jinja2Templates initialized.")
+
+    # 4. Initialize SecurityManager (with explicit DI from settings)
     master_key = load_or_generate_master_key(settings.master_key_path)
     init_security(
         server_secret=settings.server_secret_key,
@@ -129,12 +153,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     app.state.startup_time = time.time()
+    app.state.master_url = settings.master_url
+    app.state.trusted_proxies = settings.trusted_proxies
+    
+    # 7. Start Rate Limiter Cleanup Task
+    import asyncio
+    async def _rate_limiter_cleanup_task():
+        try:
+            while True:
+                await asyncio.sleep(60)
+                rate_limiter.cleanup_expired()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Error in rate limiter cleanup task: %s", e)
+
+    cleanup_task = asyncio.create_task(_rate_limiter_cleanup_task())
+    logger.info("Rate limiter cleanup task started.")
+    
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
 
     # ── Shutdown ──────────────────────────────────────────────────────────
     logger.info("Master Node shutting down...")
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     await node_manager.stop()
     await close_db()
     logger.info("Shutdown complete.")
@@ -158,6 +205,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    headers = getattr(exc, "headers", None)
+    if isinstance(exc.detail, dict):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+            headers=headers
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=headers
+    )
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -170,10 +233,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# CORS wildcard + credentials compatibility fix.
+# When allow_origins is ["*"], Starlette's CORSMiddleware sends
+# "Access-Control-Allow-Origin: *" which is incompatible with
+# "Access-Control-Allow-Credentials: true" per spec (browsers reject it).
+# We patch this by echoing the request's Origin header when "*" is used.
+if "*" in settings.cors_origins:
+    logger.warning(
+        "CORS_ORIGINS contains '*': dynamically echoing Origin header "
+        "to work around wildcard + credentials incompatibility. "
+        "Set CORS_ORIGINS to specific origins for production."
+    )
+
+    @app.middleware("http")
+    async def _cors_echo_origin(request: Request, call_next: Callable) -> Response:
+        response = await call_next(request)
+        origin = request.headers.get("origin")
+        if origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+        return response
+
 # Rate limiter (global middleware — excludes WebSocket)
 rate_limiter.middleware(app)
 logger.info("Rate limiter active: %d req/%ds per IP per route",
             rate_limiter.max_requests, rate_limiter.window)
+
+# Session middleware (for flash messages, CSRF, etc.)
+app.add_middleware(SessionMiddleware, secret_key=settings.server_secret_key)
+logger.info("SessionMiddleware initialized.")
 
 # HTTPS enforcement middleware (behind reverse proxy — checks X-Forwarded-Proto)
 if settings.enforce_https:
@@ -200,6 +287,19 @@ app.include_router(auth_router)
 app.include_router(nodes_router)
 app.include_router(services_router)
 app.include_router(chat_router)
+app.include_router(audit_router)
+
+# ---------------------------------------------------------------------------
+# Static Files
+# ---------------------------------------------------------------------------
+
+app.mount("/static", StaticFiles(directory="master/static"), name="static")
+
+# ---------------------------------------------------------------------------
+# Frontend Routes (SSR + HTMX)
+# ---------------------------------------------------------------------------
+
+app.include_router(frontend_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes

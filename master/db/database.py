@@ -7,14 +7,11 @@ import aiosqlite
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from master.config import settings
-
-
 # Module-level connection reference (initialized at startup)
 _db: aiosqlite.Connection | None = None
 
 
-async def init_db() -> aiosqlite.Connection:
+async def init_db(database_path: str) -> aiosqlite.Connection:
     """
     Open the SQLite database and configure it for production use.
     Called once at application startup via the FastAPI lifespan.
@@ -24,7 +21,7 @@ async def init_db() -> aiosqlite.Connection:
     if _db is not None:
         raise RuntimeError("Database already initialized. close_db() first.")
 
-    db = await aiosqlite.connect(settings.database_path)
+    db = await aiosqlite.connect(database_path)
 
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")

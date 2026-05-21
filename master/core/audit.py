@@ -142,9 +142,15 @@ async def log_action(
     return entry_id
 
 
-async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
+async def verify_chain(
+    db: aiosqlite.Connection, *, max_entries: int | None = None,
+) -> dict[str, Any]:
     """
-    Walk the entire audit log and verify the hash chain integrity.
+    Walk the audit log and verify the hash chain integrity.
+
+    Args:
+        max_entries: limit the number of entries verified (None = all).
+                     Useful for large tables where full scan is expensive.
 
     Returns a report dict:
       {
@@ -159,55 +165,78 @@ async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
         "total_entries": 0,
         "first_broken_sequence": None,
         "error": None,
-    }
+      }
 
-    expected_previous_hash = GENESIS_HASH
+    # Fetch rows
+    if max_entries is not None:
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence DESC
+            LIMIT ?
+        """
+        async with db.execute(sql, (max_entries,)) as cursor:
+            rows = await cursor.fetchall()
+        rows.reverse()
+    else:
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence ASC
+        """
+        async with db.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+
+    if not rows:
+        report["total_entries"] = 0
+        return report
+
+    # Initialize expected_previous_hash from the first verified row
+    first_row = rows[0]
+    if first_row["sequence"] == 1:
+        expected_previous_hash = GENESIS_HASH
+    else:
+        expected_previous_hash = first_row["previous_hash"]
+
     count = 0
+    for row in rows:
+        count += 1
+        seq = row["sequence"]
 
-    async with db.execute(
-        """
-        SELECT id, sequence, timestamp, user_id, action, node_id,
-               details_json, previous_hash, entry_hash
-        FROM audit_log
-        ORDER BY sequence ASC
-        """
-    ) as cursor:
-        async for row in cursor:
-            count += 1
-            seq = row["sequence"]
-
-            # Check that previous_hash matches expected value
-            if row["previous_hash"] != expected_previous_hash:
-                report["valid"] = False
-                report["first_broken_sequence"] = seq
-                report["error"] = (
-                    f"Sequence {seq}: previous_hash mismatch. "
-                    f"Expected '{expected_previous_hash[:12]}...', "
-                    f"got '{row['previous_hash'][:12]}...'"
-                )
-                break
-
-            # Recompute entry_hash
-            computed = compute_entry_hash(
-                previous_hash=row["previous_hash"],
-                sequence=seq,
-                timestamp=row["timestamp"],
-                action=row["action"],
-                user_id=row["user_id"],
-                node_id=row["node_id"],
-                details_json=row["details_json"],
+        # Check that previous_hash matches expected value
+        if row["previous_hash"] != expected_previous_hash:
+            report["valid"] = False
+            report["first_broken_sequence"] = seq
+            report["error"] = (
+                f"Sequence {seq}: previous_hash mismatch. "
+                f"Expected '{expected_previous_hash[:12]}...', "
+                f"got '{row['previous_hash'][:12]}...'"
             )
+            break
 
-            if computed != row["entry_hash"]:
-                report["valid"] = False
-                report["first_broken_sequence"] = seq
-                report["error"] = (
-                    f"Sequence {seq}: entry_hash mismatch. "
-                    f"Record has been tampered with."
-                )
-                break
+        # Recompute entry_hash
+        computed = compute_entry_hash(
+            previous_hash=row["previous_hash"],
+            sequence=seq,
+            timestamp=row["timestamp"],
+            action=row["action"],
+            user_id=row["user_id"],
+            node_id=row["node_id"],
+            details_json=row["details_json"],
+        )
 
-            expected_previous_hash = row["entry_hash"]
+        if computed != row["entry_hash"]:
+            report["valid"] = False
+            report["first_broken_sequence"] = seq
+            report["error"] = (
+                f"Sequence {seq}: entry_hash mismatch. "
+                f"Record has been tampered with."
+            )
+            break
+
+        expected_previous_hash = row["entry_hash"]
 
     report["total_entries"] = count
     if report["valid"]:

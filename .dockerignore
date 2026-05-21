@@ -1,16 +1,79 @@
 # Vigile — Docker Build Context Exclusions
-.venv/
+# Minimize build context for faster builds and smaller images
+
+## Version Control
 .git/
 .gitignore
+.gitattributes
+
+## Python — Runtime Artifacts
 __pycache__/
 *.py[cod]
 *.egg-info/
+*.egg
+.eggs/
+*.whl
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+## Virtual Environments (not needed in image)
+.venv/
+venv/
+env/
+
+## Environment Files (security!)
 .env
-docs/
+.env.local
+.env.*.local
+
+## Testing & Development (not needed in image)
 tests/
 scripts/
+docs/
+.pytest_tmp/
+.coverage*
+htmlcov/
+
+## Database & Data
 data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+
+## Logs
+*.log
+*.log.*
+
+## Documentation (keep in repo, not in image)
 *.md
-opencode.json
-AGENTS.md
 RULES.md
+AGENTS.md
+codemap.md
+
+## Configuration Files (not needed)
+opencode.json
+.dockerignore
+.editorconfig
+
+## IDE & Tool Artifacts
+.vscode/
+.cursor/
+.idea/
+.slim/
+.sisyphus/
+.playwright-mcp/
+.browserstack-local/
+.mypy_incremental/
+
+## OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Misc
+.env.example
+/tmp/
+*.swp
+*.swo

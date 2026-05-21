@@ -11,7 +11,7 @@ Provides reusable dependency-injected objects:
 from typing import Annotated, Any
 
 import aiosqlite
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from master.db.database import get_db_conn
 from master.core.security_manager import SecurityManager, get_security_instance, bearer_scheme
@@ -53,15 +53,19 @@ def get_node_manager() -> NodeManager:
 # ---------------------------------------------------------------------------
 
 
-def get_current_user(
+async def get_current_user(
+    request: Request,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
     ],
     sec: Annotated[SecurityManager, Depends(get_security)],
+    db: Annotated[aiosqlite.Connection, Depends(get_db)],
 ) -> dict[str, Any]:
     """
     Dependency: Extracts and verifies the JWT from Authorization header.
-    Returns the full claims dict. Raises HTTP 401 on failure.
+    Also checks if the user is required to change their password.
+    Returns the full claims dict. Raises HTTP 401 on authentication failure,
+    HTTP 403 (MUST_CHANGE_PASSWORD) if password change is required.
     """
     from fastapi import HTTPException, status
     if credentials is None:
@@ -70,7 +74,28 @@ def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return sec.verify_access_token(credentials.credentials)
+    claims = sec.verify_access_token(credentials.credentials)
+    user_id = claims["sub"]
+
+    # Check must_change_password in DB
+    async with db.execute(
+        "SELECT must_change_password FROM users WHERE id = ?",
+        (user_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if row is not None and row["must_change_password"]:
+        path = request.url.path.rstrip("/")
+        if path not in ["/api/auth/change-password", "/api/auth/logout", "/api/auth/login"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "detail": "Password change required",
+                    "code": "MUST_CHANGE_PASSWORD"
+                }
+            )
+
+    return claims
 
 
 def require_role(*roles: str):

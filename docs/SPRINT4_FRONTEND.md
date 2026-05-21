@@ -5,8 +5,8 @@
 ```
 FastAPI + Jinja2Templates (SSR)
 HTMX (interactivité sans JS custom)
-Tailwind CSS v4 (build npm + css-cli)
-JetBrains Mono + Inter (Google Fonts)
+Tailwind CSS v4 (CDN @tailwindcss/browser — pas de build npm)
+Inter (Google Fonts)
 Tabler Icons (SVG inline, text-muted, 14px max)
 EventSource JS (SSE streaming chat — le seul JS custom)
 ```
@@ -18,6 +18,7 @@ Navigateur ── HTTPS ── Nginx Proxy Manager ──→ master:8002
 ```
 
 Tout est servi par le master FastAPI lui-même :
+
 - Les templates Jinja2 sont rendus par FastAPI
 - HTMX gère les mises à jour dynamiques (polling, navigation, formulaires)
 - SSE pour le streaming chat (EventSource JS)
@@ -36,40 +37,83 @@ Tout est servi par le master FastAPI lui-même :
 
 ---
 
-## Direction visuelle — Terminal Brutalism
+## Direction visuelle — Glass Dark Ops (basé sur la maquette)
 
-### Palette (monochrome stricte + un seul accent)
+La maquette de référence est `mockup_directions.html` à la racine du projet.
+Toute décision visuelle non couverte ici doit s'inspirer des patterns de cette maquette.
+
+### Palette
 
 ```
-Background  #0a0a0a   (noir quasi-total, pas gris)
-Surface     #111111   (cartes, panels)
-Border      #1f1f1f   (séparateurs discrets)
-Text        #e4e4e4   (primaire)
-Text muted  #555555   (secondaire)
-Accent      #00ff87   (vert terminal — UNIQUEMENT états actifs, CTAs, badges CONNECTED)
-Danger      #ff4444   (FAILED, erreurs critiques)
-Warning     #f5a623   (LOST, dégradés)
+Background  #050505   (noir profond)
+Surface     #0a0a0c   (panels, sidebar)
+Surface-2   #111114   (cartes secondaires, inputs)
+Border      white/5 à white/10  (via Tailwind opacity)
+Text        white      (primaire)
+Text muted  neutral-400 / #a3a3a3
+Accent      teal-400 / #14b8a6  (UNIQUE accent — badges, CTAs, états actifs)
+Danger      red-400 / #f87171   (FAILED, erreurs)
+Warning     amber-500 / #f59e0b  (LOST, dégradés)
+Info        blue-600 / #1d4ed8  (auto-discovery, info)
 ```
 
-Pas de bleu. Pas de violet. Pas de gradient. Zéro.
+Teal = seul vrai accent. Le bleu est toléré pour les sections "info/découverte" (héro).
+Gradients autorisés : `bg-gradient-to-br`, `bg-gradient-to-r`, overlays.
+
+### Glassmorphism
+
+Toutes les cartes, panels, inputs utilisent le pattern :
+```css
+bg-white/[0.02] border border-white/[0.05] backdrop-blur-xl
+```
+Ou selon l'importance :
+- **Surface active** (cartes cliquables) : `bg-[#111114] border border-white/5 hover:border-teal-500/40`
+- **Surface passive** (statiques) : `glass-panel` = `bg-white/[0.02] border border-white/[0.05] backdrop-blur-xl`
+- **Inputs/barres** : `bg-white/5 border border-white/10`
 
 ### Typographie
 
 | Usage | Font |
 |---|---|
-| Données (IP, metrics, logs, timestamps, statuts) | `JetBrains Mono` 13px |
-| Prose (descriptions, chat, labels) | `Inter` 13px |
+| Tout le texte | `Inter` (Google Fonts) via Tailwind `font-sans` |
 
-Pas d'icônes dans des cercles colorés. Icônes en `text-muted` 14px max, sans fond.
+Pas de JetBrains Mono. Inter uniquement, en `text-[13px]` à `text-[15px]` selon le contexte.
+
+### Icônes
+
+- **Tabler Icons** : SVG inline, `text-neutral-500`, 14px max pour les icônes de texte
+- **Cercles colorés** : Autorisés dans les cards de stats (cf. maquette) : `w-10 h-10 rounded-xl bg-{color}-500/10 flex items-center justify-center border border-{color}-500/20`
+- **Émojis** : Autorisés dans la nav (🐳, ▶️, ⚙️) comme dans la maquette
+
+### Glows & Ombres
+
+- **Glow sur accent** : `shadow-[0_0_15px_rgba(45,212,191,0.2)]` pour teal
+- **Glow sur statut** : `shadow-[0_0_8px_rgba(16,185,129,0.8)]` pour les points verts
+- **Glow bleu** : `shadow-[0_0_20px_rgba(37,99,235,0.4)]` pour les CTAs info
+- **Ombre panel** : `shadow-2xl`, `shadow-[0_4px_20px_rgba(0,0,0,0.5)]`
+- **Ombre sidebar** : `shadow-[10px_0_30px_rgba(0,0,0,0.5)]`
 
 ### Layout
 
-- Sidebar fixe gauche 220px — logo + 4 liens max, pas de catégories
-- Pas de header (logo dans la sidebar)
-- Contenu `#main` : grille dense, `gap-2` à `gap-4` max
-- Pas de padding excessif
-- HTMX swap dans `#main` pour toute navigation
-- Un seul squelette HTML (`base.html`) avec blocks Jinja2
+```
+┌──────────┬───────────────────────────────┬──────────────┐
+│ Sidebar  │         #main                  │  Copilot     │
+│ 80-240px │  (contenu principal)           │  340-400px   │
+│          │                               │  (sidebar    │
+│          │                               │   droite)    │
+│          │                               │              │
+│──────────│  scrollable, overflow-y-auto   │──────────────│
+│ expand   │                               │  chat +      │
+│ on hover │                               │  proposals   │
+└──────────┴───────────────────────────────┴──────────────┘
+```
+
+- **Sidebar gauche** : 80px fixe, s'expand à 240px au hover (transition 300ms). Overlay `z-50`.
+- **Header** : Présent dans `#main` — titre de page + sélecteur de nœud (optionnel).
+- **Contenu `#main`** : Carrousels horizontaux (Netflix-style) avec `overflow-x-auto netflix-row snap-x`.
+- **Copilot droite** : Sidebar droite permanente 340-400px, glassmorphic, avec `backdrop-blur-3xl`.
+- **HTMX swap** : Dans `#main-content` (sous le header) pour les changements de page/onglet.
+- **Un seul squelette HTML** (`base.html`) avec blocks Jinja2.
 
 ---
 
@@ -79,374 +123,128 @@ Toutes les routes sont servies par le master. Les templates Jinja2 sont rendus c
 HTMX injecte le contenu dans `#main` sans rechargement complet.
 
 | Route | Méthode | Template | Description | Auth |
-|---|---|---|---|---|
+|---|---|---|---|---|---|
 | `GET /login` | GET | `login.html` | Page de login | Public |
 | `POST /login` | POST | — | Soumission login (redirect) | Public |
-| `GET /` | GET | `dashboard.html` | Dashboard, liste nœuds | Auth |
-| `GET /nodes/{id}` | GET | `node.html` | Détail nœud | Auth |
-| `GET /nodes/{id}/services` | GET | `_services.html` | Liste services (HTMX swap) | Auth |
-| `GET /nodes/{id}/logs` | GET | `_logs.html` | Logs panel (HTMX swap) | Auth |
-| `GET /chat` | GET | `chat.html` | Page chat IA | Operator+ |
+| `POST /logout` | POST | — | Déconnexion (redirect → /login) | Auth |
+| `GET /` | GET | `dashboard.html` | Dashboard avec carrousels | Auth |
+| `GET /nodes/{id}` | GET | `node.html` | Détail nœud (tabs) | Auth |
+| `GET /nodes/{id}/services` | GET | `_services.html` | Fragment services (HTMX) | Auth |
+| `GET /nodes/{id}/containers` | GET | `_containers.html` | Fragment containers (HTMX) | Auth |
+| `GET /nodes/{id}/logs` | GET | `_logs.html` | Fragment logs (HTMX) | Auth |
+| `GET /nodes/{id}/metrics` | GET | `_metrics.html` | Fragment stats (HTMX poll 15s) | Auth |
 | `GET /chat/stream` | GET | — | SSE streaming (EventSource JS) | Operator+ |
-| `GET /proposals` | GET | `proposals.html` | Propositions | Operator+ |
-| `GET /audit` | GET | `audit.html` | Audit log | Admin |
+| `GET /proposals` | GET | `proposals.html` | Propositions d'actions | Operator+ |
+| `GET /audit` | GET | `audit.html` | Audit trail | Admin |
 | `GET /plugins` | GET | `plugins.html` | Catalogue plugins | Admin |
-| `GET /settings` | GET | `settings.html` | Configuration | Admin |
 
 Les templates préfixés par `_` sont des fragments HTML partiels (pas de `<html>`/`<body>`)
 destinés à être injectés par HTMX dans le layout principal.
 
 ---
 
-## Maquettes
+## Référence visuelle — Maquette unique
 
-### Barre latérale
+L'**unique référence graphique** est `mockup_directions.html` à la racine du projet.
+Tous les templates doivent reproduire le design, les proportions et l'ambiance de cette maquette.
 
-```
-┌──────────┬──────────────────────────────────────────────┐
-│          │                                              │
-│  Vigile  │         CONTENU PRINCIPAL                    │
-│  (logo)  │                                              │
-│          │                                              │
-│  ■       │                                              │
-│  Nodes   │                                              │
-│          │                                              │
-│  💬      │                                              │
-│  Chat    │                                              │
-│          │                                              │
-│  □       │                                              │
-│  Actions │                                              │
-│          │                                              │
-│  ...     │                                              │
-│  Audit   │                                              │
-│          │                                              │
-└──────────┴──────────────────────────────────────────────┘
-```
+### Principes généraux (extrapolés de la maquette)
 
-Sidebar 220px, fond `#0a0a0a`. Liens sans fond au hover — uniquement `text-muted` → `text`. Aucune catégorie.
+- **Dark glassmorphism** : fond `#050505`, surfaces en `backdrop-blur`, bordures discrètes `white/5`
+- **Teal accent** : tout ce qui est "actif", "connecté", "action principale" → teal-400
+- **Densité élégante** : les infos sont là, au premier coup d'œil — pas besoin d'apprendre l'interface
+- **Carrousels horizontaux** : pattern Netflix pour les sections du dashboard (vitals, docker, etc.)
+- **Header + sidebar gauche + copilot droite** : layout en 3 colonnes
+- **Gradients et glows** : assumés, pas excessifs — un glow teal pour attirer l'attention
 
----
+### Pages
 
-### Login
+#### Login (non couvert par la maquette)
 
-```
-╔══════════════════════════════════════════════╗
-║                                              ║
-║                    Vigile                     ║
-║            Server fleet guardian              ║
-║                                              ║
-║  ┌────────────────────────────────────────┐  ║
-║  │  Username                              │  ║
-║  │  ┌──────────────────────────────────┐  │  ║
-║  │  │                                  │  │  ║
-║  │  └──────────────────────────────────┘  │  ║
-║  │                                        │  ║
-║  │  Password                              │  ║
-║  │  ┌──────────────────────────────────┐  │  ║
-║  │  │                                  │  │  ║
-║  │  └──────────────────────────────────┘  │  ║
-║  │                                        │  ║
-║  │  ┌──────────────────────────────────┐  │  ║
-║  │  │         Sign in                  │  │  ║
-║  │  └──────────────────────────────────┘  │  ║
-║  └────────────────────────────────────────┘  ║
-║                                              ║
-╚══════════════════════════════════════════════╝
-```
+Page centrée, fond `#050505`. Card glassmorphic centrée avec logo Vigile (V dans cercle teal), formulaire username/password, bouton Sign in avec fond teal-400/hover teal-500. La même ambiance sombre et propre que le reste.
 
-- Bouton Sign in : bordure `#1f1f1f`, text `#e4e4e4`, pas de fond coloré
-- L'input focus a une bordure `#00ff87` (seul endroit où le vert apparaît sur cette page)
+#### Dashboard (couvert par la maquette — sections #main)
 
----
+Voir le code HTML de `mockup_directions.html` pour les détails exacts. Structure :
 
-### Dashboard
+1. **Héro Découverte** (en haut) : bannière avec suggestion de plugin (ex: Nextcloud). Gradient bleu, bouton "Intégrer le Plugin" bleu avec glow.
+2. **Ligne "Signes Vitaux"** : carrousel horizontal de cards stats (CPU, RAM, DISK, etc.) avec icônes dans cercles colorés, valeurs en badge, barre de progression colorée avec glow.
+3. **Ligne Docker** : carrousel de cartes containers. Header gradient, statut "Up X days" avec point vert, infos image/ports, boutons Logs + Redémarrer. Dernière carte = "Déployer un conteneur" en dashed border.
+4. **Ligne Plex (exemple plugin)** : carrousel de cartes média avec cover image, barre de progression.
 
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │                                                     │
-│  Vigile  │  Nodes                       (3)                    │
-│          │                                                     │
-│  ■  Nodes│  ┌──────────────────────────────────────────────┐   │
-│  💬  Chat│  │  sim-prod  ● CONNECTED     Debian 12  x86_64 │   │
-│  □  Actns│  │  CPU 72%  ████████░░  RAM 32%  ████░░░░      │   │
-│  ...     │  │  DISK 47%  ████████░░  2 failed services     │   │
-│  Audit   │  ├──────────────────────────────────────────────┤   │
-│          │  │  web-01  ○ LOST     Ubuntu 24.04             │   │
-│          │  │  Last contact: 3h ago                        │   │
-│          │  └──────────────────────────────────────────────┘   │
-│          │                                                     │
-│          │  ┌────────────────────────────────────────────┐     │
-│          │  │ 💬 Ask AI...                  ▶            │     │
-│          │  └────────────────────────────────────────────┘     │
-│          │                                                     │
-└──────────┴─────────────────────────────────────────────────────┘
-```
+#### Node Detail (non couvert par la maquette — extrapoler le style)
 
-- Stats cards : pas de cards. Juste le nombre en haut (`Nodes (3)`)
-- Node list : cartes denses, bordure `#1f1f1f`, padding `p-3`
-- Badge CONNECTED : border `#00ff87`, text `#00ff87`, pas de fond
-- Badge LOST : border `#f5a623`, text `#f5a623`
-- Mini chat input en bas : barre de recherche simple, pas de card
+Breadcrumb ← Nodes / nom-du-noeud. Badge statut (CONNECTED teal, LOST amber). Infos hostname/OS/arch.
+Barre de métriques inline (CPU, RAM, DISK, Uptime) avec barres de progression colorées.
+Tabs underline : Stats | Services | Containers | Logs — chaque tab charge un fragment HTMX.
+Le style des cards suit le glassmorphism de la maquette (bordures white/5, rounded-2xl, etc.).
+
+#### Chat — Copilot Sidebar (couvert par la maquette — sidebar droite)
+
+Le copilot est une **sidebar droite permanente** sur toutes les pages, pas une page séparée.
+Voir `mockup_directions.html` → élément `<aside>` :
+
+- Header "Vigile Copilot" avec point vert "Connecté au système"
+- Messages IA : bulle glassmorphic `bg-white/5 border border-white/10 rounded-2xl rounded-tl-sm`
+- Messages user : bulle `bg-teal-500/10 border border-teal-500/20` alignée à droite
+- Propositions d'actions : carte avec bordure bleue/teal, bouton "Lancer" coloré
+- Input : `bg-[#111114] rounded-2xl border border-white/10`, avec suggestions rapides
+- Gradient subtil en fond : `bg-gradient-to-b from-teal-500/10 to-transparent`
+
+#### Proposals (page dédiée, non couverte par la maquette)
+
+Liste de propositions avec le même style glassmorphic. Filtres Pending/All/History.
+Chaque ligne = petite card avec action, raison, statut, boutons Approve (teal) / Reject (muted).
+Les propositions approuvées/refusées en opacité réduite avec icône ✓ ou ✗.
+
+#### Audit Trail (page dédiée, non couverte par la maquette)
+
+Timeline verticale inversée. Chaque entrée = petite card glassmorphic avec :
+`#42 10:32 PROPOSAL_APPROVED flavio sim-prod → action détail`
+Badge de vérification SHA256 en bas de page (vert si intact, rouge si corrompu).
+Filtre par type d'action et date.
+
+#### Plugins (page dédiée + entrée sidebar)
+
+Grid de cards plugins. Chaque card = icône + nom + description + statut (● Active en teal, ○ Install en muted).
+Style glassmorphic comme les cards Docker de la maquette.
 
 ---
 
-### Node Detail
+## Design Philosophy
 
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │  ← Nodes  /  sim-prod                               │
-│          │                                                     │
-│          │  ● CONNECTED  sim-prod                              │
-│          │  Debian 12  x86_64                                  │
-│          │                                                     │
-│          │  CPU  72%   RAM  32%   DISK  47%   Uptime  12h     │
-│          │  ──────────────────────────────────────────────     │
-│          │  [ Stats ]  [ Services ]  [ Containers ]  [ Logs ]  │
-│          │                                                     │
-│          │  ┌──────────────────────────────────────────────┐   │
-│          │  │ ● ssh.service     active  running            │   │
-│          │  │ ● nginx.service   active  running            │   │
-│          │  │ ● docker.service  active  running            │   │
-│          │  │ ● mysql.service   failed  failed    [Restart] │   │
-│          │  │ ○ apache2.service inactive dead              │   │
-│          │  │ ● prometheus.svc  failed  failed    [Restart] │   │
-│          │  └──────────────────────────────────────────────┘   │
-│          │                                                     │
-└──────────┴─────────────────────────────────────────────────────┘
-```
+### Principe : compréhension immédiate
 
-- Metrics en ligne (pas de gauges, pas de graphiques pour le prototype)
-- Tabs underline style — pas de fond sur le tab actif, juste bordure bottom `#00ff87`
-- Services list : chaque ligne compacte, texte `JetBrains Mono`
+L'utilisateur doit comprendre l'état de son serveur **en un coup d'œil**,
+sans avoir à apprendre une interface. La maquette illustre ce principe :
+aucune info détaillée apparente, mais tout est là et parlant.
 
-#### Logs tab
+- Les carrousels rendent l'information explorable naturellement
+- Les couleurs (teal = OK, red = attention, amber = warning) sont intuitives
+- Les barres de progression avec glow donnent une lecture immédiate des métriques
+- Les badges de statut (points verts/rouges) sont universels
 
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │  [ Stats ]  [ Services ]  [ Containers ]  [ Logs ]  │
-│          │                                                     │
-│          │  Service: [ssh.service ▼]  Lines: [50 ▼]           │
-│          │                                                     │
-│          │  ┌──────────────────────────────────────────────┐   │
-│          │  │ May 15 06:12:01 sshd[1123]: Failed password  │   │
-│          │  │ May 15 06:12:05 sshd[1124]: Failed password  │   │
-│          │  │ May 15 09:00:00 sshd[1250]: Accepted pubkey │   │
-│          │  │ May 15 09:45:10 sshd[1280]: Invalid user    │   │
-│          │  │                                          │   │   │
-│          │  └──────────────────────────────────────────────┘   │
-│          │                                                     │
-└──────────┴─────────────────────────────────────────────────────┘
-```
+### Guidelines pour les écrans non couverts
 
-- LogViewer = `ScrollArea` avec fond `#0a0a0a`, texte `JetBrains Mono` 12px
-- Auto-scroll vers le bas, bouton "pause" si l'utilisateur remonte
-- Bordure fine `#1f1f1f`, pas d'ombre
+Quand tu construis une page qui n'est pas dans la maquette :
 
----
-
-### Chat IA
-
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │  💬 Assistant                       [New chat]      │
-│          │                                                     │
-│          │  ┌──────────────────────────────────────────────┐   │
-│          │  │  Moi                            10:32        │   │
-│          │  │  │ Le serveur nginx semble lent             │   │
-│          │  ├──────────────────────────────────────────────┤   │
-│          │  │  Vigile                         10:33        │   │
-│          │  │  │  Je vais vérifier nginx...               │   │
-│          │  │  │  STATUT : nginx.service active (running) │   │
-│          │  │  │                                           │   │
-│          │  │  │  ┌────────────────────────────────────┐  │   │
-│          │  │  │  │ 💡 RESTART_SERVICE  risk: LOW     │  │   │
-│          │  │  │  │ Redémarrer nginx pour recharger   │  │   │
-│          │  │  │  │ la configuration                  │  │   │
-│          │  │  │  │ [Approve]       [Reject]          │  │   │
-│          │  │  │  └────────────────────────────────────┘  │   │
-│          │  ├──────────────────────────────────────────────┤   │
-│          │  │  Moi                            10:35        │   │
-│          │  │  │ Oui redémarre                            │   │
-│          │  ├──────────────────────────────────────────────┤   │
-│          │  │  Vigile                         10:36        │   │
-│          │  │  │ ✅ nginx.service restarted               │   │
-│          │  │  │ Result: Service nginx restarted          │   │
-│          │  └──────────────────────────────────────────────┘   │
-│          │                                                     │
-│          │  ┌──────────────────────────────────────────────┐   │
-│          │  │ Ask...                                     ▶ │   │
-│          │  └──────────────────────────────────────────────┘   │
-│          │                                                     │
-└──────────┴─────────────────────────────────────────────────────┘
-```
-
-- Messages IA distingués par `border-left: 1px solid #1f1f1f` — pas de bulle colorée
-- Messages utilisateur sans bordure
-- Proposal card : bordure `#1f1f1f`, pas de fond. Bouton Approve = seul élément `#00ff87` de toute l'interface
-- Loading state : spinner discret `JetBrains Mono` + points, pas de skeleton
-- Streaming SSE : curseur clignotant pendant la génération
-
----
-
-### Proposals
-
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │  Actions                         [Pending] [All]    │
-│          │                                                     │
-│          │  ● mysql.service  ──  RESTART_SERVICE               │
-│          │  MySQL a crashé (OOM). Redémarrage nécessaire.      │
-│          │  10:32  ·  sim-prod          [Approve]  [Reject]   │
-│          │                                                     │
-│          │  ○ LIST_SERVICES                                    │
-│          │  Diagnostic de routine.                             │
-│          │  10:30  ·  sim-prod          [Approve]  [Reject]   │
-│          │                                                     │
-│          │  ✓ nginx.service  ──  RESTART_SERVICE               │
-│          │  Redémarré avec succès.   09:15  ·  web-01          │
-│          │                                                     │
-│          │  ✗ READ_LOGS                                        │
-│          │  Pas nécessaire.   08:45  ·  sim-prod               │
-│          └─────────────────────────────────────────────────────┘
-```
-
-- Pas de cartes — chaque proposition est une ligne dense
-- Filtre Pending/All en haut (Select ou tabs simples)
-- Risque pas affiché (c'est dans la carte détaillée du chat)
-- Action rapide Approve/Reject inline
-
----
-
-### Audit Log
-
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │  Audit Trail                     🔍 Filter         │
-│          │                                                     │
-│          │  #42  10:32  PROPOSAL_APPROVED  flavio  sim-prod   │
-│          │       → RESTART_SERVICE nginx.service              │
-│          │  #41  10:30  PROPOSAL_CREATED   ai      sim-prod   │
-│          │       → RESTART_SERVICE (LOW)                      │
-│          │  #40  10:30  INTENT_RESULT      system  sim-prod   │
-│          │       → LIST_SERVICES (45 services)                │
-│          │                                                     │
-│          │  ✅ SHA256 chain intact — 42 entries                │
-│          └─────────────────────────────────────────────────────┘
-```
-
-- Liste chronologique inversée
-- Badge de vérification d'intégrité en bas
-- Police `JetBrains Mono` pour les IDs et timestamps
-
----
-
-### Plugin Catalogue
-
-```
-┌──────────┬─────────────────────────────────────────────────────┐
-│          │  Plugins                         🔍 Search         │
-│          │                                                     │
-│          │  ┌────────────────────┐ ┌────────────────────┐     │
-│          │  │ 📊 Metrics         │ │ 🐳 Docker           │     │
-│          │  │ CPU/RAM/DISK       │ │ Container mgmt     │     │
-│          │  │ ● Active           │ │ ● Active           │     │
-│          │  └────────────────────┘ └────────────────────┘     │
-│          │                                                     │
-│          │  ┌────────────────────┐ ┌────────────────────┐     │
-│          │  │ ⚙️ Systemd         │ │ ☁️ Backup           │     │
-│          │  │ Service management │ │ Auto backup         │     │
-│          │  │ ● Active           │ │ ○ Install           │     │
-│          │  └────────────────────┘ └────────────────────┘     │
-│          └─────────────────────────────────────────────────────┘
-```
-
-- Grille simple de cards sans fioritures
-- Statut : `● Active` (text `#00ff87`) ou `○ Install` (text muted)
-
----
-
-## 6. Philosophie de design — Pourquoi ces choix
-
-Cette section explique le raisonnement derrière la direction visuelle.
-Elle est ici pour que tu puisses prendre des décisions cohérentes
-quand tu rencontres un cas non couvert par les specs.
-
-### Le problème du "AI aesthetic"
-
-La majorité des interfaces générées par IA aujourd'hui partagent les mêmes
-marqueurs visuels : gradients violet-bleu, orbes lumineux en arrière-plan,
-cartes avec `shadow-lg` coloré, icônes dans des ronds colorés, grille de
-3 features symétrique, boutons en gradient. Ces patterns sont devenus un
-signal immédiat de "template SaaS généré". Quand un utilisateur voit cette
-esthétique, il ne ressent pas l'outil — il ressent le template.
-
-L'objectif ici est l'inverse : une interface qui ressemble à quelque chose
-qu'un ingénieur avec du goût aurait construit pour lui-même.
-
-### Le principe de la contrainte comme identité
-
-Un bon design n'est pas celui qui a le plus d'options visuelles — c'est
-celui qui a fait des choix irréversibles assumés.
-
-- **Une seule couleur d'accent** (vert terminal `#00ff87`), jamais utilisée
-  de façon décorative — uniquement pour signaler "actif" ou "action principale"
-- **Typographie monospace** pour toutes les données machine — parce que
-  c'est sémantiquement juste, pas pour faire "hacker"
-- **Noir quasi-total** plutôt que gris slate — parce que le gris slate
-  c'est le défaut shadcn, et le défaut n'a pas d'identité
-
-Ces contraintes créent une cohérence immédiate : chaque fois que tu vois
-du vert, tu sais que c'est important. Chaque fois que tu vois de la
-monospace, tu sais que c'est une donnée machine.
-
-### La règle du fond neutre + moment d'accent
-
-L'œil humain est attiré par le contraste. Si tout est coloré, rien n'est
-important. Si la quasi-totalité de l'interface est monochrome et dense,
-alors un seul élément vert suffit à diriger l'attention vers l'action
-critique. C'est la raison pour laquelle le bouton **Approve** est le seul
-élément vraiment vert de toute l'interface — quand tu arrives sur la
-Dialog de validation, tu n'as aucun doute sur quoi cliquer.
-
-### Densité comme respect de l'utilisateur
-
-Une interface ops n'est pas une landing page. L'utilisateur n'a pas besoin
-d'être guidé avec des illustrations et du padding généreux — il sait
-pourquoi il est là. La densité signale : cet outil te fait confiance.
-
-De l'espacement excessif sur un dashboard signale l'inverse : on a peur
-que tu sois perdu. Espacement serré, typo petite, information maximale
-par viewport — c'est un choix de respect, pas une économie de travail.
-
-### Ce qu'il faut éviter à tout prix
-
-Si à un moment tu te demandes "est-ce que ça fait trop générique ?",
-applique ce test : est-ce que ce pattern pourrait se retrouver sur
-n'importe quel starter template shadcn/ui sur GitHub ? Si oui, c'est
-à supprimer ou à tordre.
-
-Les patterns les plus dangereux :
-- Icône dans un rond coloré pour illustrer une feature
-- Section centrée avec titre + sous-titre + 3 cards symétriques
-- Top bar avec avatar, cloche de notification, et barre de recherche
-- Sidebar avec accordéon de catégories
-- Toast pour signaler un succès important (le feedback doit être inline,
-  dans le contexte de l'action)
-
-### La référence mentale à garder
-
-Imagine que **htop** et **Linear.app** ont eu un enfant. La densité de l'un,
-le soin typographique de l'autre. Tout ce qui ne serait pas dans l'un ou
-l'autre de ces deux outils est probablement superflu.
+1. **Reproduis le système visuel** : glassmorphism, teal accent, dark theme
+2. **Pense "coup d'œil"** : la valeur principale doit être visible sans scroller
+3. **Évite l'abstraction** : pas de jargon technique non nécessaire
+4. **Utilise les patterns de la maquette** : les cards vitals, les containers cards, le copilot
+5. **Densité mais pas sacrifice** : les infos sont denses mais aérées par le glassmorphism
 
 ---
 
 ## Comportements critiques (prototype)
 
-- **Badge statut nœud** : polling. Se met à jour sans reload
-- **Approve button** : désactivé pendant exécution, loading discret (JetBrains Mono + spinner), résultat inline — pas de toast
-- **Logs panel** : auto-scroll bas. Bouton "pause" si remonte
-- **Chat** : messages IA distingués par `border-left` seulement (pas de bulle). Streaming visible avec curseur clignotant
+- **Badge statut nœud** : polling HTMX `every 15s`. Se met à jour sans reload.
+- **Carrousels stats** : polling HTMX `every 15s` pour les métriques (metrics fragment).
+- **Approve button** : désactivé pendant exécution. Résultat inline (pas de toast).
+- **Logs panel** : chargement manuel via click. Pas de polling automatique.
+- **Copilot sidebar** : présente sur toutes les pages. Contexte adaptatif (la page courante influence les prompts/suggestions).
+- **Chat streaming** : EventSource JS. Curseur clignotant pendant génération. Messages IA en bulle glassmorphic.
+- **Navigation** : HTMX swaps dans `#main-content`. La sidebar et le copilot ne sont pas re-rendus.
 
 ---
 
@@ -457,22 +255,7 @@ par de nouvelles routes Jinja2 dans un routeur dédié `master/api/frontend.py`.
 
 ### Routes frontend (nouvelles)
 
-| Route | Méthode | Template | Rôle |
-|---|---|---|---|
-| `GET /login` | GET | `login.html` | Page login |
-| `POST /login` | POST | — | Submit login → redirect / |
-| `GET /` | GET | `dashboard.html` | Dashboard |
-| `GET /nodes/{id}` | GET | `node.html` | Détail nœud |
-| `GET /nodes/{id}/services` | GET | `_services.html` | Fragment services |
-| `GET /nodes/{id}/containers` | GET | `_containers.html` | Fragment containers |
-| `GET /nodes/{id}/logs` | GET | `_logs.html` | Fragment logs |
-| `GET /nodes/{id}/metrics` | GET | `_metrics.html` | Fragment stats (poll) |
-| `GET /chat` | GET | `chat.html` | Page chat |
-| `GET /chat/stream` | GET | SSE | Streaming chat (EventSource) |
-| `GET /proposals` | GET | `proposals.html` | Propositions |
-| `GET /audit` | GET | `audit.html` | Audit |
-| `GET /plugins` | GET | `plugins.html` | Plugins |
-| `GET /settings` | GET | `settings.html` | Settings |
+Voir tableau plus haut dans § Pages & Routing.
 
 ### API REST (existante, utilisée par templates)
 
@@ -505,7 +288,7 @@ master/
 ├── db/              # (inchangé)
 ├── plugins/         # (inchangé)
 └── templates/       # ← NOUVEAU : templates Jinja2
-    ├── base.html            # Squelette (sidebar + #main)
+    ├── base.html            # Squelette (sidebar + #main + copilot)
     ├── login.html
     ├── dashboard.html
     ├── node.html            # Détail nœud (tabs)
@@ -513,19 +296,15 @@ master/
     ├── _containers.html     # Fragment liste containers (HTMX)
     ├── _logs.html           # Fragment logs (HTMX)
     ├── _metrics.html        # Fragment stats bar (HTMX poll)
-    ├── chat.html
-    ├── _chat_messages.html  # Fragment messages chat (SSE)
     ├── proposals.html
     ├── audit.html
-    ├── plugins.html
-    └── settings.html
+    └── plugins.html
 
 static/             # ← NOUVEAU : fichiers statiques
 ├── css/
-│   └── app.css     # Tailwind build
+│   └── app.css     # Tailwind custom styles (si besoin, sinon CDN)
 ├── js/
 │   └── chat.js     # EventSource SSE (seul JS custom)
-└── fonts/          # JetBrains Mono + Inter (woff2)
 ```
 
 **Principe HTMX** : les vues sont des templates Jinja2. Les fragments `_*.html` sont
@@ -537,24 +316,24 @@ rendus sans layout, injectés dans `#main` par HTMX. Pas de build React, pas de 
 
 | Étape | Composant | Dépend de |
 |---|---|---|
-| 1 | Setup Tailwind + static files + base template | Rien |
-| 2 | Sidebar + layout `base.html` | Rien |
-| 3 | Login page + auth + session cookie | Layout |
-| 4 | Dashboard template + node list + polling HTMX | Layout, auth |
-| 5 | Node detail template + tabs (services, containers, metrics) | Dashboard |
-| 6 | LogViewer template + lazy load HTMX | NodeDetail |
-| 7 | Chat page + SSE EventSource (+ chat.js) | Layout, auth |
-| 8 | Proposals page + approve/reject HTMX | Chat |
+| 1 | Setup static dirs + base template + CDN links | Rien |
+| 2 | Sidebar + Header + Copilot layout `base.html` | Rien |
+| 3 | Login page + auth session cookie + frontend router | Layout |
+| 4 | Dashboard template (carrousels, hero, polling HTMX) | Layout, auth |
+| 5 | Node detail template + tabs (services, containers, logs) | Dashboard |
+| 6 | LogViewer + metrics fragments HTMX | NodeDetail |
+| 7 | Chat SSE streaming (EventSource + endpoint) | Layout, auth |
+| 8 | Proposals page + approve/reject HTMX | Layout, auth |
 | 9 | Audit page | Layout, auth |
-| 10 | Plugins + Settings pages | Layout, auth |
-| 11 | Routeur frontend `master/api/frontend.py` + intégration main.py | Tout |
+| 10 | Plugins page | Layout, auth |
 
 ## Estimation
 
 | Phase | Sessions |
 |---|---|
-| Setup Tailwind + base template | 1 |
-| Login + Dashboard + Node Detail | 1 |
-| Logs + Chat + Proposals | 1-2 |
-| Audit + Plugins + Settings + routage | 1 |
-| **Total** | **4-5** |
+| base.html layout + sidebar + copilot | 1 |
+| Login + Dashboard | 1 |
+| Node Detail + Logs + Metrics | 1 |
+| Chat SSE + Proposals | 1 |
+| Audit + Plugins | 1 |
+| **Total** | **~5** |

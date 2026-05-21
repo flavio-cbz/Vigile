@@ -195,6 +195,11 @@ class PluginManager:
             plugin_name = fname[:-3]
             plugin_path = os.path.join(plugins_dir, fname)
 
+            # Dedup: skip if already loaded
+            if plugin_name in self._loaded_plugins:
+                logger.debug("Plugin '%s' already loaded — skipped.", plugin_name)
+                continue
+
             try:
                 spec = importlib.util.spec_from_file_location(
                     f"vigile.plugins.{plugin_name}", plugin_path

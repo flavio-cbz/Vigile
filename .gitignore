@@ -1,38 +1,96 @@
 # Vigile — .gitignore
+# Version-controlled ignore patterns
 
-# Python
+## Python — Runtime & Build
 __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
+*.so
 dist/
 build/
+.eggs/
+*.whl
 
-# Virtual environment
+## Python — Virtual Environment
 .venv/
 venv/
+env/
+env.bak/
+venv.bak/
 
-# Environment files
+## Python — Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.mypy_incremental/
+.ruff_cache/
+*.cover
+
+## Environment & Configuration
 .env
+.env.local
+.env.*.local
 
-# Database
+## Database
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 
-# Cryptographic keys (NEVER commit these)
+## Cryptographic keys (NEVER commit these!)
 *.key
+*.pem
+*.p12
 data/
 
-# OS files
-.DS_Store
-Thumbs.db
+## Go Build
+worker/vigile-worker
+*.o
+*.a
 
-# IDE
+## OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+## IDE & Editors
 .vscode/
+.cursor/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.classpath
 
-# Temp
+## Logs
+*.log
+*.log.*
+
+## Temp & Build Artifacts
 /tmp/
+/temp/
+*.tmp
+.pytest_tmp/
+
+## Docker Build Artifacts
+.dockerignore
+.docker/
+
+## Documentation & Rules (local only)
+RULES.md
+AGENTS.md
+
+## Tool-specific Artifacts
+.slim/
+.sisyphus/
+.playwright-mcp/
+.browserstack-local/
+

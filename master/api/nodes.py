@@ -22,7 +22,6 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role
-from master.config import settings
 from master.core.audit import log_action
 from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
@@ -283,7 +282,7 @@ async def generate_join_token(
         details={"node_name": body.name, "ip_prefix": body.ip_prefix},
     )
 
-    master_url = settings.master_url
+    master_url = request.app.state.master_url
     curl_command = (
         f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
         f"sh -s -- --token {token} --master {master_url}"
@@ -317,7 +316,7 @@ async def get_kickstart_script(request: Request) -> PlainTextResponse:
     in Phase 2 of the enrollment process.
     """
     # Sanitize: escape $ to prevent bash variable expansion in the generated script
-    safe_url = settings.master_url.replace("$", "\\$")
+    safe_url = request.app.state.master_url.replace("$", "\\$")
     script = KICKSTART_TEMPLATE.replace("$master_url", safe_url)
     return PlainTextResponse(
         content=script,
@@ -335,10 +334,12 @@ async def list_nodes(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     state: str | None = Query(default=None, description="Filter by state"),
+    limit: int = Query(default=50, ge=1, le=200, description="Max results"),
+    offset: int = Query(default=0, ge=0, description="Result offset for pagination"),
     nm: NodeManager = Depends(get_node_manager),
 ) -> list[NodeResponse]:
-    """Return a list of all registered nodes, optionally filtered by state."""
-    nodes = await nm.list_nodes(db, state=state)
+    """Return a list of registered nodes, with optional pagination."""
+    nodes = await nm.list_nodes(db, state=state, limit=limit, offset=offset)
     return [NodeResponse(**_node_to_response(n)) for n in nodes]
 
 
@@ -486,6 +487,22 @@ async def get_node_stats(
         node_id=node_id,
         snapshots=[MetricsSnapshotResponse(**r) for r in rows],
     )
+
+
+@router.get(
+    "/verify-chain",
+    response_model=dict,
+    summary="Verify audit chain integrity with optional pagination (Admin only)",
+)
+async def verify_chain(
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("admin"))],
+    max_entries: int | None = Query(default=None, ge=1, le=100000, description="Max entries to verify"),
+) -> dict:
+    """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
+    from master.core.audit import verify_chain as _verify_chain
+    report = await _verify_chain(db, max_entries=max_entries)
+    return report
 
 
 @router.get(

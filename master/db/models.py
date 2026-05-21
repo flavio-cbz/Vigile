@@ -74,15 +74,33 @@ CREATE TABLE IF NOT EXISTS worker_tokens (
 # ---------------------------------------------------------------------------
 CREATE_USERS = """
 CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,       -- UUID
-    username      TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,          -- bcrypt hash via passlib
-    role          TEXT NOT NULL DEFAULT 'viewer',
-                                          -- viewer | operator | admin
-    is_active     INTEGER NOT NULL DEFAULT 1,
-    created_at    REAL NOT NULL,
-    updated_at    REAL NOT NULL,
-    last_login    REAL                    -- Unix timestamp, nullable
+    id                   TEXT PRIMARY KEY,       -- UUID
+    username             TEXT NOT NULL UNIQUE,
+    password_hash        TEXT NOT NULL,          -- bcrypt hash via passlib
+    role                 TEXT NOT NULL DEFAULT 'viewer',
+                                                 -- viewer | operator | admin
+    is_active            INTEGER NOT NULL DEFAULT 1,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    created_at           REAL NOT NULL,
+    updated_at           REAL NOT NULL,
+    last_login           REAL                    -- Unix timestamp, nullable
+)
+"""
+
+# ---------------------------------------------------------------------------
+# refresh_tokens (invalidation & theft detection)
+# ---------------------------------------------------------------------------
+CREATE_REFRESH_TOKENS = """
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id          TEXT PRIMARY KEY,        -- UUID
+    user_id     TEXT NOT NULL,           -- FK users.id
+    token_hash  TEXT NOT NULL UNIQUE,    -- SHA256 of raw token
+    family_id   TEXT NOT NULL,           -- Token family (for rotation/theft detection)
+    issued_at   REAL NOT NULL,
+    expires_at  REAL NOT NULL,
+    revoked     INTEGER NOT NULL DEFAULT 0,
+    revoked_at  REAL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 )
 """
 
@@ -181,6 +199,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_metrics_snapshots_node_time ON metrics_snapshots(node_id, collected_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_proposals_status ON action_proposals(status)",
     "CREATE INDEX IF NOT EXISTS idx_proposals_node ON action_proposals(node_id)",
+    "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family ON refresh_tokens(family_id)",
 ]
 
 # All CREATE statements in dependency order
@@ -189,6 +209,7 @@ ALL_TABLES = [
     CREATE_JOIN_TOKENS,
     CREATE_WORKER_TOKENS,
     CREATE_USERS,
+    CREATE_REFRESH_TOKENS,
     CREATE_AUDIT_LOG,
     CREATE_METRICS_SNAPSHOTS,
     CREATE_PROPOSALS,
