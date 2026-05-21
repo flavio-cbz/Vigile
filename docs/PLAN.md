@@ -2,13 +2,24 @@
 
 > Fleet Manager intelligent pour serveurs et homelabs.
 > Zero-Trust. Zéro Dépendance Tierce sur le Core. Zéro SSH.
-> Vision long terme : système autonome dirigé par l'IA (Sprints 7→11).
+> Construit pour le homelab, architecturé pour la flotte.
 
 ---
 
 ## Vision
 
-Une plateforme d'administration de flotte de serveurs en deux parties : un **Master Node** qui centralise l'intelligence, et des **Worker Nodes** (agents binaires autonomes) déployés sur chaque machine. L'IA analyse, propose, l'humain approuve, le Worker exécute. Jamais l'inverse.
+Une plateforme d'administration de serveurs en deux parties : un **Master Node** qui centralise l'intelligence, et des **Worker Nodes** (agents binaires autonomes) déployés sur chaque machine. L'IA analyse, propose, l'humain approuve, le Worker exécute. Jamais l'inverse.
+
+### Ce que Vigile résout
+
+1. **Le shell root donné à une IA est dangereux** — Vigile interpose un Worker avec une whitelist de commandes immuable. L'IA ne touche jamais un terminal.
+2. **Monitorer depuis le serveur qu'on surveille est une erreur** — Le Master vit sur un VPS stable, indépendant du homelab.
+3. **Les outils d'admin sont trop complexes** — Vigile est un copilote : tu poses une question en langage naturel, il propose une solution, tu approuves.
+
+### Public cible
+
+- **Aujourd'hui** : administrateurs de homelab (1-5 machines, Docker, Home Assistant, Plex)
+- **Demain** : petites équipes ops gérant des dizaines de serveurs
 
 Le différenciateur n'est pas la liste de features. C'est la confiance : chaque ligne de code du core est lisible, auditable, sans dépendance cachée.
 
@@ -16,7 +27,7 @@ Le différenciateur n'est pas la liste de features. C'est la confiance : chaque 
 
 ## Philosophie Technique : Zéro Dépendance Tierce sur le Core
 
-La règle est simple. Pour chaque partie complexe du système, on identifie le projet open source de référence, on étudie son code source, on extrait le pattern, on l'implémente nativement. Pas d'installation de la librairie. Pas de `pip install litellm`. Pas de `npm install open-webui`.
+La règle est simple. Pour chaque partie complexe du système, on identifie le projet open source de référence, on étudie son code source, on extrait le pattern, on l'implémente nativement. Pas d'installation de la librairie.
 
 Ce que ça garantit :
 
@@ -25,50 +36,57 @@ Ce que ça garantit :
 - **Auditabilité totale** : chaque ligne est la nôtre
 - **Déploiement trivial** : un seul binaire, zéro configuration d'environnement
 
-Les seules dépendances acceptées sont les fondations bas-niveau stables et incontournables :
+### Dépendances acceptées
 
-- Master : `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`, `passlib`, `httpx`
-- Worker : **zéro import externe** — stdlib Go uniquement (`net/http`, `crypto/ed25519`, `encoding/json`, `os/exec`)
-- Frontend : React, TailwindCSS, shadcn/ui
+| Couche | Dépendances | Justification |
+|--------|-------------|---------------|
+| **Master (Python)** | `fastapi`, `uvicorn`, `aiosqlite`→`asyncpg`, `python-jose`, `passlib`, `httpx`, `pydantic` | Fondations bas-niveau stables |
+| **Worker (Go)** | **Zéro import externe** — stdlib uniquement | Sécurité maximale |
+| **Frontend (React)** | `react`, `vite`, `tailwindcss`, `shadcn/ui`, `recharts`, `zustand` | Outils de construction UI |
+| **Dev tooling** | `pytest`, `ruff`, `mypy` | Qualité de développement (pas en prod) |
+
+> **Règle** : La whitelist runtime (Master + Worker) est sacrée. Le dev tooling (pytest, linters) est séparé et n'impacte pas le déploiement.
 
 ---
 
 ## Sources d'Inspiration (Code Étudié, Pas Installé)
 
 | Projet Open Source | Ce qu'on étudie | Ce qu'on implémente nativement |
-| --- | --- | --- |
-| **LiteLLM** | Abstraction universelle provider, format OpenAI-compatible, gestion Base URL + headers | `LLMClient` : classe Python 150 lignes, httpx, stream SSE, zéro vendor lock |
-| **Open WebUI** | Format message chat, streaming SSE côté React, gestion historique de conversation | Composant `ChatPanel` React natif, SSE reader, store de conversation |
-| **Instructor** | Boucle retry sur structured outputs, validation Pydantic, prompt engineering | `StructuredLLM` : wrapper qui force un schéma Pydantic avec 3 tentatives max |
-| **Portainer Agent** | Reconnexion WebSocket avec backoff, heartbeat, dispatch d'intents, états de connexion | Intégralité du Worker Go |
-| **Pluggy (pytest)** | Système hookspec/hookimpl, registre de plugins, dispatch par hook | `PluginManager` : 80 lignes Python, dict de hooks, chargement dynamique |
-| **FastAPI-Users** | Génération JWT, validation, refresh token, hashing bcrypt, middleware d'auth | `SecurityManager` : JWT natif avec python-jose, bcrypt avec passlib |
-| **Netdata kickstart.sh** | Détection OS/arch, vérification SHA256 binaire, installation systemd/launchd, cleanup trap | `kickstart.sh` Vigile avec cascade d'installation et enrollment en deux phases |
-| **Dozzle** | Streaming de logs Docker via WebSocket, chunking, buffer circulaire | Plugin `LOG_STREAM` du Worker |
+|---|---|---|
+| **LiteLLM** | Abstraction universelle provider, format OpenAI-compatible | `LLMClient` : httpx, stream SSE, zéro vendor lock |
+| **Open WebUI** | Format message chat, streaming SSE côté React | Composant `ChatPanel` React natif, SSE reader |
+| **Instructor** | Boucle retry sur structured outputs, validation Pydantic | `StructuredLLM` : wrapper qui force un schéma Pydantic |
+| **Portainer Agent** | Reconnexion WebSocket avec backoff, heartbeat, dispatch | Worker Go intégral |
+| **Pluggy (pytest)** | Système hookspec/hookimpl, registre de plugins | `PluginManager` : dict de hooks, chargement dynamique |
+| **FastAPI-Users** | JWT, refresh token, hashing bcrypt, middleware d'auth | `SecurityManager` : JWT natif, bcrypt passlib |
+| **Netdata kickstart.sh** | Détection OS/arch, vérification SHA256, installation systemd | `kickstart.sh` Vigile |
+| **Dozzle** | Streaming de logs Docker via WebSocket | Plugin `LOG_STREAM` du Worker |
+| **Home Assistant** | Architecture plugin, automations (trigger→condition→action) | Automation Engine natif |
 
 ---
 
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────┐
-│                      MASTER NODE                        │
-│                                                         │
-│  ┌──────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ FastAPI  │  │     Core     │  │   LLM Client     │  │
-│  │ REST+WSS │  │ ────────── │  │  (natif httpx)   │  │
-│  │          │  │ Security    │  │                  │  │
-│  │ /api/*   │  │ Manager     │  │  → OpenAI        │  │
-│  │ /ws/*    │  │ Node        │  │  → Ollama        │  │
-│  │ /chat/*  │  │ Manager     │  │  → Anthropic     │  │
-│  │          │  │ Plugin      │  │  → n'importe qui │  │
-│  └──────────┘  │ Manager     │  └──────────────────┘  │
-│                └──────────────┘                         │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │                  SQLite (aiosqlite)             │    │
-│  │  nodes | tokens | users | audit_log | proposals │    │
-│  └─────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                         MASTER NODE                           │
+│                                                               │
+│  ┌──────────┐  ┌──────────────┐  ┌──────────────────┐       │
+│  │ FastAPI  │  │     Core     │  │   LLM Client     │       │
+│  │ REST+WSS │  │ ──────────── │  │  (natif httpx)   │       │
+│  │          │  │ Security     │  │                   │       │
+│  │ /api/*   │  │ Manager      │  │  → OpenAI        │       │
+│  │ /ws/*    │  │ Node         │  │  → Ollama        │       │
+│  │          │  │ Manager      │  │  → Anthropic     │       │
+│  │          │  │ Plugin       │  │  → Any OpenAI-   │       │
+│  │          │  │ Manager      │  │    compatible     │       │
+│  └──────────┘  └──────────────┘  └──────────────────┘       │
+│                                                               │
+│  ┌──────────────────────┐  ┌──────────────────────────────┐  │
+│  │ SQLite (dev/small)   │  │ React SPA (Vite build)       │  │
+│  │ PostgreSQL (prod)    │  │ Servi via /static/ en prod   │  │
+│  └──────────────────────┘  └──────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
               ↑ WSS (Workers initient, contournent NAT)
               │
     ┌─────────┴──────────┐
@@ -135,35 +153,6 @@ PHASE 2 — Claiming (Worker → Master, au démarrage du service)
 12. Connexion WSS bascule en mode opérationnel
 ```
 
-### JOIN_TOKEN (structure)
-
-```python
-# Côté Master — SecurityManager.generate_join_token()
-import hmac, hashlib, json, base64, time
-
-def generate_join_token(node_id: str, ip_prefix: str) -> str:
-    payload = {
-        "node_id": node_id,
-        "expires_at": int(time.time()) + 1800,  # 30 minutes
-        "ip_prefix": ip_prefix,
-        "single_use": True
-    }
-    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
-    sig = hmac.new(SERVER_SECRET_KEY, payload_b64.encode(), hashlib.sha256).hexdigest()
-    return f"{sig}.{payload_b64}"
-```
-
-### WORKER_TOKEN (cycle de vie)
-
-```text
-issued_at      ←─────────────── maintenant
-rotation_due   ←─────────────── +7 jours  (soft: Master envoie nouveau token à la prochaine connexion)
-expires_at     ←─────────────── +30 jours (hard: connexion refusée)
-revoked        ←─────────────── false (révocation manuelle par Admin)
-```
-
-Règle de sécurité : si le même WORKER_TOKEN est présenté depuis deux IPs simultanément → révocation immédiate + alerte Admin.
-
 ### États du Node (NodeManager)
 
 ```text
@@ -177,197 +166,63 @@ REVOKED      → Révocation manuelle ou sécurité, toute connexion refusée
 
 ### RBAC
 
-| Rôle | Lire les stats | Voir les logs | Approuver une action | Gérer les nodes | Gérer les users |
-| --- | --- | --- | --- | --- | --- |
+| Rôle | Stats | Logs | Approuver action | Gérer nodes | Gérer users |
+|---|---|---|---|---|---|
 | **Viewer** | ✓ | ✓ | ✗ | ✗ | ✗ |
 | **Operator** | ✓ | ✓ | ✓ | ✗ | ✗ |
 | **Admin** | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Audit Trail avec hash chaîné
 
-Chaque entrée contient le hash SHA256 de l'entrée précédente. Toute modification de la base est détectable.
-
-```python
-class AuditEntry(BaseModel):
-    id: str
-    timestamp: datetime
-    user_id: str
-    action: str
-    node_id: str
-    intent: dict
-    approved_by: str
-    previous_hash: str         # hash de l'entrée N-1
-    entry_hash: str            # sha256(previous_hash + timestamp + action + ...)
-```
+Chaque entrée contient le hash SHA256 de l'entrée précédente. Toute modification de la base est détectable. Append-only. Jamais de DELETE.
 
 ---
 
-## LLM Client Natif (inspiré de LiteLLM)
-
-Pattern extrait du code source de LiteLLM. Zéro import de la librairie.
-
-```python
-# core/llm_client.py — ~150 lignes, httpx uniquement
-import httpx, json
-from typing import AsyncIterator
-
-class LLMClient:
-    """
-    Client universel OpenAI-compatible.
-    Fonctionne avec OpenAI, Anthropic (via proxy), Ollama, OpenRouter,
-    Mistral, ou n'importe quel endpoint compatible.
-    """
-    def __init__(self, base_url: str, api_key: str, model: str):
-        self.base_url = base_url.rstrip("/")
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        self.model = model
-
-    async def complete(self, messages: list[dict], **kwargs) -> str:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers=self.headers,
-                json={"model": self.model, "messages": messages, **kwargs}
-            )
-            return r.json()["choices"][0]["message"]["content"]
-
-    async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
-        async with httpx.AsyncClient() as client:
-            async with client.stream("POST",
-                f"{self.base_url}/v1/chat/completions",
-                headers=self.headers,
-                json={"model": self.model, "messages": messages, "stream": True}
-            ) as r:
-                async for line in r.aiter_lines():
-                    if line.startswith("data: ") and line != "data: [DONE]":
-                        chunk = json.loads(line[6:])
-                        if token := chunk["choices"][0]["delta"].get("content"):
-                            yield token
-```
-
----
-
-## Structured LLM pour les ActionProposals (inspiré d'Instructor)
-
-Pattern extrait du code source d'Instructor. Zéro import de la librairie.
-
-```python
-# core/structured_llm.py
-from pydantic import BaseModel
-from typing import Type, TypeVar
-import json
-
-T = TypeVar("T", bound=BaseModel)
-
-class StructuredLLM:
-    def __init__(self, llm_client: LLMClient):
-        self.client = llm_client
-
-    async def create(self, response_model: Type[T], messages: list[dict], max_retries: int = 3) -> T:
-        schema = response_model.model_json_schema()
-        system_prompt = f"""Tu dois répondre UNIQUEMENT en JSON valide correspondant à ce schéma :
-{json.dumps(schema, indent=2)}
-Aucun texte avant ou après. Aucun bloc markdown."""
-
-        full_messages = [{"role": "system", "content": system_prompt}] + messages
-
-        for attempt in range(max_retries):
-            raw = await self.client.complete(full_messages)
-            try:
-                return response_model.model_validate_json(raw)
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise ValueError(f"Structured output failed after {max_retries} attempts: {e}")
-                full_messages.append({"role": "assistant", "content": raw})
-                full_messages.append({"role": "user", "content": f"Erreur de validation : {e}. Corrige."})
-```
-
----
-
-## Plugin Manager (inspiré de Pluggy)
-
-Pattern extrait du code source de Pluggy. Zéro import de la librairie.
-
-```python
-# core/plugin_manager.py — ~80 lignes
-from typing import Callable
-import importlib, os
-
-class PluginManager:
-    def __init__(self):
-        self._hooks: dict[str, list[Callable]] = {}
-
-    def register(self, hook_name: str, fn: Callable):
-        self._hooks.setdefault(hook_name, []).append(fn)
-
-    def call(self, hook_name: str, **kwargs):
-        results = []
-        for fn in self._hooks.get(hook_name, []):
-            result = fn(**kwargs)
-            if result is not None:
-                results.append(result)
-        return results
-
-    def load_plugins_from_dir(self, plugins_dir: str):
-        for fname in os.listdir(plugins_dir):
-            if fname.endswith(".py") and not fname.startswith("_"):
-                module_name = fname[:-3]
-                spec = importlib.util.spec_from_file_location(module_name, f"{plugins_dir}/{fname}")
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                if hasattr(module, "register"):
-                    module.register(self)
-
-# Un plugin s'écrit ainsi (plugins/docker_plugin.py) :
-def register(pm: PluginManager):
-    pm.register("get_supported_actions", lambda: ["RESTART_CONTAINER", "LIST_CONTAINERS", "READ_LOGS"])
-    pm.register("handle_intent", handle_intent)
-
-def handle_intent(intent: dict, node_id: str, node_ws):
-    if intent["action"] not in ["RESTART_CONTAINER", "LIST_CONTAINERS", "READ_LOGS"]:
-        return None
-    # dispatch vers le Worker via node_ws
-```
-
----
-
-## Worker (Go — Zéro Import Externe)
+## Worker & Registre de Commandes (Go — Zéro Import Externe)
 
 Le binaire Worker n'utilise que la stdlib Go. Aucun `go get`. Compilable sur n'importe quelle machine avec Go installé.
 
+### Architecture du Registre de Commandes
+
 ```text
-Packages stdlib utilisés :
-- crypto/ed25519      → génération keypair + signature challenge
-- crypto/sha256       → fingerprint machine-id
-- encoding/json       → sérialisation des messages
-- net/http            → connexion WebSocket (upgrade manuel ou golang.org/x/net/websocket si on accepte ce seul import x/)
-- os                  → lecture machine-id, écriture clés
-- time                → heartbeat, backoff
-- log                 → logs structurés vers stdout (collectés par systemd)
+WORKER GO (immuable, compilé dans le binaire)
+├── Liste des commandes autorisées (CommandID → CommandDef)
+├── Chemins absolus des binaires
+├── Patterns de validation des arguments (regex)
+├── Timeout par commande
+├── MaxOutputBytes par commande
+├── MaxInputBytes par commande
+├── Plancher de classification minimum (MinClassification)
+└── Classification par défaut (DefaultClassification)
+
+MASTER FASTAPI (configurable, stocké en base)
+├── Classification choisie par l'utilisateur, par serveur
+├── Ne peut JAMAIS descendre en dessous du plancher Worker
+├── Logique de confirmation selon classification
+├── Expiration des confirmations (30 secondes)
+└── Log d'audit de chaque commande exécutée/refusée
 ```
 
-Actions whitelist hardcodée dans le Worker :
+### Niveaux de classification des commandes
 
-```go
-var ALLOWED_ACTIONS = map[string]bool{
-    "GET_STATS":          true,
-    "READ_LOGS":          true,
-    "RESTART_CONTAINER":  true,
-    "LIST_CONTAINERS":    true,
-    "READ_CONFIG":        true,
-    "LIST_SERVICES":      true,
-}
+| Niveau | Comportement | Exemples |
+|--------|-------------|----------|
+| `READ_ONLY` | Exécution directe sans confirmation | `docker.ps`, `systemd.status` |
+| `AMBIGUOUS` | Avertissement d'exposition de données | `docker.logs`, `file.read.config` |
+| `DESTRUCTIVE` | Confirmation humaine obligatoire | `docker.stop`, `service.reload.nginx` |
 
-func handleIntent(intent Intent) IntentResult {
-    if !ALLOWED_ACTIONS[intent.Action] {
-        return IntentResult{Error: "action not in whitelist"}
-    }
-    // dispatch
-}
-```
+### Sécurité du Système de Fichiers
+
+- **ValidatedPath** : double vérification (blacklist immuable Worker + whitelist configurable Master)
+- **`docker.exec` décomposé** en 4 commandes distinctes (top, cp.out, exec.safe, exec.shell)
+- **Shells strictement interdits** dans `docker.exec.safe` (sh, bash, zsh, python, node)
+- **Path traversal impossible** : `filepath.Clean()` + `filepath.EvalSymlinks()` sur le chemin réel
+
+### Protections contre les Saturations de Ressources
+
+1. **`io.LimitReader`** : coupe la sortie à `MaxOutputBytes`, tue le processus
+2. **Timeout strict** : terminaison active via contexte
+3. **WebSocket Write Deadline** : 10s par envoi, abort si blocage
 
 ---
 
@@ -376,25 +231,16 @@ func handleIntent(intent Intent) IntentResult {
 Le LLM ne touche jamais un Worker directement.
 
 ```text
-Utilisateur tape une demande dans le ChatPanel
+Utilisateur pose une question dans le ChatPanel
            ↓
-Master reçoit → construit le contexte (état du node, métriques récentes)
+Master construit le contexte (état du node, métriques récentes)
            ↓
 LLMClient.stream() → ChatPanel affiche la réponse en streaming
            ↓
 Si une action est nécessaire :
 StructuredLLM.create(ActionProposal) → objet Python typé et validé
            ↓
-UI affiche la proposition :
-┌──────────────────────────────────────────┐
-│ 💡 Action proposée                       │
-│ Action    : RESTART_CONTAINER            │
-│ Container : nginx-prod                   │
-│ Risque    : MEDIUM                       │
-│ Raison    : "Le container répond 502..."│
-│                                          │
-│  [Approuver]          [Refuser]          │
-└──────────────────────────────────────────┘
+UI affiche la proposition avec boutons [Approuver] / [Refuser]
            ↓ (clic Approuver par un Operator ou Admin)
 Master route l'Intent JSON au Worker via WSS
            ↓
@@ -405,177 +251,438 @@ Résultat renvoyé au Master → Audit Trail signé
 
 ---
 
-## Structure des Dossiers
+## Structure des Dossiers (état cible)
 
 ```tree
 vigile/
 ├── master/
-│   ├── main.py
+│   ├── main.py                      # FastAPI entrypoint, lifespan
 │   ├── config.py                    # Settings depuis env vars
 │   ├── core/
 │   │   ├── security_manager.py      # JOIN_TOKEN, WORKER_TOKEN, Ed25519, JWT, RBAC
-│   │   ├── node_manager.py          # États nodes, WebSockets actives, heartbeat
-│   │   ├── plugin_manager.py        # Système de hooks natif (inspiré Pluggy)
+│   │   ├── node_manager.py          # États nodes, WebSockets, heartbeat
+│   │   ├── plugin_manager.py        # Hooks natif (inspiré Pluggy)
 │   │   ├── llm_client.py            # Client LLM universel (inspiré LiteLLM)
-│   │   └── structured_llm.py        # Structured outputs (inspiré Instructor)
+│   │   ├── structured_llm.py        # Structured outputs (inspiré Instructor)
+│   │   ├── action_proposal.py       # ActionProposal state machine
+│   │   ├── automation_engine.py     # Trigger → Condition → Action (Sprint 7)
+│   │   └── notification_manager.py  # Webhook, Ntfy, Email (Sprint 7)
 │   ├── api/
-│   │   ├── nodes.py                 # POST /generate-join, GET /kickstart.sh, binaires
-│   │   ├── chat.py                  # POST /chat (stream SSE), POST /chat/approve
 │   │   ├── auth.py                  # POST /auth/login, /auth/refresh
-│   │   └── admin.py                 # Gestion users, révocation tokens, audit log
+│   │   ├── nodes.py                 # Nodes CRUD + kickstart.sh + binaires
+│   │   ├── services.py              # Services + Containers
+│   │   ├── chat.py                  # POST /chat (SSE), proposals approve/reject
+│   │   ├── plugins.py               # Plugin CRUD (Sprint 6)
+│   │   ├── automations.py           # Automations CRUD (Sprint 7)
+│   │   └── deps.py                  # FastAPI DI
 │   ├── ws/
-│   │   └── worker_handler.py        # WebSocket /ws/worker/join — enrollment + opérationnel
+│   │   └── worker_handler.py        # WebSocket enrollment + opérationnel
 │   ├── plugins/
-│   │   ├── docker_plugin.py         # Actions Docker (si Docker détecté)
-│   │   ├── systemd_plugin.py        # Actions systemd (si Linux)
-│   │   └── metrics_plugin.py        # CPU, RAM, disque (cross-platform)
-│   └── db/
-│       ├── models.py                # Tables SQLite (nodes, tokens, users, audit, proposals)
-│       └── migrations.py            # Schema init
+│   │   ├── metrics_plugin.py        # CPU, RAM, disque (cross-platform)
+│   │   ├── docker_plugin.py         # Actions Docker
+│   │   ├── systemd_plugin.py        # Actions systemd
+│   │   ├── homeassistant_plugin.py  # Home Assistant (Sprint 6)
+│   │   └── plex_plugin.py           # Plex/Arr stack (Sprint 6)
+│   ├── db/
+│   │   ├── models.py                # DDL (SQLite → PostgreSQL)
+│   │   └── migrations.py            # Migrations versionnées
+│   ├── templates/                   # Jinja2 (legacy, conservé comme fallback)
+│   └── static/                      # Build React servi en prod
 │
-├── worker/
-│   ├── main.go
-│   ├── enrollment.go                # Génération Ed25519, handshake, stockage token
-│   ├── connection.go                # WebSocket, reconnexion backoff, heartbeat
-│   ├── dispatcher.go                # Whitelist + dispatch des intents
-│   ├── discovery.go                 # Détection Docker, systemd, métriques OS
-│   └── actions/
-│       ├── stats.go
-│       ├── logs.go
-│       └── containers.go
-│
-├── frontend/
+├── frontend/                        # React SPA (Sprint 5)
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── ChatPanel.tsx        # Chat streaming (inspiré Open WebUI)
-│   │   │   ├── ActionProposal.tsx   # Carte d'approbation Human-in-the-Loop
-│   │   │   ├── NodeCard.tsx         # État d'un node + métriques
-│   │   │   ├── LogViewer.tsx        # Terminal lecture seule (Xterm.js natif)
+│   │   │   ├── ChatPanel.tsx        # Chat streaming SSE
+│   │   │   ├── ActionProposal.tsx   # Human-in-the-Loop
+│   │   │   ├── NodeCard.tsx         # État node + métriques
+│   │   │   ├── LogViewer.tsx        # Logs temps réel
+│   │   │   ├── MetricsChart.tsx     # Graphiques Recharts
+│   │   │   ├── ServiceList.tsx      # Services systemd
+│   │   │   ├── ContainerList.tsx    # Containers Docker
 │   │   │   └── AuditLog.tsx         # Trail immuable
-│   │   └── lib/
-│   │       ├── ws.ts                # Client WebSocket Master ↔ Frontend
-│   │       └── sse.ts               # SSE reader pour le streaming LLM
-│   └── ...
+│   │   ├── pages/
+│   │   │   ├── Dashboard.tsx
+│   │   │   ├── NodeDetail.tsx
+│   │   │   ├── Proposals.tsx
+│   │   │   ├── Audit.tsx
+│   │   │   └── Plugins.tsx
+│   │   ├── lib/
+│   │   │   ├── api.ts               # Client API typé
+│   │   │   ├── sse.ts               # SSE reader pour streaming LLM
+│   │   │   └── auth.ts              # JWT auth + refresh
+│   │   └── store/
+│   │       ├── nodes.ts             # State management (Zustand)
+│   │       └── chat.ts
+│   ├── vite.config.ts
+│   ├── tailwind.config.ts
+│   └── package.json
+│
+├── worker/                          # Go binary (stdlib only)
+│   ├── main.go
+│   ├── wsclient.go                  # WebSocket RFC 6455 stdlib
+│   ├── enrollment.go                # Ed25519 handshake
+│   ├── connection.go                # Reconnect, heartbeat, STATUS_REPORT
+│   ├── dispatcher.go                # Whitelist + dispatch
+│   ├── discovery.go                 # OS/arch/hostname detection
+│   ├── stats.go                     # CPU/RAM/disk from /proc
+│   ├── logs.go                      # journalctl + file logs
+│   ├── containers.go                # Docker via Unix socket
+│   ├── services.go                  # systemd management
+│   └── Dockerfile                   # Multi-stage alpine
+│
+├── tests/
+│   ├── unit/                        # pytest (Sprint 4.5)
+│   ├── integration/                 # pytest + httpx
+│   └── conftest.py                  # Fixtures partagées
 │
 └── scripts/
-    ├── kickstart.sh                 # Script universel d'installation Worker
-    ├── build_worker.sh              # Cross-compile Go pour toutes les cibles
-    └── dev_setup.sh                 # Setup environnement de dev
+    ├── kickstart.sh                 # Installation Worker universelle
+    ├── setup_test.sh                # Docker Compose test stack
+    └── test_all_simulation.py       # Simulation tests
 ```
 
 ---
 
-## Sprints
+## Roadmap par Sprints
 
-### Sprint 1 — Core Sécurisé et Enrollment
+### Sprints terminés
 
-- `SecurityManager` : JOIN_TOKEN HMAC, challenge Ed25519, WORKER_TOKEN avec cycle de vie
-- `NodeManager` : registre des nodes, machine à états, dictionnaire WebSockets
-- `PluginManager` : chargement dynamique, système de hooks
-- API : `POST /api/nodes/generate-join`, `GET /api/nodes/kickstart.sh`, `GET /api/nodes/binary/{os}/{arch}/worker`
-- WebSocket : `/ws/worker/join` — handshake complet enrollment + bascule opérationnel
-- DB : schema SQLite complet (nodes, tokens, audit)
-- Worker Go : enrollment Ed25519, heartbeat, reconnexion backoff, dispatcher whitelist
-
-### Sprint 2 — Plugins OS et Métriques
-
-- Plugin `metrics` : CPU, RAM, disque, uptime (cross-platform, sans dépendance)
-- Plugin `docker` : list containers, restart, logs (si Docker détecté dynamiquement)
-- Plugin `systemd` : list services, status, restart (si Linux)
-- `kickstart.sh` complet : détection OS/arch, vérification SHA256, cascade installation
-- API : `GET /api/nodes`, `GET /api/nodes/{id}/stats`, `GET /api/nodes/{id}/logs`
-
-### Sprint 3 — Couche IA et Human-in-the-Loop
-
-- `LLMClient` natif : complete + stream SSE
-- `StructuredLLM` : boucle retry + validation Pydantic
-- Modèle `ActionProposal` : action, params, reasoning, risk_level
-- API : `POST /api/chat` (stream), `POST /api/chat/approve`, `POST /api/chat/reject`
-- Audit Trail : hash chaîné, stockage immuable
-
-### Sprint 4 — Frontend
-
-- Application React standalone (vite + TailwindCSS + shadcn/ui)
-- `ChatPanel` : streaming SSE natif, historique de conversation
-- `ActionProposal` : carte d'approbation avec contexte et niveau de risque
-- `NodeCard` : état, métriques temps réel, logs
-- `LogViewer` : terminal lecture seule, WebSocket streaming
-- `AuditLog` : timeline des actions approuvées
-- Auth UI : login, gestion de session JWT
-- **Plugin Catalogue** : page d'accueil des plugins disponibles avec installation en 1 clic (prépare le terrain pour Sprint 5)
-
-### Sprint 5 — Plugin Ecosystem (Home Assistant-like)
-
-- **Format de plugin standardisé** : métadonnées, dépendances, hooks, configuration
-- **Plugin Registry** : catalogue de plugins téléchargeables (GitHub / registre local)
-- **Installation frontend** : browse, install, activate, configure depuis l'UI
-- **Plugin isolation** : chaque plugin dans son propre sous-processus ou namespace
-- **Moteur d'automatisations** : déclencheur (trigger) → conditions (conditions) → actions
-  - Triggers : heartbeat, STATUS_REPORT, INTENT_RESULT, timer CRON, webhook
-  - Conditions : métrique > seuil, service down, log match, AND/OR/NOT
-  - Actions : intent Worker, webhook, notification, LLM call
-- **Plugin SDK** : documentation + template pour créer des plugins tiers
-- Exemples de plugins : backup, uptime monitoring, alerting Slack/Discord, DNS updater
-
-### Sprint 6 — Production Hardening
-
-- Rate limiting sur les endpoints sensibles
-- Rotation automatique WORKER_TOKEN
-- Mode offline (binaires préchargés pour réseau isolé)
-- Build pipeline : cross-compile Worker pour Linux/Darwin/FreeBSD × x86_64/arm64/armv7
-- Health checks, métriques Master (`/metrics` Prometheus-compatible, natif)
-- Documentation déploiement
+| Sprint | Contenu | Statut |
+|--------|---------|--------|
+| 1 | Core Sécurisé : SecurityManager, NodeManager, PluginManager, DB, WebSocket enrollment, Worker Go basics | ✅ Done |
+| 2 | Plugins OS : metrics, systemd, docker + APIs REST + kickstart.sh + simulation stack | ✅ Done |
+| 3 | Couche IA : LLMClient, StructuredLLM, ActionProposal, Chat API (SSE stream) | ✅ Done |
+| 4 | Frontend Jinja2 + HTMX + Tailwind CSS v4 (Glass Dark Ops design) | ✅ Done |
 
 ---
 
-## Vision Long Terme — Système Autonome Dirigé par l'IA
+### Sprint 4.5 — Stabilisation & Migration Tests 🔧
 
-Le chemin vers un système entièrement autonome où l'IA gère les opérations
-courantes et n'escalade que l'inconnu.
+**Objectif** : Corriger les bugs critiques documentés dans LIMITS.md et migrer le framework de test vers pytest. Aucune feature nouvelle.
 
-### Sprint 7 — Autonomie Graduée
+**Critères de sortie** :
+- [ ] Tous les bugs 🔴 de LIMITS.md corrigés
+- [ ] Suite pytest opérationnelle avec couverture ≥ anciens 305 checks
+- [ ] README.md mis à jour (plus d'informations fausses)
+- [ ] Tous les tests verts
 
-- **Niveaux de confiance par action** : LOW=auto, MEDIUM=notification, HIGH=approbation humaine
-- **Profiling du comportement humain** : l'IA apprend des patterns d'approbation/rejet pour
-  ajuster ses futurs niveaux de confiance
-- **Escalade intelligente** : l'IA sait quand déranger l'humain et quand agir seule
-- **Table `confidence_history`** : enregistre chaque décision (proposé → approuvé/rejeté → appris)
+**Contenu** :
 
-### Sprint 8 — Détection Proactive
+#### Bugs critiques (LIMITS.md 🔴)
 
-- **Anomaly detection** : baseline automatique des métriques (CPU, RAM, disque, processus)
-  → écart = alerte avant la panne
-- **Analyse de logs temps réel** : l'IA scanne les logs en continu et remonte les patterns suspects
-- **Prédiction saturation** : extrapolation courbe d'utilisation → "disque plein dans 3 jours"
-- **Alerting prédictif** : notifications avant que le problème n'arrive, pas après
+| Bug | Fix |
+|-----|-----|
+| Rate limiter : `cleanup_expired()` jamais appelé | Tâche asyncio périodique dans le lifespan |
+| Refresh token sans invalidation | Table `refresh_tokens` avec flag `revoked` |
+| Pas de force-change admin password | Flag `must_change_password` + middleware |
+| Plugin deduplication absente | Check `already_loaded` dans `load_plugins_from_dir()` |
+| Aucune pagination sur `list_nodes` et `verify_chain` | `limit`/`offset` params sur les endpoints REST |
+| Migration DB non versionnée | Table `schema_version` + scripts numérotés |
 
-### Sprint 9 — Runbooks & Auto-Healing
+#### Migration Tests
 
-- **Bibliothèque de runbooks** : scénarios de résolution pré-approuvés stockés en base
-  (exemple : "si nginx down → restart → si toujours down → appeler l'humain")
-- **Auto-healing des pannes courantes** : l'IA exécute les runbooks sans intervention
-- **Rolling remediation** : cascade d'actions (si X → alors Y → puis Z) avec arrêt sécurisé
-  si une étape échoue
-- **Rollback automatique** : si une action de restauration empire la situation, retour à l'état
-  précédent
+- Installer pytest comme dépendance dev
+- Réécrire les 9 fichiers de test en pytest avec fixtures
+- Les 305 checks actuels deviennent le cahier des charges des tests pytest
+- Créer `conftest.py` avec fixtures partagées (fake DB, fake SecurityManager, etc.)
+- Supprimer l'ancien harness custom (`check()` + `results` pattern)
 
-### Sprint 10 — Coordination Multi-Nœuds
+#### README.md
 
-- **Gestion des dépendances inter-services** : l'IA comprend que "si je restart docker.service,
-  tous les containers seront impactés"
-- **Déploiement gradué** : actions sur un worker test → validation → propagation à la flotte
-- **Coordination de flotte** : actions simultanées sur plusieurs nœuds avec gestion des conflits
-- **Topologie de service** : graphe des dépendances découvert automatiquement
+- Corriger les erreurs factuelles (Redis → SQLite, E2E → TLS)
+- Ajouter section Getting Started propre
+- Ajouter section Architecture avec diagramme
+- Garder l'histoire personnelle (c'est l'âme du projet)
 
-### Sprint 11 — Apprentissage & Mémoire
+---
 
-- **Base de connaissances** : indexation de tous les incidents passés (cause → action → résultat)
-- **Fine-tuning du LLM** : adaptation du modèle sur l'historique du projet (privé, pas de données
-  envoyées à l'extérieur)
-- **Feedback loop continue** : chaque action exécutée enrichit la base de connaissances
-- **Mémoire conversationnelle** : l'IA se souvient des conversations précédentes et du contexte
-  de chaque nœud
-- **Auto-évaluation** : l'IA analyse ses propres décisions passées et ajuste sa stratégie
+### Sprint 5 — Frontend React SPA 🎨
+
+**Objectif** : Reconstruire le frontend en React/Vite avec le design Glass Dark Ops identique au Sprint 4. Le Master sert le build React via `/static/` en prod.
+
+**Critères de sortie** :
+- [ ] Toutes les pages du Sprint 4 Jinja2 reproduites en React
+- [ ] Chat SSE streaming fonctionnel
+- [ ] Proposals approve/reject fonctionnel
+- [ ] Design pixel-perfect Glass Dark Ops
+- [ ] Vite dev proxy → FastAPI (:8000) configuré
+- [ ] Build prod copié dans `master/static/`, servi par FastAPI
+
+**Contenu** :
+
+#### Setup
+
+- Initialiser projet Vite + React + TypeScript dans `frontend/`
+- Configurer Tailwind CSS v4 avec la palette Glass Dark Ops
+- Configurer le proxy Vite → `http://localhost:8000/api/`
+- Ajouter shadcn/ui comme librairie de composants de base
+
+#### Pages
+
+| Page | Composants | Interactivité |
+|------|-----------|---------------|
+| **Login** | Auth form, JWT storage | POST /api/auth/login |
+| **Dashboard** | NodeCard carousel, MetricsBar, HeroDiscovery | Polling 15s |
+| **Node Detail** | Tabs (Stats, Services, Containers, Logs), MetricsChart | Polling + on-demand |
+| **Proposals** | ProposalList, ApproveButton, RejectButton | POST approve/reject |
+| **Audit** | AuditTimeline, HashVerification | GET + polling |
+| **Plugins** | PluginGrid, PluginCard | GET /api/plugins |
+
+#### Composants clés
+
+| Composant | Technologie |
+|-----------|------------|
+| `ChatPanel` (Copilot sidebar) | EventSource SSE, streaming token-by-token |
+| `MetricsChart` | Recharts (line charts CPU/RAM/disk) |
+| `LogViewer` | Composant scroll avec auto-follow |
+| `ActionProposal` | Card glassmorphic avec boutons approve/reject |
+
+#### Design System
+
+- Palette : `#050505` (bg), `#0a0a0c` (surface), `#111114` (surface-2), `teal-400` (accent)
+- Glassmorphism : `bg-white/[0.02] border border-white/[0.05] backdrop-blur-xl`
+- Layout : Sidebar gauche (80→240px hover) + Main + Copilot droite (340-400px)
+- Typographie : Inter uniquement, text-[13px] à text-[15px]
+- Icônes : Tabler Icons SVG
+
+---
+
+### Sprint 6 — Plugin SDK & Intégrations 🔌
+
+**Objectif** : Créer un framework de plugins standardisé avec métadonnées, configuration UI, et les premières intégrations concrètes (Home Assistant, Plex/Arr).
+
+**Critères de sortie** :
+- [ ] Format de plugin documenté (manifest.json, hooks, config schema)
+- [ ] Plugin Home Assistant fonctionnel (lire config YAML, proposer des fixes)
+- [ ] Plugin Plex/Arr fonctionnel (monitoring, restart)
+- [ ] UI d'installation/activation de plugins dans le frontend React
+- [ ] Plugin SDK documenté (template + guide pour créer un plugin)
+
+**Contenu** :
+
+#### Plugin SDK
+
+```text
+plugins/
+├── homeassistant/
+│   ├── manifest.json      # Nom, version, hooks, config schema
+│   ├── plugin.py          # Hooks + logique métier
+│   └── README.md          # Documentation
+├── plex/
+│   ├── manifest.json
+│   ├── plugin.py
+│   └── README.md
+```
+
+Chaque plugin déclare :
+- **Métadonnées** : nom, version, description, auteur, icône
+- **Configuration** : schéma JSON des paramètres (URL, tokens, chemins)
+- **Hooks** : `get_supported_actions`, `handle_intent`, `on_status_report`, etc.
+- **Actions Worker** : commandes supplémentaires que le Worker devrait supporter
+
+#### Intégrations concrètes
+
+| Plugin | Actions | Classification |
+|--------|---------|---------------|
+| **Home Assistant** | Lire config YAML, diagnostiquer logs, proposer fixes, restart service | READ_ONLY → DESTRUCTIVE |
+| **Plex** | Status API, sessions actives, restart service | READ_ONLY → DESTRUCTIVE |
+| **Radarr/Sonarr** | Status queue, health check, restart | READ_ONLY → DESTRUCTIVE |
+
+#### API Plugins
+
+- `GET /api/plugins` — lister les plugins installés
+- `POST /api/plugins/{name}/enable` — activer un plugin
+- `POST /api/plugins/{name}/disable` — désactiver un plugin
+- `PUT /api/plugins/{name}/config` — configurer un plugin (schéma validé)
+
+---
+
+### Sprint 7 — Automation Engine & Notifications 🤖
+
+**Objectif** : Construire un moteur d'automatisations (trigger → condition → action) et un système de notifications multi-canal. C'est ce qui rend Vigile proactif plutôt que réactif.
+
+**Critères de sortie** :
+- [ ] Moteur d'automatisations fonctionnel avec au moins 5 triggers différents
+- [ ] Notifications Webhook + Ntfy + Email fonctionnelles
+- [ ] Au moins 3 automatisations pré-configurées (exemples)
+- [ ] UI de création/gestion d'automatisations dans le frontend
+- [ ] Tests E2E d'une chaîne complète : trigger → condition → action → notification
+
+**Contenu** :
+
+#### Moteur d'Automatisations
+
+```text
+Trigger (événement)
+    ↓
+Condition (vérification)
+    ↓
+Action (exécution)
+    ↓
+Notification (alerte)
+```
+
+| Type | Exemples |
+|------|----------|
+| **Triggers** | STATUS_REPORT reçu, métrique > seuil, service down, container restart, CRON timer, webhook entrant |
+| **Conditions** | CPU > 90% depuis 5min, disk usage > 80%, service failed, container exited, AND/OR/NOT |
+| **Actions** | Intent Worker (restart service/container), appel LLM (diagnostic), webhook sortant, notification |
+| **Notifications** | Webhook POST, Ntfy push, Email SMTP |
+
+#### Automatisations pré-configurées (exemples)
+
+| Nom | Trigger | Condition | Action |
+|-----|---------|-----------|--------|
+| **Disk Full Alert** | STATUS_REPORT | disk_usage > 85% | Notification Ntfy |
+| **Container Auto-Restart** | STATUS_REPORT | container exited (non-zero) | Restart container + notification |
+| **HA Config Watch** | Timer CRON (5min) | HA service état changed | Notification + diagnostic LLM |
+
+#### Notifications
+
+| Canal | Implémentation |
+|-------|---------------|
+| **Webhook** | POST HTTP configurable (URL, headers, body template) |
+| **Ntfy** | POST sur `https://ntfy.sh/topic` ou instance self-hosted |
+| **Email** | SMTP async (aiosmtplib ou httpx vers un relay) |
+
+#### API Automations
+
+- `GET /api/automations` — lister les automatisations
+- `POST /api/automations` — créer une automation (JSON schema)
+- `PUT /api/automations/{id}` — modifier
+- `DELETE /api/automations/{id}` — supprimer
+- `POST /api/automations/{id}/test` — tester (dry-run)
+
+---
+
+### Sprint 8 — Production Hardening & PostgreSQL 🏗️
+
+**Objectif** : Rendre Vigile prêt pour un usage quotidien fiable. Migration SQLite → PostgreSQL, rate limiter robuste, métriques de santé, cross-compilation Worker.
+
+**Critères de sortie** :
+- [ ] PostgreSQL fonctionnel en remplacement de SQLite
+- [ ] Migration automatique depuis une base SQLite existante
+- [ ] Métriques `/metrics` Prometheus-compatible
+- [ ] Rate limiter persistent (pas memory-only)
+- [ ] Rotation automatique WORKER_TOKEN
+- [ ] Cross-compilation Worker pour Linux/Darwin × x86_64/arm64
+- [ ] Health check Master (`/health`) complet
+
+**Contenu** :
+
+#### Migration PostgreSQL
+
+- Remplacer `aiosqlite` par `asyncpg` (ajout à la whitelist)
+- Adapter tout le SQL (SQLite → PostgreSQL syntax)
+- Script de migration automatique (lecture SQLite → écriture PostgreSQL)
+- Garder SQLite comme option pour les petites installations (via config)
+
+#### Hardening
+
+| Fix | Détail |
+|-----|--------|
+| Rate limiter | Redis ou PostgreSQL backend (pas memory) |
+| WORKER_TOKEN rotation | Rotation automatique soft (7j) / hard (30j) |
+| CORS validation | Refuser wildcard si `allow_credentials=True` |
+| Ed25519 key permissions | Vérifier `0o600` au chargement |
+| WebSocket limits | Limite max connexions par IP |
+| `_pending_intents` cleanup | TTL + garbage collector |
+
+#### Build & Monitoring
+
+- Cross-compilation Worker : `GOOS=linux GOARCH=amd64/arm64`
+- Endpoint `/metrics` Prometheus (sans librairie, format texte natif)
+- Health check `/health` : DB, nodes connectés, mémoire
+
+---
+
+### Sprint 9 — Alertes Intelligentes & Runbooks 🧠
+
+**Objectif** : Donner à l'IA la capacité de détecter des problèmes avant qu'ils n'arrivent et d'exécuter des procédures de résolution pré-approuvées.
+
+**Critères de sortie** :
+- [ ] Baseline automatique des métriques (CPU/RAM/disk normaux vs anormaux)
+- [ ] Alertes prédictives fonctionnelles ("disque plein dans 3 jours")
+- [ ] Bibliothèque de runbooks (≥ 5 scénarios pré-configurés)
+- [ ] Auto-healing sur les scénarios simples (container restart)
+- [ ] Rollback automatique si une action empire la situation
+
+**Contenu** :
+
+#### Détection Proactive
+
+- **Baseline métriques** : moyenne glissante sur 7 jours par node
+- **Anomaly detection simple** : écart > 2σ de la baseline → alerte
+- **Prédiction saturation** : extrapolation linéaire du trend disk/RAM → "plein dans N jours"
+- **Analyse de logs** : patterns connus (OOM killer, segfault, permission denied) → alerte
+
+> **Note** : Pas de ML complexe. Des heuristiques simples et fiables qui fonctionnent avec le volume de données d'un homelab.
+
+#### Runbooks
+
+```text
+Runbook = {
+  name: "nginx-502-fix",
+  trigger: "LLM détecte un 502 dans les logs nginx",
+  steps: [
+    { action: "CHECK", command: "nginx -t" },
+    { action: "RESTART", command: "systemctl restart nginx",
+      rollback: "systemctl restart nginx-backup" },
+    { action: "VERIFY", command: "curl -s localhost:80",
+      expect: "status_code == 200" }
+  ],
+  on_failure: "NOTIFY + ESCALATE_TO_HUMAN"
+}
+```
+
+- Stockés en base, éditables via l'UI
+- Pré-approuvés par l'admin (pas de confirmation à chaque exécution)
+- Historique complet dans l'audit trail
+- Rollback automatique si `VERIFY` échoue
+
+---
+
+### Sprint 10 — Mémoire Conversationnelle & Autonomie Graduée 🧩
+
+**Objectif** : L'IA se souvient des conversations précédentes, apprend des patterns d'approbation/rejet, et ajuste son niveau de confiance.
+
+**Critères de sortie** :
+- [ ] Conversations persistées et contextualisées par node
+- [ ] L'IA rappelle les incidents passés dans ses diagnostics
+- [ ] Niveaux de confiance par type d'action (auto-exécution des actions LOW risk)
+- [ ] Tableau de bord "décisions de l'IA" (approuvées, rejetées, auto-exécutées)
+
+**Contenu** :
+
+#### Mémoire Conversationnelle
+
+- Table `conversations` : historique par session et par node
+- L'IA reçoit un résumé des 5 derniers incidents du node dans son contexte
+- Recherche sémantique simple (keyword matching) dans l'historique
+
+#### Autonomie Graduée
+
+| Niveau de confiance | Comportement | Exemple |
+|---------------------|-------------|---------|
+| `AUTO` | Exécution directe, notification post-action | Restart container déjà approuvé 5x |
+| `NOTIFY` | Exécution + notification simultanée | Cleanup logs > 1GB |
+| `APPROVE` | Confirmation humaine requise (défaut) | Toute action nouvelle |
+
+- Table `confidence_history` : chaque (action, contexte) → score de confiance
+- Le score augmente avec les approbations, diminue avec les rejets
+- Seuils configurables par l'admin
+
+---
+
+### Sprints futurs (non planifiés en détail)
+
+| Sprint | Titre | Description courte |
+|--------|-------|--------------------|
+| 11 | **Distribution & CI/CD** | GitHub Actions, releases binaires, kickstart.sh fonctionnel, Docker Hub |
+| 12 | **Mobile & WhatsApp** | PWA responsive, bot WhatsApp pour chatter avec Vigile |
+| 13+ | **Fleet Scale** | Multi-tenant, coordination multi-nœuds, canary deployment |
+
+> Ces sprints ne seront détaillés que quand les précédents seront terminés et le besoin réel validé.
 
 ---
 

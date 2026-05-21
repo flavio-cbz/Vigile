@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Proposals{% endblock %}
+{% block heading %}Proposals{% endblock %}
+{% block breadcrumb %}
+<span>Dashboard</span>
+<span class="breadcrumb__sep">/</span>
+<span class="breadcrumb__current">Proposals</span>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+.skeleton {
+  background: linear-gradient(90deg, var(--border-strong) 0%, rgba(255,255,255,0.05) 50%, var(--border-strong) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 3px;
+}
+.skeleton-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r);
+  padding: 1.1rem;
+  overflow: hidden;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .proposal-filters {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 0.35rem;
+    padding-bottom: 0.25rem;
+  }
+  .proposal-filters::-webkit-scrollbar { display: none; }
+  .proposal-filters a { white-space: nowrap; }
+
+  .glass.p-4.fade-in > div {
+    flex-direction: column !important;
+  }
+  .glass.p-4.fade-in > div > div:last-child {
+    width: 100%;
+    margin-top: 0.75rem;
+  }
+  .glass.p-4.fade-in > div > div:last-child button {
+    flex: 1;
+    justify-content: center;
+  }
+  .flex.gap-3.mt-2 {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="section-pad">
+  {# Status filter pills #}
+  <div class="section-block">
+    <div class="flex gap-2 flex-wrap proposal-filters">
+      {% for s in ['all', 'PENDING', 'APPROVED', 'EXECUTED', 'FAILED', 'REJECTED'] %}
+      <a href="/proposals{% if s != 'all' %}?status={{ s }}{% endif %}"
+         class="px-3 py-1.5 text-xs font-medium transition no-underline"
+         style="background: {% if status_filter == s %}var(--accent-soft){% else %}transparent{% endif %}; color: {% if status_filter == s %}var(--accent){% else %}var(--ink-muted){% endif %}; border: 1.5px solid {% if status_filter == s %}var(--accent-border){% else %}var(--border-strong){% endif %}; border-radius: var(--r);">
+        {{ s }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── Skeleton proposals (shown during HTMX loading) ── #}
+  <div class="htmx-indicator space-y-3" aria-hidden="true" style="display:none;">
+    {% for _ in range(3) %}
+    <div class="skeleton-card">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="skeleton" style="width:80px;height:10px;"></div>
+        <div class="skeleton" style="width:50px;height:16px;"></div>
+        <div class="skeleton" style="width:60px;height:16px;"></div>
+      </div>
+      <div class="skeleton" style="width:70%;height:14px;"></div>
+      <div class="skeleton" style="width:90%;height:10px;margin-top:8px;"></div>
+      <div class="flex gap-4 mt-3">
+        <div class="skeleton" style="width:100px;height:10px;"></div>
+        <div class="skeleton" style="width:80px;height:10px;"></div>
+        <div class="skeleton" style="width:60px;height:10px;"></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# Proposals list #}
+  {% if proposals %}
+  <div class="space-y-3">
+    {% for prop in proposals %}
+    <div class="glass p-4 fade-in">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex-1 min-w-0">
+          {# Top row: ID, risk badge, status badge #}
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs font-mono" style="color: var(--ink-muted);">{{ prop.id[:12] }}…</span>
+            {% set risk = (prop.risk_level or 'MEDIUM').upper() %}
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase
+              {% if risk == 'LOW' %}risk-low
+              {% elif risk == 'MEDIUM' %}risk-medium
+              {% elif risk == 'HIGH' %}risk-high
+              {% elif risk == 'CRITICAL' %}risk-critical
+              {% else %}risk-medium{% endif %}">
+              {{ risk }}
+            </span>
+            {% set pstatus = prop.status %}
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
+                  style="background: {% if pstatus == 'PENDING' %}var(--amber-soft){% elif pstatus == 'APPROVED' %}var(--accent-soft){% elif pstatus == 'EXECUTED' %}var(--green-soft){% elif pstatus == 'FAILED' %}var(--red-soft){% else %}rgba(100,116,139,0.1){% endif %}; color: {% if pstatus == 'PENDING' %}var(--amber){% elif pstatus == 'APPROVED' %}var(--accent){% elif pstatus == 'EXECUTED' %}var(--green){% elif pstatus == 'FAILED' %}var(--red){% else %}#94a3b8{% endif %};">
+              {{ pstatus }}
+            </span>
+          </div>
+          {# Action name #}
+          <div class="text-sm font-medium mb-1" style="color: var(--ink);">{{ prop.action }}</div>
+          {# Reasoning text #}
+          <div class="text-xs" style="color: var(--ink-dim);">{{ prop.reasoning }}</div>
+          {# Params JSON #}
+          {% if prop.params_json and prop.params_json != '{}' %}
+          <div class="text-[10px] font-mono mt-1.5 p-2" style="color: var(--ink-muted); background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--r); overflow-x: auto;">
+            {{ prop.params_json[:200] }}
+          </div>
+          {% endif %}
+          {# Footer: node, author, time #}
+          <div class="flex gap-3 mt-2 text-[10px]" style="color: var(--ink-muted);">
+            <span class="flex items-center gap-1"><i class="ti ti-server"></i> {{ prop.node_id[:8] }}…</span>
+            <span class="flex items-center gap-1"><i class="ti ti-user"></i> {{ prop.created_by }}</span>
+            <span class="flex items-center gap-1"><i class="ti ti-clock"></i> {{ "%.0f"|format((now()|default(0) - prop.created_at) / 60) }}m ago</span>
+          </div>
+        </div>
+
+        {# Action buttons for pending proposals #}
+        {% if prop.status == 'PENDING' %}
+        <div class="flex gap-2 shrink-0">
+          <button class="btn-primary" onclick="approveProposal('{{ prop.id }}')">
+            <i class="ti ti-circle-check"></i> Approve
+          </button>
+          <button class="btn-ghost" style="color: var(--red); border-color: var(--red-border);"
+                  onclick="rejectProposal('{{ prop.id }}')">
+            <i class="ti ti-circle-x"></i> Reject
+          </button>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  {# Empty state #}
+  <div class="flex flex-col items-center justify-center py-16 text-center fade-in">
+    <i class="ti ti-inbox text-4xl" style="color: var(--ink-muted);"></i>
+    <p class="mt-4 text-sm font-medium" style="color: var(--ink-muted);">
+      {% if status_filter and status_filter != 'all' %}
+      Aucune proposition {{ status_filter|lower }}.
+      {% else %}
+      Aucune proposition en attente. Le système est stable.
+      {% endif %}
+    </p>
+    {% if status_filter == 'PENDING' or not status_filter or status_filter == 'all' %}
+    <p class="mt-1 text-xs" style="color: var(--ink-dim);">Interrogez le copilot pour analyser vos serveurs — il peut proposer des actions.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function getBearerToken() {
+    var match = document.cookie.match(/(?:^|;\s*)auth_token=([^;]*)/);
+    return match ? match[1] : null;
+  }
+
+  async function approveProposal(id) {
+    if (!confirm('Approve this action?')) return;
+    try {
+      var token = getBearerToken();
+      var headers = {'Content-Type': 'application/json'};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/chat/proposals/' + id + '/approve', {
+        method: 'POST', headers: headers
+      });
+      if (resp.ok) { window.location.reload(); }
+      else { alert('Failed to approve'); }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  async function rejectProposal(id) {
+    const reason = prompt('Rejection reason (optional):');
+    try {
+      var token = getBearerToken();
+      var headers = {'Content-Type': 'application/json'};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/chat/proposals/' + id + '/reject', {
+        method: 'POST', headers: headers,
+        body: JSON.stringify({reason: reason || ''})
+      });
+      if (resp.ok) { window.location.reload(); }
+      else { alert('Failed to reject'); }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+</script>
+{% endblock %}

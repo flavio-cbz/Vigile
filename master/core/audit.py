@@ -27,8 +27,34 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
+class LoopBoundLock:
+    """
+    A helper lock that delegates to an asyncio.Lock bound to the current event loop.
+    Prevents loop mismatch / closed loop errors in tests.
+    """
+    def __init__(self) -> None:
+        self._locks: dict[Any, asyncio.Lock] = {}
+
+    def _get_lock(self) -> asyncio.Lock:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.Lock()
+        # Prune closed event loops to prevent memory leaks
+        self._locks = {lp: lk for lp, lk in self._locks.items() if not lp.is_closed()}
+        if loop not in self._locks:
+            self._locks[loop] = asyncio.Lock()
+        return self._locks[loop]
+
+    async def __aenter__(self) -> Any:
+        return await self._get_lock().__aenter__()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        return await self._get_lock().__aexit__(exc_type, exc_val, exc_tb)
+
+
 # Serialize writes to prevent sequence collision
-_audit_lock = asyncio.Lock()
+_audit_lock = LoopBoundLock()
 
 # Sentinel for the first entry in the chain
 GENESIS_HASH = "0" * 64
@@ -142,9 +168,15 @@ async def log_action(
     return entry_id
 
 
-async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
+async def verify_chain(
+    db: aiosqlite.Connection, *, max_entries: int | None = None,
+) -> dict[str, Any]:
     """
-    Walk the entire audit log and verify the hash chain integrity.
+    Walk the audit log and verify the hash chain integrity.
+
+    Args:
+        max_entries: limit the number of entries verified (None = all).
+                     Useful for large tables where full scan is expensive.
 
     Returns a report dict:
       {
@@ -159,55 +191,78 @@ async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
         "total_entries": 0,
         "first_broken_sequence": None,
         "error": None,
-    }
+      }
 
-    expected_previous_hash = GENESIS_HASH
+    # Fetch rows
+    if max_entries is not None:
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence DESC
+            LIMIT ?
+        """
+        async with db.execute(sql, (max_entries,)) as cursor:
+            rows = await cursor.fetchall()
+        rows.reverse()
+    else:
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence ASC
+        """
+        async with db.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+
+    if not rows:
+        report["total_entries"] = 0
+        return report
+
+    # Initialize expected_previous_hash from the first verified row
+    first_row = rows[0]
+    if first_row["sequence"] == 1:
+        expected_previous_hash = GENESIS_HASH
+    else:
+        expected_previous_hash = first_row["previous_hash"]
+
     count = 0
+    for row in rows:
+        count += 1
+        seq = row["sequence"]
 
-    async with db.execute(
-        """
-        SELECT id, sequence, timestamp, user_id, action, node_id,
-               details_json, previous_hash, entry_hash
-        FROM audit_log
-        ORDER BY sequence ASC
-        """
-    ) as cursor:
-        async for row in cursor:
-            count += 1
-            seq = row["sequence"]
-
-            # Check that previous_hash matches expected value
-            if row["previous_hash"] != expected_previous_hash:
-                report["valid"] = False
-                report["first_broken_sequence"] = seq
-                report["error"] = (
-                    f"Sequence {seq}: previous_hash mismatch. "
-                    f"Expected '{expected_previous_hash[:12]}...', "
-                    f"got '{row['previous_hash'][:12]}...'"
-                )
-                break
-
-            # Recompute entry_hash
-            computed = compute_entry_hash(
-                previous_hash=row["previous_hash"],
-                sequence=seq,
-                timestamp=row["timestamp"],
-                action=row["action"],
-                user_id=row["user_id"],
-                node_id=row["node_id"],
-                details_json=row["details_json"],
+        # Check that previous_hash matches expected value
+        if row["previous_hash"] != expected_previous_hash:
+            report["valid"] = False
+            report["first_broken_sequence"] = seq
+            report["error"] = (
+                f"Sequence {seq}: previous_hash mismatch. "
+                f"Expected '{expected_previous_hash[:12]}...', "
+                f"got '{row['previous_hash'][:12]}...'"
             )
+            break
 
-            if computed != row["entry_hash"]:
-                report["valid"] = False
-                report["first_broken_sequence"] = seq
-                report["error"] = (
-                    f"Sequence {seq}: entry_hash mismatch. "
-                    f"Record has been tampered with."
-                )
-                break
+        # Recompute entry_hash
+        computed = compute_entry_hash(
+            previous_hash=row["previous_hash"],
+            sequence=seq,
+            timestamp=row["timestamp"],
+            action=row["action"],
+            user_id=row["user_id"],
+            node_id=row["node_id"],
+            details_json=row["details_json"],
+        )
 
-            expected_previous_hash = row["entry_hash"]
+        if computed != row["entry_hash"]:
+            report["valid"] = False
+            report["first_broken_sequence"] = seq
+            report["error"] = (
+                f"Sequence {seq}: entry_hash mismatch. "
+                f"Record has been tampered with."
+            )
+            break
+
+        expected_previous_hash = row["entry_hash"]
 
     report["total_entries"] = count
     if report["valid"]:

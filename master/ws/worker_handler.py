@@ -38,7 +38,6 @@ from typing import Any
 import aiosqlite
 from fastapi import WebSocket, WebSocketDisconnect, WebSocketException, status
 
-from master.config import settings
 from master.core.audit import log_action
 from master.core.node_manager import NodeManager, NodeState, node_manager
 from master.core.plugin_manager import plugin_manager
@@ -295,7 +294,7 @@ async def _run_enrollment(
         "worker_token": worker_token,
         "master_public_key": get_security_instance().master_public_key_b64,
         "node_id": node_id,
-        "heartbeat_interval": settings.heartbeat_interval,
+        "heartbeat_interval": node_manager.heartbeat_interval,
     })
 
     # ── Step 14: Audit ───────────────────────────────────────────────────────
@@ -349,7 +348,7 @@ async def _run_operational(
         try:
             raw = await asyncio.wait_for(
                 websocket.receive_text(),
-                timeout=settings.heartbeat_interval * 3,  # 3× heartbeat grace period
+                timeout=node_manager.heartbeat_interval * 3,  # 3× heartbeat grace period
             )
         except asyncio.TimeoutError:
             # Worker hasn't sent anything in 3× heartbeat interval → likely dead
@@ -482,8 +481,9 @@ def _get_remote_address(websocket: WebSocket) -> str:
     client_ip = client.host if client else ""
 
     # Only use X-Forwarded-For if the direct connection comes from a trusted proxy
-    if client_ip and settings.trusted_proxies:
-        if client_ip in settings.trusted_proxies:
+    trusted_proxies = getattr(websocket.app.state, "trusted_proxies", [])
+    if client_ip and trusted_proxies:
+        if client_ip in trusted_proxies:
             forwarded_for = websocket.headers.get("x-forwarded-for", "")
             if forwarded_for:
                 return forwarded_for.split(",")[0].strip()

@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% block heading %}Dashboard{% endblock %}
+{% block heading_extra %}
+<span class="text-xs font-normal" style="color: var(--ink-muted);">
+  {{ connected_count }}/{{ total_count }} online
+</span>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+/* ── Skeleton / shimmer utility ── */
+.skeleton {
+  background: linear-gradient(90deg, var(--border-strong) 0%, rgba(255,255,255,0.05) 50%, var(--border-strong) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 3px;
+}
+.skeleton-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r);
+  padding: 1.1rem;
+  overflow: hidden;
+}
+
+/* ── Container card hero variants for nodes ── */
+.container-card__hero--node-accent {
+  background: linear-gradient(135deg, #0d1225 0%, #1a1f3a 60%, #12162a 100%);
+}
+.container-card__hero--node-green {
+  background: linear-gradient(135deg, #0a1a14 0%, #112b1e 60%, #0c2018 100%);
+}
+.container-card__hero--node-amber {
+  background: linear-gradient(135deg, #1a170a 0%, #2b2111 60%, #20180c 100%);
+}
+.container-card__hero--node-cyan {
+  background: linear-gradient(135deg, #0a161a 0%, #11242b 60%, #0c1a20 100%);
+}
+
+/* ── GPU-like card ── */
+.container-card__hero--node-gpu {
+  background: linear-gradient(135deg, #120a1a 0%, #24112b 60%, #1a0c20 100%);
+}
+
+/* ── RESPONSIVE OVERRIDES ── */
+@media (max-width: 640px) {
+  /* Hero card */
+  .hero-card { flex-direction: column; }
+  .hero-card__body { padding: 1rem 1.2rem; }
+  .hero-card__title { font-size: 1.1rem; }
+  .hero-card__title small { display: block; font-size: 0.78rem; margin-top: 0.2rem; }
+  .hero-card__desc { font-size: 0.75rem; }
+  .hero-card__visual { display: none; }
+  .hero-card__actions { flex-direction: column; }
+  .hero-card__actions .btn-primary,
+  .hero-card__actions .btn-ghost { width: 100%; justify-content: center; }
+
+  /* Vitals */
+  .vital-card { width: 155px !important; padding: 0.85rem 0.85rem 0.75rem; }
+  .vitals-row { gap: 0.55rem; }
+  .vital-card__value { font-size: 1.05rem; }
+
+  /* Container cards / Netflix row */
+  .container-card,
+  .container-card--add { width: 220px; }
+  .netflix-row { gap: 0.55rem; }
+
+  /* Section headers & titles */
+  .section-title { font-size: 0.85rem; }
+  .section-title__sub { font-size: 0.6rem; }
+  .section-header { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+  .section-header__link { font-size: 0.62rem; }
+
+  /* Empty state */
+  .glass.p-12 { padding: 1.5rem 1rem; }
+  .glass.p-12 .flex.gap-3 { flex-direction: column; }
+  .glass.p-12 .btn-primary,
+  .glass.p-12 .btn-ghost { width: 100%; justify-content: center; }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  .hero-card__title { font-size: 1.25rem; }
+  .vital-card { width: 175px; }
+  .container-card,
+  .container-card--add { width: 240px; }
+  .section-title { font-size: 0.9rem; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# HERO DISCOVERY CARD                                                       #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{% if online_nodes %}
+{% set first_node = online_nodes[0] %}
+<div class="section-pad section-block">
+  <div class="hero-card">
+    <div class="hero-card__scan"></div>
+    <div class="hero-card__glow"></div>
+    <div class="hero-card__body">
+      <div class="hero-card__badge">
+        <span class="hero-card__badge-dot"></span>
+        Tableau de bord
+      </div>
+      <h1 class="hero-card__title">
+        Bienvenue sur Vigile
+        <small>{{ connected_count }}/{{ total_count }} nœuds connectés</small>
+      </h1>
+      <p class="hero-card__desc">
+        Supervisez et gérez votre flotte de nœuds distants en toute sécurité.
+        Architecture zero-trust, audit trail chaîné, et contrôles granulaires.
+      </p>
+      <div class="hero-card__actions">
+        <a href="/nodes/{{ first_node.id }}" class="btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          Explorer les nœuds
+        </a>
+        <a href="https://github.com" target="_blank" class="btn-ghost">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          Documentation
+        </a>
+      </div>
+    </div>
+    <div class="hero-card__visual">
+      <div class="hero-card__visual-ring">
+        <div class="hero-card__visual-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="8" height="8" rx="1.5"/>
+            <rect x="14" y="2" width="8" height="8" rx="1.5"/>
+            <rect x="2" y="14" width="8" height="8" rx="1.5"/>
+            <rect x="14" y="14" width="8" height="8" rx="1.5"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# SIGNES VITAUX — first online node metrics                                  #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{% if first_node.metrics %}
+{% set m = first_node.metrics %}
+<div class="section-pad section-block">
+  <div class="section-header">
+    <h2 class="section-title">
+      Signes Vitaux
+      <span class="section-title__sub">{{ first_node.name }}</span>
+    </h2>
+    <a href="/nodes/{{ first_node.id }}" class="section-header__link">
+      Voir détails
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+    </a>
+  </div>
+
+  <div class="vitals-row">
+
+    {# ─ CPU ─ #}
+    {% set cpu_pct = m.cpu_percent|default(0) %}
+    {% if cpu_pct < 70 %}{% set cpu_class = 'green' %}{% elif cpu_pct < 90 %}{% set cpu_class = 'amber' %}{% else %}{% set cpu_class = 'red' %}{% endif %}
+    <div class="vital-card {{ cpu_class }}">
+      <div class="vital-card__head">
+        <div class="vital-card__icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+        </div>
+        <span class="vital-card__badge">{{ cpu_class|upper }}</span>
+      </div>
+      <span class="vital-card__label">CPU</span>
+      <span class="vital-card__value">{{ "%.1f"|format(cpu_pct) }}%</span>
+      <span class="vital-card__meaning">{% if m.cpu_load_1m %}Charge 1m: {{ "%.2f"|format(m.cpu_load_1m) }}{% else %}—{% endif %}</span>
+      <div class="vital-card__bar">
+        <div class="vital-card__bar-fill {{ cpu_class }}" style="width: {{ cpu_pct }}%;"></div>
+      </div>
+    </div>
+
+    {# ─ RAM ─ #}
+    {% set mem_pct = m.mem_percent|default(0) %}
+    {% if mem_pct < 70 %}{% set mem_class = 'green' %}{% elif mem_pct < 90 %}{% set mem_class = 'amber' %}{% else %}{% set mem_class = 'red' %}{% endif %}
+    <div class="vital-card {{ mem_class }}">
+      <div class="vital-card__head">
+        <div class="vital-card__icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="20"/><line x1="16" y1="4" x2="16" y2="20"/><line x1="4" y1="8" x2="8" y2="8"/><line x1="4" y1="12" x2="8" y2="12"/><line x1="4" y1="16" x2="8" y2="16"/><line x1="16" y1="8" x2="20" y2="8"/><line x1="16" y1="12" x2="20" y2="12"/><line x1="16" y1="16" x2="20" y2="16"/></svg>
+        </div>
+        <span class="vital-card__badge">{{ mem_class|upper }}</span>
+      </div>
+      <span class="vital-card__label">RAM</span>
+      <span class="vital-card__value">{{ "%.1f"|format(mem_pct) }}%</span>
+      <span class="vital-card__meaning">{% if m.mem_used_bytes and m.mem_total_bytes %}{{ "%.1f"|format(m.mem_used_bytes / 1073741824) }} / {{ "%.1f"|format(m.mem_total_bytes / 1073741824) }} Go{% else %}—{% endif %}</span>
+      <div class="vital-card__bar">
+        <div class="vital-card__bar-fill {{ mem_class }}" style="width: {{ mem_pct }}%;"></div>
+      </div>
+    </div>
+
+    {# ─ Disk ─ #}
+    {% set disk_pct = m.disk_percent|default(0) %}
+    {% if disk_pct < 70 %}{% set disk_class = 'green' %}{% elif disk_pct < 90 %}{% set disk_class = 'amber' %}{% else %}{% set disk_class = 'red' %}{% endif %}
+    <div class="vital-card {{ disk_class }}">
+      <div class="vital-card__head">
+        <div class="vital-card__icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="10" ry="10"/><line x1="12" y1="6" x2="12" y2="12"/><line x1="12" y1="12" x2="16" y2="14"/></svg>
+        </div>
+        <span class="vital-card__badge">{{ disk_class|upper }}</span>
+      </div>
+      <span class="vital-card__label">Disque</span>
+      <span class="vital-card__value">{{ "%.1f"|format(disk_pct) }}%</span>
+      <span class="vital-card__meaning">{% if m.disk_used_bytes and m.disk_total_bytes %}{{ "%.1f"|format(m.disk_used_bytes / 1073741824) }} / {{ "%.1f"|format(m.disk_total_bytes / 1073741824) }} Go{% else %}—{% endif %}</span>
+      <div class="vital-card__bar">
+        <div class="vital-card__bar-fill {{ disk_class }}" style="width: {{ disk_pct }}%;"></div>
+      </div>
+    </div>
+
+    {# ─ Uptime ─ #}
+    {% set uptime_s = m.uptime_seconds|default(0) %}
+    {% set uptime_d = (uptime_s / 86400)|int %}
+    {% set uptime_h = ((uptime_s % 86400) / 3600)|int %}
+    <div class="vital-card green">
+      <div class="vital-card__head">
+        <div class="vital-card__icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <span class="vital-card__badge">UP</span>
+      </div>
+      <span class="vital-card__label">Uptime</span>
+      <span class="vital-card__value">{% if uptime_d > 0 %}{{ uptime_d }}j {% endif %}{{ uptime_h }}h</span>
+      <span class="vital-card__meaning">{% if m.processes %}{{ m.processes }} processus{% else %}—{% endif %}</span>
+      <div class="vital-card__bar">
+        <div class="vital-card__bar-fill green" style="width: 100%;"></div>
+      </div>
+    </div>
+
+  </div>{# /vitals-row #}
+</div>
+
+{# ── Skeleton vitals (shown during HTMX loading) ── #}
+<div class="section-pad section-block htmx-indicator" aria-hidden="true" style="display:none;">
+  <div class="section-header">
+    <h2 class="section-title">
+      <span class="skeleton" style="display:inline-block;height:16px;width:120px;"></span>
+    </h2>
+  </div>
+  <div class="vitals-row">
+    {% for _ in range(4) %}
+    <div class="skeleton-card" style="width:215px;">
+      <div class="vital-card__head">
+        <div class="skeleton" style="width:32px;height:32px;"></div>
+        <div class="skeleton" style="width:36px;height:16px;"></div>
+      </div>
+      <div class="skeleton" style="width:28px;height:10px;margin-top:14px;"></div>
+      <div class="skeleton" style="width:80px;height:22px;margin-top:6px;"></div>
+      <div class="skeleton" style="width:140px;height:10px;margin-top:6px;"></div>
+      <div class="skeleton" style="width:100%;height:2px;margin-top:10px;"></div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}{# /first_node.metrics #}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# NŒUDS CONNECTÉS — Netflix Row                                             #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+<div class="section-pad section-block">
+  <div class="section-header">
+    <h2 class="section-title">
+      Nœuds Connectés
+      <span class="section-title__sub">{{ connected_count }} actifs</span>
+    </h2>
+    <span class="section-header__link">
+      <span class="status-dot online" style="margin-right:6px;"></span>
+      {{ connected_count }} en ligne
+    </span>
+  </div>
+
+  {% if online_nodes %}
+  {# ── Skeleton node cards (shown during HTMX loading) ── #}
+  <div class="netflix-row-wrap htmx-indicator" aria-hidden="true" style="display:none;">
+    <div class="netflix-row">
+      {% for _ in range(3) %}
+      <div class="skeleton-card" style="width:272px;padding:0;">
+        <div class="skeleton" style="height:80px;width:100%;border-radius:0;"></div>
+        <div style="padding:0.85rem 1.1rem;">
+          <div class="skeleton" style="width:60%;height:14px;"></div>
+          <div class="skeleton" style="width:40%;height:10px;margin-top:8px;"></div>
+          <div class="skeleton" style="width:70%;height:10px;margin-top:6px;"></div>
+          <div class="skeleton" style="width:100%;height:2px;margin-top:12px;"></div>
+          <div class="skeleton" style="width:50%;height:10px;margin-top:8px;"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="netflix-row-wrap">
+    <div class="netflix-row">
+      {% for node in online_nodes %}
+      {% set hero_variants = ['node-accent', 'node-green', 'node-amber', 'node-cyan', 'node-gpu'] %}
+      {% set hero_idx = loop.index0 % hero_variants|length %}
+      {% set hero_class = hero_variants[hero_idx] %}
+      <a href="/nodes/{{ node.id }}" class="container-card" style="text-decoration:none;color:inherit;">
+        <div class="container-card__hero container-card__hero--{{ hero_class }}">
+          <h3 class="container-card__name">{{ node.name }}</h3>
+          <span class="container-card__status-badge">
+            <span class="container-card__status-dot"></span>
+            <span class="container-card__status-text">{{ node.state }}</span>
+          </span>
+        </div>
+        <div class="container-card__body">
+          <div class="container-card__meta">
+            <div class="container-card__meta-row">
+              <span class="container-card__meta-label">Hostname</span>
+              <span class="container-card__meta-value">{{ node.hostname or '—' }}</span>
+            </div>
+            <div class="container-card__meta-row">
+              <span class="container-card__meta-label">OS</span>
+              <span class="container-card__meta-value">{{ node.os or '—' }}{% if node.arch %} / {{ node.arch }}{% endif %}</span>
+            </div>
+            <div class="container-card__meta-row">
+              <span class="container-card__meta-label">État</span>
+              <span class="container-card__meta-value" style="color:var(--green);">{{ node.state }}</span>
+            </div>
+            {% if node.last_heartbeat %}
+            <div class="container-card__meta-row">
+              <span class="container-card__meta-label">Battement</span>
+              <span class="container-card__meta-value" data-timestamp="{{ node.last_heartbeat }}">—</span>
+            </div>
+            {% endif %}
+          </div>
+          {% if node.metrics %}
+          <div class="container-card__cpu-row">
+            <span class="container-card__cpu-label">CPU</span>
+            <div class="container-card__cpu-bar">
+              <div class="container-card__cpu-bar-fill" style="width:{{ node.metrics.cpu_percent }}%;"></div>
+            </div>
+            <span class="container-card__cpu-val">{{ "%.0f"|format(node.metrics.cpu_percent) }}%</span>
+          </div>
+          <div class="container-card__cpu-row">
+            <span class="container-card__cpu-label">RAM</span>
+            <div class="container-card__cpu-bar">
+              <div class="container-card__cpu-bar-fill" style="width:{{ node.metrics.mem_percent }}%;"></div>
+            </div>
+            <span class="container-card__cpu-val">{{ "%.0f"|format(node.metrics.mem_percent) }}%</span>
+          </div>
+          {% endif %}
+          <div class="container-card__actions">
+            <span class="container-card__action">Détails</span>
+            <span class="container-card__action">Logs</span>
+          </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="glass p-6 text-center">
+    <p style="color:var(--ink-muted);font-size:0.83rem;">Aucun nœud connecté pour le moment.</p>
+  </div>
+  {% endif %}
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# GRILLE DES NŒUDS EN LIGNE                                                 #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+<div class="section-pad section-block">
+  <div class="section-header">
+    <h2 class="section-title">
+      Aperçu des Nœuds
+      <span class="section-title__sub">{{ total_count }} total</span>
+    </h2>
+  </div>
+  <div class="node-grid">
+    {% for node in online_nodes %}
+    {% set delay = loop.index0 * 0.06 %}
+    <a href="/nodes/{{ node.id }}" class="glass p-4 block rounded-xl no-underline fade-in" style="color:inherit;animation-delay:{{ delay }}s;">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="flex items-center justify-center" style="width:28px;height:28px;border:1.5px solid var(--green-border);background:var(--green-soft);flex-shrink:0;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="8" height="8" rx="1.5"/><rect x="14" y="2" width="8" height="8" rx="1.5"/><rect x="2" y="14" width="8" height="8" rx="1.5"/><rect x="14" y="14" width="8" height="8" rx="1.5"/></svg>
+          </div>
+          <span class="text-sm font-medium truncate">{{ node.name }}</span>
+        </div>
+        <span class="status-dot online shrink-0"></span>
+      </div>
+      <div class="text-xs" style="color:var(--ink-dim);">
+        {{ node.hostname or '—' }} · {{ node.os or '—' }}
+      </div>
+      {% if node.metrics %}
+      <div class="grid grid-cols-3 gap-2 text-center mt-3 pt-3" style="border-top:1px solid var(--border);">
+        <div>
+          <div class="text-xs" style="color:var(--ink-muted);">CPU</div>
+          <div class="text-sm font-semibold">{{ "%.1f"|format(node.metrics.cpu_percent) }}%</div>
+        </div>
+        <div>
+          <div class="text-xs" style="color:var(--ink-muted);">RAM</div>
+          <div class="text-sm font-semibold">{{ "%.1f"|format(node.metrics.mem_percent) }}%</div>
+        </div>
+        <div>
+          <div class="text-xs" style="color:var(--ink-muted);">Disk</div>
+          <div class="text-sm font-semibold">{{ "%.1f"|format(node.metrics.disk_percent) }}%</div>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-xs text-center py-2" style="color:var(--ink-muted);">Aucune métrique</div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# NŒUDS HORS LIGNE                                                           #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{% if offline_nodes %}
+<div class="section-pad section-block">
+  <div class="section-header">
+    <h2 class="section-title">
+      Nœuds Hors Ligne
+      <span class="section-title__sub">{{ offline_nodes|length }} inactifs</span>
+    </h2>
+    <span class="section-header__link">
+      <span class="status-dot offline" style="margin-right:6px;display:inline-block;"></span>
+      {{ offline_nodes|length }} déconnectés
+    </span>
+  </div>
+  <div class="node-grid">
+    {% for node in offline_nodes %}
+    {% set delay = loop.index0 * 0.06 %}
+    <a href="/nodes/{{ node.id }}" class="glass p-4 block rounded-xl no-underline fade-in" style="color:inherit;opacity:0.7;animation-delay:{{ delay }}s;">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="flex items-center justify-center" style="width:28px;height:28px;border:1.5px solid var(--border-strong);background:var(--surface-alt);flex-shrink:0;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="8" height="8" rx="1.5"/><rect x="14" y="2" width="8" height="8" rx="1.5"/><rect x="2" y="14" width="8" height="8" rx="1.5"/><rect x="14" y="14" width="8" height="8" rx="1.5"/></svg>
+          </div>
+          <span class="text-sm font-medium truncate">{{ node.name }}</span>
+        </div>
+        <span class="status-dot offline shrink-0"></span>
+      </div>
+      <div class="text-xs" style="color:var(--ink-dim);">
+        État: {{ node.state }}
+        {% if node.last_heartbeat %}
+        <br>Dernier battement: <span data-timestamp="{{ node.last_heartbeat }}">—</span>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# ÉTAT VIDE — Aucun nœud                                                     #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+<div class="section-pad section-block" style="margin-top:2rem;">
+  <div class="glass p-12 text-center fade-in">
+    <div class="flex flex-col items-center justify-center py-4 text-center">
+      <i class="ti ti-server-off text-4xl" style="color: var(--ink-muted);"></i>
+      <p class="mt-4 text-sm font-medium" style="color: var(--ink-muted);">Aucun nœud enregistré</p>
+      <p class="mt-1 text-xs" style="color: var(--ink-dim);">Générez un token d'invitation pour inscrire votre premier worker.</p>
+      <div class="mt-5 flex gap-3">
+        <a href="/login" class="btn-primary">
+          <i class="ti ti-user-plus"></i>
+          Enrôler un worker
+        </a>
+        <a href="https://github.com" target="_blank" class="btn-ghost">
+          <i class="ti ti-book"></i>
+          Documentation
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // ── Relative timestamps for heartbeat display ──
+  document.querySelectorAll('[data-timestamp]').forEach(function(el) {
+    var ts = parseFloat(el.getAttribute('data-timestamp'));
+    if (!ts) return;
+    var diff = Date.now() / 1000 - ts;
+    var text = '';
+    if (diff < 60) text = 'à l\'instant';
+    else if (diff < 3600) text = Math.floor(diff / 60) + 'm';
+    else if (diff < 86400) text = Math.floor(diff / 3600) + 'h ' + Math.floor((diff % 3600) / 60) + 'm';
+    else text = Math.floor(diff / 86400) + 'j ' + Math.floor((diff % 86400) / 3600) + 'h';
+    el.textContent = text;
+  });
+});
+</script>
+{% endblock %}

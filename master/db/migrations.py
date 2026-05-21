@@ -27,6 +27,10 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     """
     logger.info("Running database migrations...")
 
+    # Check if this is an existing database
+    async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'") as cursor:
+        users_exist = await cursor.fetchone() is not None
+
     # Create tables
     for ddl in ALL_TABLES:
         await db.execute(ddl)
@@ -37,6 +41,18 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
 
     await db.commit()
     logger.info("Tables and indexes OK.")
+
+    # Stamp Alembic version if not already versioned
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+    )
+    async with db.execute("SELECT COUNT(*) FROM alembic_version") as cursor:
+        row = await cursor.fetchone()
+        if row[0] == 0:
+            version = "001" if users_exist else "003"
+            await db.execute("INSERT INTO alembic_version (version_num) VALUES (?)", (version,))
+            await db.commit()
+            logger.info(f"Stamped database with Alembic revision '{version}'.")
 
     # Seed data
     await _seed_default_admin(db)
@@ -59,8 +75,8 @@ async def _seed_default_admin(db: aiosqlite.Connection) -> None:
 
     await db.execute(
         """
-        INSERT INTO users (id, username, password_hash, role, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, 'admin', 1, ?, ?)
+        INSERT INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at)
+        VALUES (?, ?, ?, 'admin', 1, 1, ?, ?)
         """,
         (user_id, "admin", password_hash, now, now),
     )

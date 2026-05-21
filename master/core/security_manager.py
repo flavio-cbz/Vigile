@@ -43,10 +43,20 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
 )
 from cryptography.exceptions import InvalidSignature
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+
+class SecurityError(Exception):
+    """Base exception for all security issues."""
+    pass
+
+class InvalidTokenError(SecurityError):
+    """Raised when a token signature is invalid, format is incorrect, or token type mismatch."""
+    pass
+
+class ExpiredTokenError(SecurityError):
+    """Raised when a token has expired."""
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +85,6 @@ ROLES_HIERARCHY: dict[str, int] = {
     "admin": 3,
 }
 
-bearer_scheme = HTTPBearer(auto_error=False)
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -114,6 +123,12 @@ class SecurityManager:
         self._jwt_access_token_ttl: int = jwt_access_token_ttl
         self._jwt_refresh_token_ttl: int = jwt_refresh_token_ttl
 
+        # Derive isolated JWT secrets for each token class (B7)
+        jwt_secret_bytes = jwt_secret.encode()
+        self._jwt_access_secret: str = hmac.new(jwt_secret_bytes, b"user_access_token", hashlib.sha256).hexdigest()
+        self._jwt_refresh_secret: str = hmac.new(jwt_secret_bytes, b"user_refresh_token", hashlib.sha256).hexdigest()
+        self._jwt_worker_secret: str = hmac.new(jwt_secret_bytes, b"worker_token", hashlib.sha256).hexdigest()
+
         # Keypair: caller provides a pre-loaded Ed25519PrivateKey
         # If None, a fresh keypair is generated (dev mode, NOT for production)
         if master_private_key is None:
@@ -126,6 +141,7 @@ class SecurityManager:
             encoding=Encoding.Raw, format=PublicFormat.Raw
         )
         self._master_public_key_b64: str = base64.urlsafe_b64encode(raw).decode()
+        self.audit_compromised: bool = False
         logger.info("SecurityManager initialized.")
 
     @property
@@ -273,7 +289,7 @@ class SecurityManager:
             "rotation_due": int(lifecycle["rotation_due"]),
             "jti": str(uuid.uuid4()),
         }
-        token = jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
+        token = jwt.encode(claims, self._jwt_worker_secret, algorithm=self._jwt_algorithm)
         return token, lifecycle
 
     def verify_worker_token(self, token: str) -> dict[str, Any]:
@@ -283,8 +299,14 @@ class SecurityManager:
         For DB revocation checking, use verify_worker_token_async().
         """
         try:
-            claims = jwt.decode(token, self._jwt_secret, algorithms=[self._jwt_algorithm])
+            claims = jwt.decode(token, self._jwt_worker_secret, algorithms=[self._jwt_algorithm])
         except JWTError as exc:
+            try:
+                unverified = jwt.get_unverified_claims(token)
+                if unverified.get("type") != "worker":
+                    raise ValueError("Token type mismatch: expected 'worker'")
+            except JWTError:
+                pass
             raise ValueError(f"Invalid worker token: {exc}") from exc
 
         if claims.get("type") != "worker":
@@ -331,10 +353,27 @@ class SecurityManager:
             "exp": now + self._jwt_access_token_ttl,
             "jti": str(uuid.uuid4()),
         }
-        return jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
+        return jwt.encode(claims, self._jwt_access_secret, algorithm=self._jwt_algorithm)
 
-    def create_refresh_token(self, user_id: str) -> str:
-        """Create a long-lived refresh token (opaque — just a JWT with limited claims)."""
+    @property
+    def jwt_access_token_ttl(self) -> int:
+        """Return the configured JWT access token TTL."""
+        return self._jwt_access_token_ttl
+
+    @property
+    def jwt_refresh_token_ttl(self) -> int:
+        """Return the configured JWT refresh token TTL."""
+        return self._jwt_refresh_token_ttl
+
+    @staticmethod
+    def hash_refresh_token(token: str) -> str:
+        """SHA256 fingerprint of the raw refresh token (for DB storage)."""
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def create_refresh_token(self, user_id: str, family_id: str | None = None) -> tuple[str, str]:
+        """Create a long-lived refresh token. Returns (token_str, family_id)."""
+        if family_id is None:
+            family_id = str(uuid.uuid4())
         now = int(time.time())
         claims = {
             "sub": user_id,
@@ -342,45 +381,48 @@ class SecurityManager:
             "iat": now,
             "exp": now + self._jwt_refresh_token_ttl,
             "jti": str(uuid.uuid4()),
+            "family_id": family_id,
         }
-        return jwt.encode(claims, self._jwt_secret, algorithm=self._jwt_algorithm)
+        token = jwt.encode(claims, self._jwt_refresh_secret, algorithm=self._jwt_algorithm)
+        return token, family_id
 
     def verify_access_token(self, token: str) -> dict[str, Any]:
-        """Decode and verify a user access token. Raises HTTPException on failure."""
+        """Decode and verify a user access token. Raises SecurityError on failure."""
         try:
-            claims = jwt.decode(token, self._jwt_secret, algorithms=[self._jwt_algorithm])
-        except JWTError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            claims = jwt.decode(token, self._jwt_access_secret, algorithms=[self._jwt_algorithm])
+        except jwt.ExpiredSignatureError as exc:
+            raise ExpiredTokenError("Token has expired") from exc
+        except JWTError as exc:
+            try:
+                unverified = jwt.get_unverified_claims(token)
+                if unverified.get("type") != "access":
+                    raise InvalidTokenError("Token type mismatch")
+            except JWTError:
+                pass
+            raise InvalidTokenError("Invalid token") from exc
+
         if claims.get("type") != "access":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token type mismatch",
-            )
+            raise InvalidTokenError("Token type mismatch")
         return claims
 
     def verify_refresh_token(self, token: str) -> dict[str, Any]:
-        """Decode and verify a refresh token."""
+        """Decode and verify a refresh token. Raises SecurityError on failure."""
         try:
-            claims = jwt.decode(token, self._jwt_secret, algorithms=[self._jwt_algorithm])
-        except JWTError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired refresh token",
-            )
-        if claims.get("type") != "refresh":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token type mismatch",
-            )
-        return claims
+            claims = jwt.decode(token, self._jwt_refresh_secret, algorithms=[self._jwt_algorithm])
+        except jwt.ExpiredSignatureError as exc:
+            raise ExpiredTokenError("Refresh token has expired") from exc
+        except JWTError as exc:
+            try:
+                unverified = jwt.get_unverified_claims(token)
+                if unverified.get("type") != "refresh":
+                    raise InvalidTokenError("Token type mismatch")
+            except JWTError:
+                pass
+            raise InvalidTokenError("Invalid refresh token") from exc
 
-    # -----------------------------------------------------------------------
-    # Password hashing
-    # -----------------------------------------------------------------------
+        if claims.get("type") != "refresh":
+            raise InvalidTokenError("Token type mismatch")
+        return claims
 
     @staticmethod
     def hash_password(plain: str) -> str:
@@ -391,68 +433,6 @@ class SecurityManager:
     def verify_password(plain: str, hashed: str) -> bool:
         """Verify a plaintext password against a bcrypt hash."""
         return _pwd_context.verify(plain, hashed)
-
-    # -----------------------------------------------------------------------
-    # RBAC FastAPI dependencies
-    # -----------------------------------------------------------------------
-
-    def get_current_user_claims(
-        self,
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
-        ],
-    ) -> dict[str, Any]:
-        """
-        FastAPI dependency: Extract and verify the JWT from the Authorization header.
-        Returns the full claims dict on success.
-        """
-        if credentials is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return self.verify_access_token(credentials.credentials)
-
-    def require_role(self, *required_roles: str):
-        """
-        FastAPI dependency factory: Require the caller to have one of the given roles.
-
-        Usage in a router:
-            @router.post("/secret", dependencies=[Depends(security.require_role("admin"))])
-
-        Or with injection:
-            @router.get("/data")
-            async def get_data(claims=Depends(security.require_role("operator", "admin"))):
-                ...
-        """
-        def _dependency(
-            credentials: Annotated[
-                HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
-            ],
-        ) -> dict[str, Any]:
-            if credentials is None:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Not authenticated",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-            claims = self.verify_access_token(credentials.credentials)
-            user_role = claims.get("role", "viewer")
-
-            # Check if the user's role satisfies ANY of the required roles
-            user_level = ROLES_HIERARCHY.get(user_role, 0)
-            required_level = min(
-                ROLES_HIERARCHY.get(r, 99) for r in required_roles
-            )
-            if user_level < required_level:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Insufficient permissions. Required: {required_roles}",
-                )
-            return claims
-
-        return _dependency
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,20 @@ class Settings(BaseModel):
             return v
         return [o.strip() for o in v.split(",") if o.strip()]
 
+    @field_validator("cors_origins")
+    @classmethod
+    def _reject_wildcard_with_credentials(cls, v: list[str]) -> list[str]:
+        if "*" in v:
+            import logging
+            _log = logging.getLogger(__name__)
+            _log.warning(
+                "CORS_ORIGINS contains '*' — this is incompatible with "
+                "allow_credentials=True (hardcoded in main.py). "
+                "Browsers will reject credentialed requests. "
+                "Set specific origins instead."
+            )
+        return v
+
     @field_validator("trusted_proxies", mode="before")
     @classmethod
     def _parse_trusted_proxies(cls, v: str | list[str]) -> list[str]:
