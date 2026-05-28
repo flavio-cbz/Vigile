@@ -41,7 +41,7 @@ Pour pallier ces faiblesses, **Vigile** sépare le cerveau décisionnel du bras 
 |  - API FastAPI                                        |
 |  - SQLite (aiosqlite) - Users, Nodes, Audit Trail     |
 |  - Agent LLM & Actions de Chat                        |
-|  - Dashboard Jinja2/HTMX                              |
+|  - Frontend React SPA                                 |
 +--------------------------^----------------------------+
                            |
                      (WebSocket)

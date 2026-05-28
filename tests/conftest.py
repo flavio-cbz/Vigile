@@ -2,6 +2,7 @@ import os
 os.environ["LLM_BASE_URL"] = "http://test-llm:8000/v1"
 os.environ["LLM_API_KEY"] = "test-key"
 os.environ["LLM_MODEL"] = "test-model"
+os.environ["TESTING"] = "true"
 
 import pytest
 import aiosqlite

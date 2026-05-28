@@ -5,5 +5,17 @@
     "opencode-websearch-cited@latest",
     "opencode-shell-strategy@latest",
     "opencode-notify@latest"
-  ]
+  ],
+  "provider": {
+    "opencode": {
+      "models": {
+        "deepseek-v4-flash-free": {
+          "limit": {
+            "context": 1048576,
+            "output": 262144
+          }
+        }
+      }
+    }
+  }
 }

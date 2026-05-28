@@ -199,6 +199,7 @@ def require_role(*roles: str) -> Any:
 
 import asyncio
 
+_init_lock = threading.RLock()
 _llm_client: "LLMClient | None" = None
 _structured_llm: "StructuredLLM | None" = None
 _insights_manager: Any = None
@@ -207,50 +208,70 @@ _insights_manager: Any = None
 def get_llm_client() -> "LLMClient":
     """Return the LLMClient singleton, initializing it on first call."""
     global _llm_client
-    if _llm_client is None:
-        from master.config import settings
-        from master.core.llm_client import LLMClient
-        if not settings.llm_base_url:
-            raise RuntimeError(
-                "LLM not configured. Set LLM_BASE_URL environment variable."
+    with _init_lock:
+        if _llm_client is None:
+            from master.config import settings
+            from master.core.llm_client import LLMClient
+            if not settings.llm_base_url:
+                raise RuntimeError(
+                    "LLM not configured. Set LLM_BASE_URL environment variable."
+                )
+            _llm_client = LLMClient(
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key,
+                model=settings.llm_model,
             )
-        _llm_client = LLMClient(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
-        )
-    return _llm_client
+        return _llm_client
 
 
 def get_structured_llm() -> "StructuredLLM":
     """Return the StructuredLLM singleton, initializing it on first call."""
     global _structured_llm
-    if _structured_llm is None:
-        from master.core.structured_llm import StructuredLLM
-        _structured_llm = StructuredLLM(llm_client=get_llm_client())
-    return _structured_llm
+    with _init_lock:
+        if _structured_llm is None:
+            from master.core.structured_llm import StructuredLLM
+            _structured_llm = StructuredLLM(llm_client=get_llm_client())
+        return _structured_llm
 
 
 def get_insights_manager() -> Any:
     """Return the InsightsManager singleton, initializing it on first call."""
     global _insights_manager
-    if _insights_manager is None:
-        from master.core.insights import InsightsManager
-        llm_client = None
-        try:
-            llm_client = get_llm_client()
-        except RuntimeError:
-            pass
-        _insights_manager = InsightsManager(llm_client=llm_client)
-    return _insights_manager
+    with _init_lock:
+        if _insights_manager is None:
+            from master.core.insights import InsightsManager
+            llm_client = None
+            try:
+                llm_client = get_llm_client()
+            except RuntimeError:
+                pass
+            _insights_manager = InsightsManager(llm_client=llm_client)
+        return _insights_manager
 
 
 def reset_llm_clients() -> None:
     """Reset the LLM clients to force re-instantiation with new settings."""
     global _llm_client, _structured_llm, _insights_manager
-    _llm_client = None
-    _structured_llm = None
-    _insights_manager = None
+    with _init_lock:
+        _llm_client = None
+        _structured_llm = None
+        _insights_manager = None
+
+
+from fastapi import Header
+
+def get_locale(accept_language: Annotated[str | None, Header()] = None) -> str:
+    """Parse Accept-Language header to determine the client's locale ('fr' or 'en')."""
+    if not accept_language:
+        return "fr"
+    # Parse locales by priority
+    for part in accept_language.split(","):
+        clean_lang = part.split(";")[0].strip().lower()
+        if clean_lang.startswith("en"):
+            return "en"
+        if clean_lang.startswith("fr"):
+            return "fr"
+    return "fr"
 
 
 # ---------------------------------------------------------------------------
@@ -260,3 +281,4 @@ def reset_llm_clients() -> None:
 CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
 DB = Annotated[aiosqlite.Connection, Depends(get_db)]
 Insights = Annotated[Any, Depends(get_insights_manager)]
+

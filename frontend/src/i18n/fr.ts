@@ -1,0 +1,126 @@
+export const fr = {
+  // Navigation
+  "nav.dashboard": "Tableau de bord",
+  "nav.chat": "Chat IA",
+  "nav.proposals": "Propositions",
+  "nav.servers": "Serveurs",
+  "nav.admin": "ADMINISTRATION",
+  "nav.plugins": "Plugins",
+  "nav.audit": "Audit",
+  "nav.settings": "Paramètres",
+  "nav.profile": "Profil",
+
+  // Login
+  "login.title": "Connexion à Vigile",
+  "login.subtitle": "Gestion de flotte autonome sécurisée",
+  "login.username": "Nom d'utilisateur",
+  "login.password": "Mot de passe",
+  "login.btn": "Se connecter",
+  "login.error": "Identifiants invalides",
+  "login.success_password_change": "Mot de passe mis à jour avec succès !",
+
+  // Dashboard General
+  "dash.all_operational": "Tous les systèmes sont opérationnels",
+  "dash.servers_online": "{online}/{total} serveurs en ligne",
+  "dash.servers_offline_banner": "{count} serveur(s) hors ligne : {names}",
+  "dash.last_updated": "Mis à jour il y a {time}s",
+  "dash.stale_warning": "Données obsolètes (dernière mise à jour il y a >60s)",
+  "dash.view_all": "Voir tout",
+  "dash.empty_state": "Aucune donnée disponible",
+
+  // Swimlanes
+  "swim.servers": "Serveurs",
+  "swim.containers": "Conteneurs",
+  "swim.insights": "Insights IA",
+  "swim.activity": "Activité Récente",
+  "swim.trends": "Uptime & Tendances",
+
+  // Cards
+  "card.cpu": "CPU",
+  "card.ram": "RAM",
+  "card.disk": "Disque",
+  "card.uptime": "Uptime",
+  "card.restart": "Redémarrer",
+  "card.restarting": "Redémarrage...",
+  "btn.refresh": "Actualiser",
+  "card.status.running": "En cours",
+  "card.status.stopped": "Arrêté",
+  "card.status.restarting": "Redémarrage",
+  "card.analyze_ai": "Analyser avec l'IA →",
+
+  // Proposals
+  "prop.title": "Propositions d'actions",
+  "prop.risk": "Niveau de risque",
+  "prop.reasoning": "Raisonnement",
+  "prop.action": "Action",
+  "prop.status.pending": "En attente",
+  "prop.status.approved": "Approuvée",
+  "prop.status.rejected": "Rejetée",
+  "prop.status.executed": "Exécutée",
+  "prop.status.failed": "Échouée",
+  "prop.btn.approve": "Approuver",
+  "prop.btn.reject": "Rejeter",
+  "prop.reject_reason_title": "Raison du rejet",
+  "prop.reject_reason_placeholder": "Expliquez pourquoi vous rejetez cette proposition...",
+
+  // Audit
+  "audit.title": "Journal d'audit immuable",
+  "audit.subtitle": "Chaîne d'audit sécurisée par SHA256",
+  "audit.user": "Utilisateur",
+  "audit.action": "Action",
+  "audit.node": "Serveur",
+  "audit.timestamp": "Horodatage",
+  "audit.hash": "Signature de chaîne",
+  "audit.verified": "Chaîne validée cryptographiquement",
+
+  // Settings
+  "settings.title": "Paramètres de Vigile",
+  "settings.language": "Langue de l'interface",
+  "settings.lang_fr": "Français",
+  "settings.lang_en": "English",
+  "settings.theme": "Thème visuel",
+  "settings.save": "Enregistrer les modifications",
+
+  // Plugins
+  "plugins.title": "Catalogue de Plugins",
+  "plugins.status.active": "Actif",
+  "plugins.status.stale": "Obsolète",
+  "plugins.status.inactive": "Inactif",
+  "plugins.confirm_uninstall": "Êtes-vous sûr de vouloir désinstaller ce plugin ?",
+
+  // Add Server Modal
+  "add_node.title": "Ajouter un serveur",
+  "add_node.name_label": "Nom du serveur",
+  "add_node.name_placeholder": "ex: media-server",
+  "add_node.generate_token": "Générer un jeton",
+  "add_node.waiting": "⏳ En attente de la première connexion du Worker...",
+  "add_node.token_created": "Jeton d'enrôlement généré. Exécutez la commande suivante sur votre serveur :",
+  "add_node.success": "Serveur connecté avec succès !",
+
+  // Error States
+  "error.network": "Erreur réseau lors de la communication avec l'API.",
+  "error.retry": "Réessayer",
+  "error.load_data": "Impossible de charger les données.",
+
+  // Chat
+  "chat.welcome": "Bonjour ! Je suis Vigile Copilot. Je peux vous aider à superviser votre serveur et exécuter des commandes sécurisées. Posez-moi vos questions !",
+  "chat.welcome_multi": "Bonjour ! Je suis Vigile Copilot en mode plein écran. Je peux vous aider à superviser vos serveurs et exécuter des commandes sécurisées. Sélectionnez un serveur associé ou posez-moi une question globale.",
+  "chat.loading": "Chargement de la conversation...",
+  "chat.placeholder": "Poser une question, demander un rapport de métriques ou exécuter une commande...",
+  "chat.shift_enter": "Shift+Entrée pour saut de ligne",
+  "chat.associate": "Associer à :",
+  "chat.all_servers": "Tous les serveurs (Global)",
+  "chat.title_edit": "Modifier le titre",
+  "chat.title_new": "Nouvelle conversation",
+  "chat.user": "Vous",
+  "chat.copilot": "Vigile Copilot",
+  "chat.proposal_title": "Proposition d'action",
+  "chat.risk_level": "Risque : {level}",
+  "chat.btn.approve": "Approuver et Exécuter",
+  "chat.btn.reject": "Rejeter",
+  "chat.btn.approved": "Approuvée",
+  "chat.btn.rejected": "Rejetée",
+  "chat.copy": "Copier",
+  "chat.copied": "Copié !",
+  "chat.error_communication": "Désolé, une erreur est survenue lors de la communication avec l'assistant.",
+};

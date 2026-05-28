@@ -17,14 +17,16 @@ import uuid
 from typing import Annotated
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role
+from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role, Insights, get_insights_manager, get_locale
+from master.api.demo_data import DEMO_NODES, DEMO_USER_ID, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
 from master.core.audit import log_action
 from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
+from master.core.insights import NodeProfile, HeavyProcessConfig, DiagnosticReport
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,18 @@ class NodeResponse(BaseModel):
     enrolled_at: float | None
     created_at: float
     updated_at: float
+
+
+class BulkNodeStatus(BaseModel):
+    cpu: int | None = None
+    mem: int | None = None
+    disk: int | None = None
+    uptime: float | None = None
+    containers_count: int | None = None
+
+
+class BulkStatusResponse(BaseModel):
+    statuses: dict[str, BulkNodeStatus]
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +261,20 @@ async def generate_join_token(
 
     The token is single-use and expires in 30 minutes.
     """
+    # Demo mode: return mock response
+    if is_demo(claims):
+        master_url = request.app.state.master_url
+        fake_token = f"demo-join-token-{uuid.uuid4()}"
+        return JoinTokenResponse(
+            node_id="demo-node-99",
+            token=fake_token,
+            expires_in=1800,
+            curl_command=(
+                f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
+                f"sh -s -- --token {fake_token} --master {master_url}"
+            ),
+        )
+
     # 1. Pre-create node
     node_id = await nm.create_node(db, name=body.name, ip_prefix=body.ip_prefix)
 
@@ -339,8 +367,119 @@ async def list_nodes(
     nm: NodeManager = Depends(get_node_manager),
 ) -> list[NodeResponse]:
     """Return a list of registered nodes, with optional pagination."""
+    # Demo mode: return mock data
+    if is_demo(claims):
+        return [NodeResponse(**_node_to_response(n)) for n in DEMO_NODES]
+
     nodes = await nm.list_nodes(db, state=state, limit=limit, offset=offset)
     return [NodeResponse(**_node_to_response(n)) for n in nodes]
+
+
+@router.get(
+    "/verify-chain",
+    response_model=dict,
+    summary="Verify audit chain integrity with optional pagination (Admin only)",
+)
+async def verify_chain(
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("admin"))],
+    max_entries: int | None = Query(default=None, ge=1, le=100000, description="Max entries to verify"),
+) -> dict:
+    """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
+    # Demo mode: return mock data
+    if is_demo(claims):
+        return {"verified": True, "entries_checked": 5, "corrupted": False, "valid": True}
+
+    from master.core.audit import verify_chain as _verify_chain
+    report = await _verify_chain(db, max_entries=max_entries)
+    return report
+
+
+@router.get(
+    "/bulk/status",
+    response_model=BulkStatusResponse,
+    summary="Get bulk status metrics and container counts for all online nodes (Operator+)",
+)
+async def get_bulk_status(
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+) -> BulkStatusResponse:
+    """Get the latest metrics snapshots and container counts for all nodes in bulk."""
+    import json
+    if is_demo(claims):
+        demo_statuses = {}
+        for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
+            is_online = node_id in ("demo-node-01", "demo-node-02")
+            if is_online:
+                snaps = get_demo_metrics(node_id, limit=1)
+                if snaps:
+                    snap = snaps[0]
+                    demo_statuses[node_id] = BulkNodeStatus(
+                        cpu=round(snap["cpu_percent"]) if snap.get("cpu_percent") is not None else None,
+                        mem=round(snap["mem_percent"]) if snap.get("mem_percent") is not None else None,
+                        disk=round(snap["disk_percent"]) if snap.get("disk_percent") is not None else None,
+                        uptime=snap.get("uptime_seconds"),
+                        containers_count=4 if node_id == "demo-node-01" else 0,
+                    )
+            else:
+                demo_statuses[node_id] = BulkNodeStatus()
+        return BulkStatusResponse(statuses=demo_statuses)
+
+    # Real mode
+    # 1. Fetch latest snapshots using window function
+    snapshots_map = {}
+    async with db.execute(
+        """
+        WITH RankedSnapshots AS (
+            SELECT
+                node_id,
+                cpu_percent,
+                mem_percent,
+                disk_percent,
+                uptime_seconds,
+                ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY collected_at DESC) as rn
+            FROM metrics_snapshots
+        )
+        SELECT node_id, cpu_percent, mem_percent, disk_percent, uptime_seconds
+        FROM RankedSnapshots
+        WHERE rn = 1
+        """
+    ) as cursor:
+        for row in await cursor.fetchall():
+            snapshots_map[row["node_id"]] = {
+                "cpu": round(row["cpu_percent"]) if row["cpu_percent"] is not None else None,
+                "mem": round(row["mem_percent"]) if row["mem_percent"] is not None else None,
+                "disk": round(row["disk_percent"]) if row["disk_percent"] is not None else None,
+                "uptime": row["uptime_seconds"],
+            }
+
+    # 2. Combine with container count from nodes cached_containers_json
+    statuses = {}
+    async with db.execute("SELECT id, cached_containers_json FROM nodes") as cursor:
+        for row in await cursor.fetchall():
+            node_id = row["id"]
+            snap = snapshots_map.get(node_id, {})
+            
+            containers_count = None
+            cached_containers = row["cached_containers_json"]
+            if cached_containers:
+                try:
+                    conts = json.loads(cached_containers)
+                    if isinstance(conts, list):
+                        containers_count = len(conts)
+                except Exception:
+                    pass
+            
+            statuses[node_id] = BulkNodeStatus(
+                cpu=snap.get("cpu"),
+                mem=snap.get("mem"),
+                disk=snap.get("disk"),
+                uptime=snap.get("uptime"),
+                containers_count=containers_count,
+            )
+
+    return BulkStatusResponse(statuses=statuses)
 
 
 @router.get(
@@ -355,6 +494,13 @@ async def get_node(
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeResponse:
     """Fetch detailed information for a single node."""
+    # Demo mode: return mock data
+    if is_demo(claims):
+        node = get_demo_node(node_id)
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+        return NodeResponse(**_node_to_response(node))
+
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -376,6 +522,10 @@ async def revoke_node(
     Revoke a node: disconnect it, invalidate its tokens, and mark it REVOKED.
     This action is permanent — a new enrollment is required to re-add the node.
     """
+    # Demo mode: no-op (simulate successful deletion)
+    if is_demo(claims):
+        return None
+
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -458,6 +608,17 @@ async def get_node_stats(
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
     """Return the latest metrics snapshots for a node, ordered by time descending."""
+    # Demo mode: return mock metrics
+    if is_demo(claims):
+        demo_node = get_demo_node(node_id)
+        if demo_node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+        snapshots = get_demo_metrics(node_id, limit)
+        return NodeStatsResponse(
+            node_id=node_id,
+            snapshots=[MetricsSnapshotResponse(**s) for s in snapshots],
+        )
+
     # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
@@ -490,22 +651,6 @@ async def get_node_stats(
 
 
 @router.get(
-    "/verify-chain",
-    response_model=dict,
-    summary="Verify audit chain integrity with optional pagination (Admin only)",
-)
-async def verify_chain(
-    db: DB,
-    claims: Annotated[dict, Depends(require_role("admin"))],
-    max_entries: int | None = Query(default=None, ge=1, le=100000, description="Max entries to verify"),
-) -> dict:
-    """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
-    from master.core.audit import verify_chain as _verify_chain
-    report = await _verify_chain(db, max_entries=max_entries)
-    return report
-
-
-@router.get(
     "/{node_id}/logs",
     response_model=LogsResponse,
     summary="Get live logs from a node (Operator+)",
@@ -528,6 +673,21 @@ async def get_node_logs(
 
     If neither `service` nor `path` is specified, defaults to `/var/log/syslog`.
     """
+    # Demo mode: return mock logs
+    if is_demo(claims):
+        demo_node = get_demo_node(node_id)
+        if demo_node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+        _effective_path = path if path else "/var/log/syslog"
+        logs = get_demo_logs(service, _effective_path, lines)
+        return LogsResponse(
+            node_id=node_id,
+            output="\n".join(logs),
+            lines=len(logs),
+            service=service,
+            path=_effective_path if not service else None,
+        )
+
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -592,3 +752,150 @@ def _node_to_response(node: dict) -> dict:
         "created_at": node["created_at"],
         "updated_at": node["updated_at"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Insights & Profiling Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{node_id}/insights",
+    summary="Get real-time insights for a node (Operator+)",
+)
+async def get_node_insights(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    im: Insights,
+    nm: NodeManager = Depends(get_node_manager),
+    locale: str = Depends(get_locale),
+) -> dict:
+    """Fetch real-time natural language insights for CPU, memory, and disk usage."""
+    if is_demo(claims):
+        return {
+            "node_id": node_id,
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "insights": [
+                {
+                    "type": "disk",
+                    "severity": "warning",
+                    "icon": "⚠️",
+                    "headline": "Disk full in 1 week and 3 days" if locale == "en" else "Disque plein dans 1 semaine et 3j",
+                    "detail": "+2.4 GB / day growth rate" if locale == "en" else "Taux de croissance de +2.4 Go / jour",
+                    "raw": {
+                        "used_percent": 80.0,
+                        "free_gb": 24.0,
+                        "growth_gb_per_day": 2.4
+                    }
+                },
+                {
+                    "type": "cpu",
+                    "severity": "warning",
+                    "icon": "🔥",
+                    "headline": "Higher than normal load · Plex Transcoding" if locale == "en" else "Charge supérieure à la normale · Transcodage Plex",
+                    "detail": "Sustained load (60%) attributed to Plex container" if locale == "en" else "Charge soutenue (60%) imputée au conteneur Plex",
+                    "raw": {
+                        "cpu_percent": 60.0,
+                        "culprit_container": "plex",
+                        "culprit_service": None
+                    }
+                },
+                {
+                    "type": "ram",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable memory" if locale == "en" else "Mémoire stable",
+                    "detail": "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)",
+                    "raw": {
+                        "used_percent": 65.0,
+                        "used_gb": 10.4,
+                        "total_gb": 16.0,
+                        "swap_used_mb": 0.0
+                    }
+                }
+            ],
+            "profile_confidence": "high"
+        }
+
+    # Verify node exists
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    return await im.get_insights(node_id, db, nm, locale=locale)
+
+
+@router.post(
+    "/{node_id}/profile/regenerate",
+    response_model=NodeProfile,
+    summary="Regenerate node profile manually (Operator+)",
+)
+async def regenerate_node_profile(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    im: Insights,
+    nm: NodeManager = Depends(get_node_manager),
+    locale: str = Depends(get_locale),
+) -> NodeProfile:
+    """Manually trigger LLM/heuristic profile regeneration for a node."""
+    if is_demo(claims):
+        return NodeProfile(
+            node_id=node_id,
+            known_heavy_processes=[
+                HeavyProcessConfig(container_name="plex", cpu_threshold_percent=50.0, label="Plex Transcoding" if locale == "en" else "Transcodage Plex")
+            ],
+            baseline_ram_percent=70.0,
+            context_label="Homelab Server" if locale == "en" else "Serveur homelab"
+        )
+
+    # Verify node exists
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    try:
+        profile = await im.generate_profile(node_id, db, nm, force=True, locale=locale)
+        return profile
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate profile: {e}",
+        )
+
+
+@router.post(
+    "/{node_id}/insights/analyze",
+    response_model=DiagnosticReport,
+    summary="Analyze anomaly using LLM diagnostic (Operator+)",
+)
+async def analyze_node_anomaly(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    im: Insights,
+    nm: NodeManager = Depends(get_node_manager),
+    locale: str = Depends(get_locale),
+) -> DiagnosticReport:
+    """Analyze current metrics and services with LLM to produce an anomaly diagnostic report."""
+    if is_demo(claims):
+        return DiagnosticReport(
+            headline="Plex transcoding task detected" if locale == "en" else "Tâche de transcodage Plex détectée",
+            explanation="The Plex container is currently transcoding a 4K H.265 video stream to 1080p H.264 for client 'iPad-de-Flavio'. This operation intensively uses the CPU (60%)." if locale == "en" else "Le conteneur Plex effectue actuellement le transcodage d'un flux vidéo 4K H.265 vers 1080p H.264 pour le client 'iPad-de-Flavio'. Cette opération sollicite intensément le processeur (60%).",
+            suggested_action="No action required. If this impacts other services, you can limit Plex CPU or enable hardware acceleration (GPU transcoding)." if locale == "en" else "Aucune action requise. Si cela impacte d'autres services, vous pouvez limiter le CPU de Plex ou activer l'accélération matérielle (transcodage GPU)."
+        )
+
+    # Verify node exists
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    try:
+        report = await im.analyze_anomaly(node_id, db, nm, locale=locale)
+        return report
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Anomaly analysis failed: {e}",
+        )

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from master.api.deps import DB, require_role
+from master.api.demo_data import is_demo, DEMO_AUDIT_ENTRIES
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,22 @@ async def list_audit_entries(
     action: str | None = Query(default=None, description="Filter by action name"),
 ) -> AuditListResponse:
     """Fetch audit log entries, ordered by sequence descending, with pagination."""
+    # Demo mode: return mock data, no DB queries
+    if is_demo(claims):
+        entries = DEMO_AUDIT_ENTRIES
+        if node_id:
+            entries = [e for e in entries if e.get("node_id") == node_id]
+        if action:
+            entries = [e for e in entries if e.get("action") == action]
+        total = len(entries)
+        sliced = entries[offset : offset + limit]
+        return AuditListResponse(
+            entries=[AuditEntryResponse(**e) for e in sliced],
+            limit=limit,
+            offset=offset,
+            total=total,
+        )
+
     conditions = []
     params: list[Any] = []
 

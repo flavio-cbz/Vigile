@@ -78,6 +78,9 @@ async def worker_join_handler(websocket: WebSocket) -> None:
     remote = _get_remote_address(websocket)
     logger.info("Worker connected from %s (WS=%s)", remote, id(websocket))
 
+    if get_security_instance().audit_compromised:
+        raise _EnrollmentError(4433, "Security compromise detected")
+
     db = get_db_conn()
     node_id: str | None = None
 
@@ -399,6 +402,17 @@ async def _run_operational(
                 await plugin_manager.async_call(
                     "on_status_report", node_id=node_id, snapshot=snapshot, db=db
                 )
+                
+                # Trigger automatic profiling on first STATUS_REPORT
+                try:
+                    async with db.execute("SELECT insight_profile FROM nodes WHERE id = ?", (node_id,)) as cursor:
+                        row = await cursor.fetchone()
+                    if row and not row["insight_profile"]:
+                        from master.api.deps import get_insights_manager
+                        im = get_insights_manager()
+                        asyncio.create_task(im.generate_profile(node_id, db, node_manager))
+                except Exception as ex:
+                    logger.warning("Failed to start background profiling task for node %s: %s", node_id, ex)
             else:
                 logger.warning(
                     "Node %s: invalid STATUS_REPORT rejected", node_id
