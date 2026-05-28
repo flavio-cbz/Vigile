@@ -22,6 +22,7 @@ A plugin module must expose:
 import asyncio
 import importlib.util
 import inspect
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -47,6 +48,43 @@ class PluginManager:
         # { hook_name: [(plugin_name, callable)] }
         self._hooks: dict[str, list[tuple[str, Callable]]] = {}
         self._loaded_plugins: list[str] = []
+        self._db: Any | None = None
+        self._active_calls: dict[str, int] = {}
+        self._draining_plugins: set[str] = set()
+        self._enabled_plugins: set[str] | None = None
+
+    async def initialize(self, db: Any) -> None:
+        """
+        Initialize the plugin manager with a database connection
+        and load the set of enabled plugins.
+        """
+        self._db = db
+        try:
+            async with db.execute("SELECT plugin_id FROM plugin_configs WHERE enabled = 1") as cursor:
+                rows = await cursor.fetchall()
+                self._enabled_plugins = {row[0] for row in rows}
+            logger.info("PluginManager initialized. Enabled plugins: %s", self._enabled_plugins)
+        except Exception as e:
+            logger.error("Failed to query enabled plugins during PluginManager initialization: %s", e)
+            self._enabled_plugins = None
+
+    async def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
+        """
+        Retrieve configuration for a plugin from the database.
+        """
+        if self._db is None:
+            return {}
+        try:
+            async with self._db.execute(
+                "SELECT config_json FROM plugin_configs WHERE plugin_id = ?",
+                (plugin_name,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return json.loads(row[0])
+        except Exception as e:
+            logger.error("Error fetching config for plugin '%s': %s", plugin_name, e)
+        return {}
 
     # -----------------------------------------------------------------------
     # Registration
@@ -95,6 +133,12 @@ class PluginManager:
                     hook_name, plugin_name,
                 )
                 continue
+            
+            # Skip if disabled
+            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+                continue
+
+            self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
             try:
                 result = fn(**kwargs)
                 if result is not None:
@@ -103,6 +147,8 @@ class PluginManager:
                 logger.exception(
                     "Hook '%s' impl from '%s' raised an exception", hook_name, plugin_name
                 )
+            finally:
+                self._active_calls[plugin_name] -= 1
         return results
 
     def call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
@@ -113,6 +159,12 @@ class PluginManager:
         for plugin_name, fn in self._hooks.get(hook_name, []):
             if inspect.iscoroutinefunction(fn):
                 continue
+            
+            # Skip if disabled
+            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+                continue
+
+            self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
             try:
                 result = fn(**kwargs)
                 if result is not None:
@@ -121,11 +173,24 @@ class PluginManager:
                 logger.exception(
                     "Hook '%s' impl from '%s' raised an exception", hook_name, plugin_name
                 )
+            finally:
+                self._active_calls[plugin_name] -= 1
         return None
 
     # -----------------------------------------------------------------------
     # Async dispatch
     # -----------------------------------------------------------------------
+
+    async def _run_async_hook(self, plugin_name: str, fn: Callable, hook_name: str, **kwargs: Any) -> Any:
+        self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
+        try:
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            else:
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, lambda: fn(**kwargs))
+        finally:
+            self._active_calls[plugin_name] -= 1
 
     async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
         """
@@ -137,15 +202,15 @@ class PluginManager:
         tasks: list[asyncio.Future] = []
 
         for plugin_name, fn in self._hooks.get(hook_name, []):
-            if inspect.iscoroutinefunction(fn):
-                tasks.append(asyncio.create_task(fn(**kwargs), name=f"{plugin_name}.{hook_name}"))
-            else:
-                # Run sync hook in default thread pool to avoid blocking the loop
-                # run_in_executor returns an asyncio.Future (awaitable), not a coroutine
-                # Capture kwargs in closure to prevent cross-call contamination
-                loop = asyncio.get_running_loop()
-                fut = loop.run_in_executor(None, lambda f=fn, kw=kwargs: f(**kw))
-                tasks.append(fut)
+            # Skip if disabled
+            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+                continue
+
+            fut = asyncio.create_task(
+                self._run_async_hook(plugin_name, fn, hook_name, **kwargs),
+                name=f"{plugin_name}.{hook_name}"
+            )
+            tasks.append(fut)
 
         if not tasks:
             return []
@@ -193,38 +258,106 @@ class PluginManager:
                 continue
 
             plugin_name = fname[:-3]
-            plugin_path = os.path.join(plugins_dir, fname)
+
+            # Skip if explicitly disabled in database
+            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+                logger.info("Plugin '%s' is disabled in database — skipping load.", plugin_name)
+                continue
 
             # Dedup: skip if already loaded
             if plugin_name in self._loaded_plugins:
                 logger.debug("Plugin '%s' already loaded — skipped.", plugin_name)
                 continue
 
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    f"vigile.plugins.{plugin_name}", plugin_path
-                )
-                if spec is None or spec.loader is None:
-                    raise ImportError(f"Could not load spec for {plugin_path}")
-
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)  # type: ignore[union-attr]
-
-                if not hasattr(module, "register"):
-                    logger.warning(
-                        "Plugin '%s' has no register() function — skipped.", plugin_name
-                    )
-                    continue
-
-                module.register(self)
-                self._loaded_plugins.append(plugin_name)
+            success = self.load_plugin(plugin_name, plugins_dir)
+            if success:
                 loaded.append(plugin_name)
-                logger.info("Plugin loaded: %s", plugin_name)
-
-            except Exception:
-                logger.exception("Failed to load plugin '%s'", plugin_name)
 
         return loaded
+
+    def load_plugin(self, plugin_name: str, plugins_dir: str) -> bool:
+        """
+        Load a single plugin by name from a directory.
+        """
+        plugin_path = os.path.join(plugins_dir, f"{plugin_name}.py")
+        if not os.path.isfile(plugin_path):
+            logger.warning("Plugin file not found: %s", plugin_path)
+            return False
+
+        if plugin_name in self._loaded_plugins:
+            logger.debug("Plugin '%s' already loaded — skipped.", plugin_name)
+            return True
+
+        try:
+            module_name = f"vigile.plugins.{plugin_name}"
+            spec = importlib.util.spec_from_file_location(
+                module_name, plugin_path
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load spec for {plugin_path}")
+
+            module = importlib.util.module_from_spec(spec)
+            
+            # Register in sys.modules before executing to handle relative/absolute imports cleanly
+            import sys
+            sys.modules[module_name] = module
+            
+            spec.loader.exec_module(module)
+
+            if not hasattr(module, "register"):
+                logger.warning(
+                    "Plugin '%s' has no register() function — skipped.", plugin_name
+                )
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                return False
+
+            module.register(self)
+            self._loaded_plugins.append(plugin_name)
+            if self._enabled_plugins is not None:
+                self._enabled_plugins.add(plugin_name)
+            logger.info("Plugin loaded: %s", plugin_name)
+            return True
+        except Exception:
+            logger.exception("Failed to load plugin '%s'", plugin_name)
+            module_name = f"vigile.plugins.{plugin_name}"
+            import sys
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+            return False
+
+    async def unload_plugin(self, plugin_name: str) -> None:
+        """
+        Safely unload a plugin by unregistering hooks and draining active calls.
+        """
+        logger.info("Unloading plugin '%s'...", plugin_name)
+        self._draining_plugins.add(plugin_name)
+
+        # 1. Unregister all hooks
+        for hook_name in list(self._hooks.keys()):
+            self.unregister(hook_name, plugin_name)
+
+        # 2. Drain active running tasks
+        while self._active_calls.get(plugin_name, 0) > 0:
+            logger.debug(
+                "Draining plugin '%s' (active calls: %d)",
+                plugin_name, self._active_calls[plugin_name]
+            )
+            await asyncio.sleep(0.05)
+
+        # 3. Clean up loaded list and sys.modules
+        if plugin_name in self._loaded_plugins:
+            self._loaded_plugins.remove(plugin_name)
+        if self._enabled_plugins is not None and plugin_name in self._enabled_plugins:
+            self._enabled_plugins.remove(plugin_name)
+            
+        module_name = f"vigile.plugins.{plugin_name}"
+        import sys
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+            
+        self._draining_plugins.discard(plugin_name)
+        logger.info("Plugin '%s' unloaded successfully.", plugin_name)
 
     # -----------------------------------------------------------------------
     # Introspection

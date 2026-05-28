@@ -3,16 +3,15 @@
 *Ce fichier permet à n'importe quel assistant IA ou développeur de comprendre instantanément le contexte du projet, son architecture et son état d'avancement.*
 
 ---
-<!-- Dernière session : 2026-05-21 — Sprint 4.5 (Stabilisation & Migration Tests) FINI -->
+<!-- Dernière session : 2026-05-21 — Sprint 4.6 (Test Coverage Maximization to 93%) FINI -->
 <!--
 Résumé de la dernière session :
-- Sprint 4.5 (Stabilisation et Migration Tests) entièrement complété.
-- Résolution des 6 bugs critiques de LIMITS.md (Alembic initialization, rate limiter leak cleanup, refresh token family rotation, password force-change, pagination, plugin double-registration).
-- Correction de toutes les violations d'injection de dépendances (DI) pour les settings de Master.
-- Migration complète du harnais de test (~305 assertions) vers pytest (91 tests au total).
-- Suppression des répertoires de tests historiques tests/unit et tests/integration.
-- Réécriture globale du README.md.
-- Prochaine étape : Sprint 5 (Plugin Ecosystem - Home Assistant-like).
+- Sprint 4.6 (Hausse de la couverture de tests à 93%) entièrement complété.
+- Création de tests unitaires exhaustifs pour les routes API (test_auth.py, test_nodes.py, test_audit_api.py).
+- Augmentation de la couverture sur les modules de cœur (NodeManager, SecurityManager, RateLimiter, ActionProposal, StructuredLLM, Database) à 100%.
+- Correction des bugs dans la suite de tests (contrainte de clé étrangère SQLite pour nonexistent-user-id dans les tests de refresh token, et validation de longueur de mot de passe dans les tests de modification de mot de passe).
+- Validation de 189 tests unitaires avec une couverture globale de 93%.
+- Prochaine étape : Sprint 5 (Frontend React SPA).
 -->
 ---
 
@@ -45,13 +44,13 @@ Le système est divisé en deux composants majeurs :
 
 ---
 
-## 🚀 État d'avancement : SPRINT 5 (Plugin Ecosystem)
+## 🚀 État d'avancement : SPRINT 5 (Frontend React SPA)
 
-Sprints 1 à 4 terminés — Fondations, Plugins OS, Couche IA, et Frontend SSR + HTMX.
+Sprints 1 à 4 terminés — Fondations, Plugins OS, Couche IA, et prototype Frontend SSR + HTMX (remplacé par la React SPA).
 
-**Sprint 5 (Plugin Ecosystem) — En développement :**
+**Sprint 5 (Frontend React SPA) — En développement :**
 
-### ✅ Ce qui est implémenté et validé (218 Tests — terrain validé)
+### ✅ Ce qui est implémenté et validé (189 Tests Unitaires — Couverture globale 93% ✅)
 
 **Core (57 tests) :**
 
@@ -152,7 +151,7 @@ python -m pytest -v
 
 ## ⏭️ Prochaines Étapes (Sprint 5)
 
-**Sprint 5 : Plugin Ecosystem (Home Assistant-like)** ← PROCHAINE ÉTAPE
+**Sprint 5 : Frontend React SPA** ← PROCHAINE ÉTAPE
 
 **Sprint 2 : Plugins OS et Worker Go (Terminé ✅)**
 
@@ -179,10 +178,10 @@ python -m pytest -v
 - `ActionProposal` : modèle Pydantic + table DB (PENDING→APPROVED→EXECUTED|FAILED)
 - Chat API : POST /api/chat (SSE), POST /proposals/approve, POST /proposals/reject
 
-**Sprint 4 : Frontend (FastAPI + Jinja2 + HTMX + Tailwind) (Terminé ✅)**
+**Sprint 4 : Prototype Frontend (FastAPI + Jinja2 + HTMX + Tailwind) (Terminé ✅ — Déprécié/Remplacé)**
 
-- Architecture SSR avec Jinja2 templates servis par le Master
-- HTMX pour l'interactivité (navigation, polling stats, formulaires, dialogs)
+- Architecture SSR initiale avec Jinja2 templates (supprimés lors de la migration React au Sprint 5)
+- HTMX pour l'interactivité (navigation, polling, formulaires)
 - Responsive mobile et design System Glass Dark Ops (carrousels, overlays, sidebars)
 - ChatPanel/Copilot sidebar, NodeCard, LogViewer, AuditLog, Auth UI
 - Plugin Catalogue (page d'accueil)
@@ -201,15 +200,41 @@ python -m pytest -v
 - Nettoyage et suppression des répertoires de tests historiques `tests/unit` et `tests/integration`.
 - Réécriture globale du `README.md`.
 
-**Sprint 5 : Plugin Ecosystem (Home Assistant-like)**
+**Sprint 4.6 : Test Coverage Maximization to 93% (Terminé ✅)**
 
-- Format standard de plugins, catalogue installable
+- Augmentation de la couverture de test globale de 60% à 93% (dépassant l'objectif de 90%+).
+- Couverture complète de toutes les routes de l'API REST :
+  - Authentification (`tests/test_api/test_auth.py`)
+  - Nœuds (`tests/test_api/test_nodes.py`)
+  - Logs d'audit (`tests/test_api/test_audit_api.py`)
+- Couverture maximale (100% ou proche) pour tous les gestionnaires cœurs (`NodeManager`, `RateLimiter`, `SecurityManager`, `ActionProposal`, `StructuredLLM`, `Database`).
+- Résolution de deux bugs identifiés dans la suite de tests (contrainte FK sur les refresh tokens pour nonexistent-user-id et schéma de validation de longueur pour le mot de passe).
+
+**Sprint 5 : Frontend React SPA**
+- Reconstruire le frontend en React/Vite avec design Glass Dark Ops
+- Chat SSE streaming, proposals approve/reject, et Recharts
+- Intégration shadcn/ui et Tailwind CSS v4
+
+**Sprint 6 : Plugin SDK & Intégrations (Plugin Ecosystem)**
+- Format de plugin standardisé, catalogue installable
+- Intégrations concrètes (Home Assistant, Plex/Arr)
+- UI d'installation et activation dans le frontend
+
+**Sprint 7 : Automation Engine & Notifications**
 - Moteur d'automatisations (trigger → condition → action)
-- Exemples : backup, alerting, DNS updater
+- Alertes multi-canal (Webhook, Ntfy, Email SMTP)
 
-**Sprint 6 : Production Hardening**
+**Sprint 8 : Production Hardening & PostgreSQL**
+- Migration SQLite → PostgreSQL, rate limiter persistant
+- Rotation automatique WORKER_TOKEN, endpoint /metrics Prometheus
 
-- Rate limiting, rotation tokens, cross-compile Worker
+**Sprint 9 : Alertes Intelligentes & Runbooks**
+- Baseline automatique des métriques et alertes prédictives
+- Bibliothèque de runbooks pour auto-healing et rollback automatique
+
+**Sprint 10 : Mémoire Conversationnelle & Autonomie Graduée**
+- Historique et recherche sémantique des conversations
+- Niveaux d'autonomie graduée par type d'action
 
 ---
 *Fin du résumé. Fournis ce fichier comme contexte en début de chaque nouvelle session.

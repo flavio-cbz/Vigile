@@ -17,7 +17,7 @@ import time
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Path, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -34,6 +34,19 @@ from master.core.audit import log_action
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager
 from master.core.structured_llm import StructuredLLM
+
+from master.api.demo_data import (
+    DEMO_PROPOSALS,
+    delete_demo_chat_session,
+    get_demo_chat_session,
+    get_demo_chat_sessions,
+    get_demo_chat_tokens,
+    get_demo_proposal,
+    get_demo_proposal_from_text,
+    is_demo,
+    save_demo_chat_session,
+    update_demo_proposal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +70,7 @@ async def chat(
     nm: NodeManager = Depends(get_node_manager),
     llm: LLMClient = Depends(get_llm_client),
     sllm: StructuredLLM = Depends(get_structured_llm),
+    accept_language: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     """
     Send a message to the AI. Returns a SSE stream with tokens and tool calls.
@@ -65,7 +79,8 @@ async def chat(
       {
         "message": "What's the status of my server?",
         "node_id": "optional-node-uuid",
-        "history": []  # optional conversation history
+        "history": [],  # optional conversation history
+        "session_id": "optional-session-uuid"
       }
 
     SSE events:
@@ -77,12 +92,68 @@ async def chat(
     message = body.get("message", "")
     node_id = body.get("node_id")
     history = body.get("history", [])
+    session_id = body.get("session_id")
 
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
 
+    # Demo mode: intercept with simulated streaming (no LLM, no DB)
+    if is_demo(claims):
+        async def _demo_event_stream():
+            demo_tokens = get_demo_chat_tokens(message)
+            for token in demo_tokens:
+                yield f"data: {json.dumps({'type': 'token', 'content': token + ' '}, separators=(',', ':'))}\n\n"
+
+            # Look for a pending demo proposal
+            demo_proposal = get_demo_proposal_from_text(message)
+            if demo_proposal:
+                yield f"data: {json.dumps({'type': 'proposal', 'proposal_id': demo_proposal['id'], 'action': demo_proposal['action'], 'risk_level': demo_proposal['risk_level'], 'reasoning': demo_proposal['reasoning']}, separators=(',', ':'))}\n\n"
+
+            # Save session to in-memory dict if session_id provided
+            if session_id:
+                new_history = list(history) + [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": ' '.join(demo_tokens)},
+                ]
+                title = message[:40] + ("..." if len(message) > 40 else "")
+                save_demo_chat_session(
+                    session_id=session_id,
+                    user_id=claims["sub"],
+                    node_id=node_id,
+                    title=title,
+                    history=new_history,
+                )
+
+            yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
+
+        return StreamingResponse(
+            _demo_event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # If session_id is provided and history is empty, try loading it from DB
+    if session_id and not history:
+        async with db.execute(
+            "SELECT history_json FROM chat_sessions WHERE id = ? AND user_id = ?",
+            (session_id, claims["sub"]),
+        ) as cursor:
+            sess_row = await cursor.fetchone()
+        if sess_row:
+            try:
+                history = json.loads(sess_row["history_json"])
+            except Exception:
+                history = []
+
     # Build system prompt with node context if specified
-    system_prompt = await _build_chat_context(nm, db, node_id)
+    locale = "fr"
+    if accept_language and accept_language.lower().startswith("en"):
+        locale = "en"
+    system_prompt = await _build_chat_context(nm, db, node_id, locale)
 
     # Build messages array
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
@@ -113,7 +184,9 @@ async def chat(
                     return
 
             # After streaming, try to extract a structured proposal
-            if node_id:
+            # Note: Do not extract proposal if node_id is 'all' or None.
+            proposal = None
+            if node_id and node_id != "all":
                 proposal = await _try_extract_proposal(
                     sllm, node_id, message, token_buffer, claims["sub"]
                 )
@@ -128,6 +201,44 @@ async def chat(
                             'reasoning': proposal.reasoning,
                         }, separators=(',', ':'))}\n\n"
                     )
+
+            # Save chat history to DB if session_id is provided
+            if session_id:
+                new_history = history + [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": token_buffer}
+                ]
+                now = time.time()
+                history_str = json.dumps(new_history)
+                
+                async with db.execute(
+                    "SELECT title FROM chat_sessions WHERE id = ? AND user_id = ?",
+                    (session_id, claims["sub"]),
+                ) as cursor:
+                    sess_row = await cursor.fetchone()
+                
+                if sess_row:
+                    await db.execute(
+                        """
+                        UPDATE chat_sessions SET
+                            history_json = ?, updated_at = ?
+                        WHERE id = ? AND user_id = ?
+                        """,
+                        (history_str, now, session_id, claims["sub"]),
+                    )
+                else:
+                    title = message[:40] + ("..." if len(message) > 40 else "")
+                    db_node_id = node_id
+                    if db_node_id == "all":
+                        db_node_id = None
+                    await db.execute(
+                        """
+                        INSERT INTO chat_sessions (id, user_id, node_id, title, history_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (session_id, claims["sub"], db_node_id, title, history_str, now, now),
+                    )
+                await db.commit()
 
             # Final done event
             yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
@@ -165,6 +276,11 @@ async def list_proposals(
     ),
 ) -> list[dict[str, Any]]:
     """List all action proposals, optionally filtered by status."""
+    if is_demo(claims):
+        if status_filter:
+            return list(p for p in DEMO_PROPOSALS if p["status"] == status_filter)
+        return list(DEMO_PROPOSALS)
+
     if status_filter:
         async with db.execute(
             "SELECT * FROM action_proposals WHERE status = ? ORDER BY created_at DESC",
@@ -189,6 +305,12 @@ async def get_proposal(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
 ) -> dict[str, Any]:
     """Fetch a single action proposal by ID."""
+    if is_demo(claims):
+        prop = get_demo_proposal(proposal_id)
+        if prop is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+        return dict(prop)
+
     async with db.execute(
         "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
     ) as cursor:
@@ -214,6 +336,24 @@ async def approve_proposal(
     The intent is sent to the Worker via the existing WebSocket.
     The proposal status becomes EXECUTED or FAILED based on the result.
     """
+    if is_demo(claims):
+        prop = get_demo_proposal(proposal_id)
+        if prop is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+        if prop["status"] != "PENDING":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Proposal is {prop['status']}, not PENDING",
+            )
+        updates = {
+            "status": "EXECUTED",
+            "approved_by": claims["sub"],
+            "executed_at": time.time(),
+            "result_json": '{"success": true, "simulated": true}',
+        }
+        updated = update_demo_proposal(proposal_id, updates)
+        return dict(updated)
+
     # Fetch proposal
     async with db.execute(
         "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
@@ -300,6 +440,23 @@ async def reject_proposal(
     """
     reason = body.get("reason", "")
 
+    if is_demo(claims):
+        prop = get_demo_proposal(proposal_id)
+        if prop is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+        if prop["status"] != "PENDING":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Proposal is {prop['status']}, not PENDING",
+            )
+        updates = {
+            "status": "REJECTED",
+            "rejected_by": claims["sub"],
+            "rejection_reason": reason,
+        }
+        updated = update_demo_proposal(proposal_id, updates)
+        return dict(updated)
+
     async with db.execute(
         "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
     ) as cursor:
@@ -350,30 +507,214 @@ async def reject_proposal(
 
 
 # ---------------------------------------------------------------------------
+# Chat Sessions CRUD (Operator+)
+# ---------------------------------------------------------------------------
+
+
+class _SessionSaveRequest(BaseModel):
+    id: str | None = None
+    node_id: str | None = None
+    title: str
+    history: list[dict[str, Any]] = []
+
+
+@router.get(
+    "/sessions",
+    summary="List chat sessions (Operator+)",
+)
+async def list_sessions(
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    node_id: str | None = Query(default=None, description="Filter by node ID"),
+) -> list[dict[str, Any]]:
+    """List all chat sessions for the logged in user, optionally filtered by node_id."""
+    if is_demo(claims):
+        return get_demo_chat_sessions(claims["sub"])
+
+    user_id = claims["sub"]
+    if node_id and node_id != "all":
+        query = "SELECT * FROM chat_sessions WHERE user_id = ? AND node_id = ? ORDER BY updated_at DESC"
+        params = (user_id, node_id)
+    else:
+        query = "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC"
+        params = (user_id,)
+        
+    async with db.execute(query, params) as cursor:
+        rows = await cursor.fetchall()
+        
+    results = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["history"] = json.loads(d.pop("history_json"))
+        except Exception:
+            d["history"] = []
+        results.append(d)
+    return results
+
+
+@router.get(
+    "/sessions/{session_id}",
+    summary="Get chat session details (Operator+)",
+)
+async def get_session(
+    session_id: Annotated[str, Path(description="Session UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+) -> dict[str, Any]:
+    """Get the details and history of a specific chat session."""
+    if is_demo(claims):
+        sess = get_demo_chat_session(session_id)
+        if sess is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        return sess
+
+    user_id = claims["sub"]
+    async with db.execute(
+        "SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        
+    d = dict(row)
+    try:
+        d["history"] = json.loads(d.pop("history_json"))
+    except Exception:
+        d["history"] = []
+    return d
+
+
+@router.post(
+    "/sessions",
+    summary="Create or update a chat session (Operator+)",
+)
+async def save_session(
+    body: _SessionSaveRequest,
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+) -> dict[str, Any]:
+    """Create a new chat session or update an existing one's metadata and/or history."""
+    if is_demo(claims):
+        sess_id = body.id or str(uuid.uuid4())
+        db_node_id = body.node_id
+        if db_node_id == "all":
+            db_node_id = None
+        return save_demo_chat_session(
+            session_id=sess_id,
+            user_id=claims["sub"],
+            node_id=db_node_id,
+            title=body.title,
+            history=body.history,
+        )
+
+    user_id = claims["sub"]
+    sess_id = body.id or str(uuid.uuid4())
+    node_id = body.node_id
+    if node_id == "all":
+        node_id = None
+        
+    now = time.time()
+    history_str = json.dumps(body.history)
+    
+    async with db.execute(
+        "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?",
+        (sess_id, user_id),
+    ) as cursor:
+        exists = await cursor.fetchone() is not None
+        
+    if exists:
+        await db.execute(
+            """
+            UPDATE chat_sessions SET
+                node_id = ?, title = ?, history_json = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (node_id, body.title, history_str, now, sess_id, user_id),
+        )
+    else:
+        await db.execute(
+            """
+            INSERT INTO chat_sessions (id, user_id, node_id, title, history_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (sess_id, user_id, node_id, body.title, history_str, now, now),
+        )
+    await db.commit()
+    
+    return {
+        "id": sess_id,
+        "user_id": user_id,
+        "node_id": node_id,
+        "title": body.title,
+        "history": body.history,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    summary="Delete a chat session (Operator+)",
+)
+async def delete_session(
+    session_id: Annotated[str, Path(description="Session UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+) -> dict[str, Any]:
+    """Delete a chat session."""
+    if is_demo(claims):
+        deleted = delete_demo_chat_session(session_id)
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        return {"success": True}
+
+    user_id = claims["sub"]
+    async with db.execute(
+        "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        
+    await db.execute(
+        "DELETE FROM chat_sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    )
+    await db.commit()
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 
 async def _build_chat_context(
-    nm: NodeManager, db: DB, node_id: str | None
+    nm: NodeManager, db: DB, node_id: str | None, locale: str = "fr"
 ) -> str:
     """
     Build a system prompt with node context.
     If no node_id is specified, returns a generic sysadmin prompt.
     """
-    if not node_id:
+    lang_instruction = "You must always reply in English." if locale == "en" else "Tu dois toujours répondre en français."
+    if not node_id or node_id == "all":
         return (
             "You are a server fleet management AI assistant. "
             "You help operators monitor and manage their servers. "
             "When an action is needed, you can propose it and the operator will approve it. "
-            "Be concise, technical, and precise."
+            "Be concise, technical, and precise. "
+            f"{lang_instruction}"
         )
 
     node = await nm.get_node(db, node_id)
     if node is None:
         return (
             "You are a server fleet management AI assistant. "
-            "The specified node was not found."
+            "The specified node was not found. "
+            f"{lang_instruction}"
         )
 
     # Gather node context
@@ -417,6 +758,7 @@ async def _build_chat_context(
         "- RESTART_SERVICE: Restart a systemd service\n"
         "- LIST_CONTAINERS: List Docker containers\n"
         "- RESTART_CONTAINER: Restart a Docker container\n\n"
+        f"{lang_instruction}\n\n"
         "Current node context:\n"
     )
 

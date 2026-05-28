@@ -42,6 +42,28 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     await db.commit()
     logger.info("Tables and indexes OK.")
 
+    # Idempotent dynamic columns upgrade for insights and caching
+    async with db.execute("PRAGMA table_info(nodes)") as cursor:
+        columns = [row["name"] for row in await cursor.fetchall()]
+    
+    mutated = False
+    if "insight_profile" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile TEXT")
+        mutated = True
+    if "insight_profile_generated_at" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile_generated_at REAL")
+        mutated = True
+    if "cached_services_json" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN cached_services_json TEXT")
+        mutated = True
+    if "cached_containers_json" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN cached_containers_json TEXT")
+        mutated = True
+        
+    if mutated:
+        await db.commit()
+        logger.info("Added insights and caching columns to nodes table.")
+
     # Stamp Alembic version if not already versioned
     await db.execute(
         "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
@@ -56,7 +78,24 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
 
     # Seed data
     await _seed_default_admin(db)
+    await _seed_default_plugins(db)
     logger.info("Migrations complete.")
+
+
+async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
+    """
+    Seed default plugins in plugin_configs table if empty.
+    """
+    defaults = [("metrics", 1, "{}"), ("systemd", 1, "{}"), ("docker", 1, "{}")]
+    for p_id, enabled, config in defaults:
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json)
+            VALUES (?, ?, ?)
+            """,
+            (p_id, enabled, config),
+        )
+    await db.commit()
 
 
 async def _seed_default_admin(db: aiosqlite.Connection) -> None:

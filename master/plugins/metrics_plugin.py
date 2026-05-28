@@ -181,6 +181,29 @@ def register(pm) -> None:
 # Hook implementations
 # ---------------------------------------------------------------------------
 
+def get_config_schema() -> dict[str, Any]:
+    """Return plugin info and configuration schema."""
+    return {
+        "name": "Metrics Collector",
+        "description": "Collects and persists system health telemetry (CPU cores, loads, memory, swap, and disk percentages) via /proc pipelines.",
+        "category": "Monitoring",
+        "schema": {
+            "polling_interval": {
+                "type": "integer",
+                "title": "Polling Interval (seconds)",
+                "default": 60,
+                "description": "Frequency of metrics collection reports sent from the worker."
+            },
+            "retention_days": {
+                "type": "integer",
+                "title": "Metrics Retention (days)",
+                "default": 30,
+                "description": "Number of days to keep historical metrics snapshots in the database."
+            }
+        }
+    }
+
+
 def _get_supported_actions() -> list[str]:
     """Declare that this plugin handles the GET_STATS action."""
     return ["GET_STATS"]

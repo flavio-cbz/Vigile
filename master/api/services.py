@@ -28,6 +28,13 @@ from master.plugins.systemd_plugin import (
     parse_service_status,
 )
 from master.plugins.docker_plugin import ContainerSummary, parse_container_list
+from master.api.demo_data import (
+    DEMO_CONTAINERS,
+    DEMO_SERVICES,
+    get_demo_node,
+    get_demo_service,
+    is_demo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +134,11 @@ async def list_services(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceListResponse:
     """Fetch the list of all systemd services from a Worker."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ServiceListResponse(node_id=node_id, services=DEMO_SERVICES)
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "LIST_SERVICES", {})
 
@@ -159,6 +171,24 @@ async def get_service_status(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceStatusResponse:
     """Fetch the status of a specific systemd service on a Worker."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        svc = get_demo_service(service_name)
+        if svc is not None:
+            return ServiceStatusResponse(
+                node_id=node_id,
+                service=service_name,
+                active=svc.get("state", "active"),
+                enabled=svc.get("status", "enabled"),
+            )
+        return ServiceStatusResponse(
+            node_id=node_id,
+            service=service_name,
+            active="unknown",
+            enabled="unknown",
+        )
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "STATUS_SERVICE", {"service": service_name})
 
@@ -191,6 +221,16 @@ async def restart_service(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceActionResponse:
     """Restart a systemd service on a Worker (requires admin role)."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ServiceActionResponse(
+            node_id=node_id,
+            service=service_name,
+            output=f"Simulated restart of {service_name} completed successfully.",
+            error=None,
+        )
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "RESTART_SERVICE", {"service": service_name})
 
@@ -219,6 +259,11 @@ async def list_containers(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerListResponse:
     """Fetch the list of all Docker containers from a Worker."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ContainerListResponse(node_id=node_id, containers=DEMO_CONTAINERS)
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "LIST_CONTAINERS", {})
 
@@ -252,6 +297,16 @@ async def restart_container(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerActionResponse:
     """Restart a Docker container on a Worker (requires admin role)."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ContainerActionResponse(
+            node_id=node_id,
+            container_id=container_id,
+            output=f"Simulated restart of container {container_id} completed successfully.",
+            error=None,
+        )
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "RESTART_CONTAINER", {"container_id": container_id})
 

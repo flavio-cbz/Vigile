@@ -6,11 +6,13 @@ Loads all settings from environment variables with sensible defaults.
 import os
 import secrets
 from pathlib import Path
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 
 
 class Settings(BaseModel):
     """Application settings loaded from environment variables."""
+
+    model_config = ConfigDict(frozen=False)
 
     # --- Server ---
     master_url: str = os.getenv("MASTER_URL", "http://localhost:8000")
@@ -98,6 +100,13 @@ class Settings(BaseModel):
         if not self.jwt_secret_key:
             self.jwt_secret_key = secrets.token_hex(32)
             _log.warning("JWT_SECRET_KEY auto-generated (dev mode). Set it in production.")
+
+    def apply_overrides(self, base_url: str, api_key: str, model: str) -> None:
+        """Mutate LLM configuration in memory (Zero filesystem I/O per DI rule)."""
+        self.llm_base_url = base_url
+        if api_key != "••••••••":
+            self.llm_api_key = api_key
+        self.llm_model = model
 
 
 # Singleton

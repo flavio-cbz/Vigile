@@ -87,3 +87,40 @@ def test_proposal_to_db_roundtrip():
     assert restored.result == {"output": "ok"}
     assert restored.status == "EXECUTED"
     assert restored.approved_by == "admin"
+
+
+def test_proposal_invalid_transitions_extra():
+    """Verify other invalid transitions raise ValueError."""
+    p = ActionProposal(node_id="n1", action="RESTART_CONTAINER")
+    p.approve("user-1")
+    with pytest.raises(ValueError):
+        p.reject("user-2")
+
+    # Complete when not approved
+    p2 = ActionProposal(node_id="n1", action="RESTART_CONTAINER")
+    with pytest.raises(ValueError):
+        p2.complete(success=True, result_data={})
+
+
+def test_proposal_from_db_row_invalid_json():
+    """from_db_row handles invalid or null json strings gracefully."""
+    db_data = {
+        "id": "proposal-1",
+        "node_id": "node-1",
+        "action": "ACTION",
+        "params_json": "{}",
+        "result_json": "{invalid_json2}",
+        "reasoning": "",
+        "risk_level": "LOW",
+        "status": "PENDING",
+        "created_by": "ai",
+        "approved_by": None,
+        "rejected_by": None,
+        "rejection_reason": None,
+        "created_at": 123.0,
+        "updated_at": 123.0,
+        "executed_at": None,
+    }
+    restored = ActionProposal.from_db_row(db_data)
+    assert restored.params == {}
+    assert restored.result is None

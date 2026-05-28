@@ -17,7 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from master.api.deps import CurrentUser, DB, get_security
-from master.core.security_manager import SecurityManager
+from master.api.demo_data import DEMO_USERNAME, DEMO_PASSWORD, DEMO_USER_ID, is_demo
+from master.core.security_manager import SecurityManager, SecurityError
 from master.core.rate_limiter import rate_limiter
 from master.core.audit import log_action
 
@@ -86,6 +87,21 @@ async def login(
       - access_token  : short-lived JWT (default 1h) for API calls
       - refresh_token : long-lived token (default 24h) for token renewal
     """
+    # Demo user shortcut — no DB access
+    if body.username == DEMO_USERNAME and body.password == DEMO_PASSWORD:
+        access_token = sec.create_access_token(
+            user_id=DEMO_USER_ID,
+            username=DEMO_USERNAME,
+            role="admin",
+        )
+        refresh_token, _ = sec.create_refresh_token(user_id=DEMO_USER_ID)
+        logger.info("Demo user '%s' logged in (no DB).", DEMO_USERNAME)
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=sec.jwt_access_token_ttl,
+        )
+
     # Fetch user from DB
     async with db.execute(
         "SELECT id, username, password_hash, role, is_active FROM users WHERE username = ?",
@@ -177,10 +193,25 @@ async def refresh_token(
     """
     try:
         claims = sec.verify_refresh_token(body.refresh_token)
-    except HTTPException:
+    except SecurityError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
+        ) from exc
+
+    # Demo user shortcut — no DB access (refresh token claims only have "sub")
+    if claims.get("sub") == DEMO_USER_ID:
+        access_token = sec.create_access_token(
+            user_id=DEMO_USER_ID,
+            username=DEMO_USERNAME,
+            role="admin",
+        )
+        new_refresh_token, _ = sec.create_refresh_token(user_id=DEMO_USER_ID)
+        logger.info("Demo user refresh token rotated (no DB).")
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=new_refresh_token,
+            expires_in=sec.jwt_access_token_ttl,
         )
 
     user_id = claims["sub"]
@@ -324,6 +355,13 @@ async def change_password(
     sec: SecurityManager = Depends(get_security),
 ):
     """Change the password for the current authenticated user and reset their must_change_password flag."""
+    # Block demo user
+    if is_demo(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password change not allowed in demo mode",
+        )
+
     user_id = current_user["sub"]
 
     # Fetch user password hash

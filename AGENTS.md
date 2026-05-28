@@ -43,8 +43,8 @@ worker/                  # Go binary (stdlib-only, zero imports, flat package)
   containers.go          # Docker API via Unix socket
   services.go            # systemd service management
   Dockerfile             # Multi-stage (golang:1.23-alpine → alpine), 300 lines incl. inline test fixtures
-master/templates/        # Jinja2 templates (base, dashboard, node, proposals, audit, plugins)
-master/static/           # Custom CSS & JS (chat.js EventSource SSE)
+frontend/                # React SPA (Vite + TS + Tailwind v4 + Zustand + Recharts)
+master/static/           # React build served by FastAPI static files fallback
 ```
 
 ## Sprint status
@@ -54,9 +54,10 @@ master/static/           # Custom CSS & JS (chat.js EventSource SSE)
 | 1 | Core sec, enrollment, DB, Worker Go basics | ✅ Done |
 | 2 | Plugins OS (metrics, systemd, docker), APIs, simulation stack | ✅ Done |
 | 3 | LLMClient, StructuredLLM, ActionProposal, Chat API (+ SSE stream) | ✅ Done |
-| 4 | Frontend (Jinja2 + HTMX + Tailwind) | ✅ Done |
-| 5 | Plugin ecosystem (Home Assistant-like) | 🔜 Next |
-| 6+ | Prod hardening, autonomy | 📅 Planned |
+| 4 | Prototype Frontend (Jinja2 + HTMX + Tailwind) | ✅ Done |
+| 4.5/4.6| Stabilisation, tests, rate limiter fixes, 93% coverage | ✅ Done |
+| 5 | Frontend React SPA (Vite + TS + Tailwind v4 + Zustand + Recharts) | 🔜 Next / In progress |
+| 6 | Plugin ecosystem (Home Assistant-like) | 📅 Planned |
 
 See `docs/SESSION.md` for detailed status.
 
@@ -128,8 +129,8 @@ docker compose up -d master
 - `master/api/deps.py` imports `from master.config import settings` at module level — violates RULES.md §1 (should use lazy injection).
 - `master/config.py` uses `pydantic.BaseModel` + `os.getenv` directly, **not** `pydantic-settings`. The `model_post_init` hook auto-generates dev secrets.
 - CORS wildcard (`CORS_ORIGINS=*`) with `allow_credentials=True` is invalid per spec — see `docs/LIMITS.md`.
-- `master/templates/components/` is empty/dead directory — ignore.
-- `frontend/` exists but is **empty** — placeholder for Sprint 4.
+- `master/templates/` has been deleted (deprecated Jinja2/HTMX SSR frontend).
+- `frontend/` contains the React SPA application (Vite + TypeScript + React 19).
 - `docker-compose.yml` has a hardcoded LLM API key — security risk.
 - **No CI/CD**: no `.github/`, no `.editorconfig`, no `.pre-commit-config.yaml`, no Makefile, no pyproject.toml.
 

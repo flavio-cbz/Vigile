@@ -39,7 +39,7 @@ Ce que ça garantit :
 ### Dépendances acceptées
 
 | Couche | Dépendances | Justification |
-|--------|-------------|---------------|
+| -------- | ------------- | --------------- |
 | **Master (Python)** | `fastapi`, `uvicorn`, `aiosqlite`→`asyncpg`, `python-jose`, `passlib`, `httpx`, `pydantic` | Fondations bas-niveau stables |
 | **Worker (Go)** | **Zéro import externe** — stdlib uniquement | Sécurité maximale |
 | **Frontend (React)** | `react`, `vite`, `tailwindcss`, `shadcn/ui`, `recharts`, `zustand` | Outils de construction UI |
@@ -52,7 +52,7 @@ Ce que ça garantit :
 ## Sources d'Inspiration (Code Étudié, Pas Installé)
 
 | Projet Open Source | Ce qu'on étudie | Ce qu'on implémente nativement |
-|---|---|---|
+| --- | --- | --- |
 | **LiteLLM** | Abstraction universelle provider, format OpenAI-compatible | `LLMClient` : httpx, stream SSE, zéro vendor lock |
 | **Open WebUI** | Format message chat, streaming SSE côté React | Composant `ChatPanel` React natif, SSE reader |
 | **Instructor** | Boucle retry sur structured outputs, validation Pydantic | `StructuredLLM` : wrapper qui force un schéma Pydantic |
@@ -167,7 +167,7 @@ REVOKED      → Révocation manuelle ou sécurité, toute connexion refusée
 ### RBAC
 
 | Rôle | Stats | Logs | Approuver action | Gérer nodes | Gérer users |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | **Viewer** | ✓ | ✓ | ✗ | ✗ | ✗ |
 | **Operator** | ✓ | ✓ | ✓ | ✗ | ✗ |
 | **Admin** | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -206,7 +206,7 @@ MASTER FASTAPI (configurable, stocké en base)
 ### Niveaux de classification des commandes
 
 | Niveau | Comportement | Exemples |
-|--------|-------------|----------|
+| -------- | ------------- | ---------- |
 | `READ_ONLY` | Exécution directe sans confirmation | `docker.ps`, `systemd.status` |
 | `AMBIGUOUS` | Avertissement d'exposition de données | `docker.logs`, `file.read.config` |
 | `DESTRUCTIVE` | Confirmation humaine obligatoire | `docker.stop`, `service.reload.nginx` |
@@ -286,8 +286,7 @@ vigile/
 │   ├── db/
 │   │   ├── models.py                # DDL (SQLite → PostgreSQL)
 │   │   └── migrations.py            # Migrations versionnées
-│   ├── templates/                   # Jinja2 (legacy, conservé comme fallback)
-│   └── static/                      # Build React servi en prod
+│   └── static/                      # Fichiers statiques et assets du build React (dist/)
 │
 ├── frontend/                        # React SPA (Sprint 5)
 │   ├── src/
@@ -343,107 +342,75 @@ vigile/
 
 ---
 
-## Roadmap par Sprints
-
-### Sprints terminés
+### Sprints terminés ou en cours
 
 | Sprint | Contenu | Statut |
-|--------|---------|--------|
-| 1 | Core Sécurisé : SecurityManager, NodeManager, PluginManager, DB, WebSocket enrollment, Worker Go basics | ✅ Done |
-| 2 | Plugins OS : metrics, systemd, docker + APIs REST + kickstart.sh + simulation stack | ✅ Done |
-| 3 | Couche IA : LLMClient, StructuredLLM, ActionProposal, Chat API (SSE stream) | ✅ Done |
-| 4 | Frontend Jinja2 + HTMX + Tailwind CSS v4 (Glass Dark Ops design) | ✅ Done |
+| -------- | --------- | -------- |
+| 1 | Core Sécurisé : SecurityManager, NodeManager, PluginManager, DB, WebSocket enrollment, Go Worker | ✅ Terminé |
+| 2 | Plugins OS : metrics, systemd, docker + APIs REST + kickstart.sh + simulation stack | ✅ Terminé |
+| 3 | Couche IA : LLMClient, StructuredLLM, ActionProposal, Chat API (SSE stream) | ✅ Terminé |
+| 4 | Prototype Frontend (Jinja2 + HTMX) | ❌ Déprécié / Remplacé |
+| 4.5/4.6| Stabilisation, tests, rate limiter fixes, 93% couverture backend | ✅ Terminé |
+| 5 | Frontend React SPA (Architecture de base Vite + TS + Zustand + Recharts) | ✅ Terminé |
+| 5.5 | Refonte UX/UI & Alignement IA (Obsidian Command, Netflix Swimlanes, i18n, Lucide Icons) | 🔜 En cours |
 
 ---
 
-### Sprint 4.5 — Stabilisation & Migration Tests 🔧
+### Sprint 5.5 — Refonte UX/UI & Alignement IA (Obsidian Command) 🎨
 
-**Objectif** : Corriger les bugs critiques documentés dans LIMITS.md et migrer le framework de test vers pytest. Aucune feature nouvelle.
+**Objectif** : Reconstruire et sublimer le frontend en React/Vite en abandonnant le style "Glass Dark Ops" au profit de la direction artistique premium **"Obsidian Command"** et du layout **"Netflix Swimlanes"** pour le Dashboard.
 
 **Critères de sortie** :
-- [ ] Tous les bugs 🔴 de LIMITS.md corrigés
-- [ ] Suite pytest opérationnelle avec couverture ≥ anciens 305 checks
-- [ ] README.md mis à jour (plus d'informations fausses)
-- [ ] Tous les tests verts
+
+- [ ] Design Obsidian Command appliqué à toutes les pages (Indigo + Lavande sur Noir profond #0a0a0f)
+- [ ] Dashboard restructuré sous forme de swimlanes horizontales (Netflix-style) :
+  - Hero Banner d'état global avec les noms des serveurs en panne (5-Second Rule)
+  - Swimlane "Serveurs" (cartes avec statuts et mini-barres de métriques)
+  - Swimlane "Conteneurs" (tous les conteneurs triés avec pannes en premier, actions rapides de restart)
+  - Swimlane "Insights IA" (diagnostic textuel et projections temporelles)
+  - Swimlane "Activité Récente" (historique des actions et propositions)
+  - Swimlane "Uptime & Tendances" (sparklines par serveur sur 24h/7j)
+- [ ] Nettoyage de la dette technique : adoption globale de `useApi` et `usePolling`, suppression des `alert()` natifs et du code mort (`App.css`, etc.)
+- [ ] Unification de l'état conversationnel de l'IA (Zustand `chatStore`) partagé entre la page Chat, le CopilotPanel (volet latéral) et VigilInsights (actions one-shot)
+- [ ] Intégration de `lucide-react` (icônes uniformisées, zéro émojis)
+- [ ] Support minimal multilingue (i18n) préparé avec sélecteur FR/EN dans Settings et prompts LLM traduits selon la langue de l'UI
+- [ ] Navigation simplifiée : regroupement d'Audit et Plugins sous un menu collapsible "Administration" dans la Sidebar
 
 **Contenu** :
 
-#### Bugs critiques (LIMITS.md 🔴)
+#### Setup & Refactoring
 
-| Bug | Fix |
-|-----|-----|
-| Rate limiter : `cleanup_expired()` jamais appelé | Tâche asyncio périodique dans le lifespan |
-| Refresh token sans invalidation | Table `refresh_tokens` avec flag `revoked` |
-| Pas de force-change admin password | Flag `must_change_password` + middleware |
-| Plugin deduplication absente | Check `already_loaded` dans `load_plugins_from_dir()` |
-| Aucune pagination sur `list_nodes` et `verify_chain` | `limit`/`offset` params sur les endpoints REST |
-| Migration DB non versionnée | Table `schema_version` + scripts numérotés |
+- Configurer Tailwind CSS v4 avec les nouveaux tokens Obsidian Command dans `src/styles/`
+- Implémenter l'infrastructure i18n et localiser les composants clés
+- Remplacer les 46 appels de fetch bruts par `useApi`
+- Remplacer les `setInterval` individuels par le registre `usePolling`
 
-#### Migration Tests
+#### Pages et Composants
 
-- Installer pytest comme dépendance dev
-- Réécrire les 9 fichiers de test en pytest avec fixtures
-- Les 305 checks actuels deviennent le cahier des charges des tests pytest
-- Créer `conftest.py` avec fixtures partagées (fake DB, fake SecurityManager, etc.)
-- Supprimer l'ancien harness custom (`check()` + `results` pattern)
-
-#### README.md
-
-- Corriger les erreurs factuelles (Redis → SQLite, E2E → TLS)
-- Ajouter section Getting Started propre
-- Ajouter section Architecture avec diagramme
-- Garder l'histoire personnelle (c'est l'âme du projet)
-
----
-
-### Sprint 5 — Frontend React SPA 🎨
-
-**Objectif** : Reconstruire le frontend en React/Vite avec le design Glass Dark Ops identique au Sprint 4. Le Master sert le build React via `/static/` en prod.
-
-**Critères de sortie** :
-- [ ] Toutes les pages du Sprint 4 Jinja2 reproduites en React
-- [ ] Chat SSE streaming fonctionnel
-- [ ] Proposals approve/reject fonctionnel
-- [ ] Design pixel-perfect Glass Dark Ops
-- [ ] Vite dev proxy → FastAPI (:8000) configuré
-- [ ] Build prod copié dans `master/static/`, servi par FastAPI
-
-**Contenu** :
-
-#### Setup
-
-- Initialiser projet Vite + React + TypeScript dans `frontend/`
-- Configurer Tailwind CSS v4 avec la palette Glass Dark Ops
-- Configurer le proxy Vite → `http://localhost:8000/api/`
-- Ajouter shadcn/ui comme librairie de composants de base
-
-#### Pages
-
-| Page | Composants | Interactivité |
-|------|-----------|---------------|
-| **Login** | Auth form, JWT storage | POST /api/auth/login |
-| **Dashboard** | NodeCard carousel, MetricsBar, HeroDiscovery | Polling 15s |
-| **Node Detail** | Tabs (Stats, Services, Containers, Logs), MetricsChart | Polling + on-demand |
-| **Proposals** | ProposalList, ApproveButton, RejectButton | POST approve/reject |
-| **Audit** | AuditTimeline, HashVerification | GET + polling |
-| **Plugins** | PluginGrid, PluginCard | GET /api/plugins |
+| Page / Composant | Rôle & Améliorations | Interactivité |
+| ------ | ----------- | --------------- |
+| **Login** | Formulaire d'auth restructuré, bannières d'erreur et de succès vertes/rouges distinctes | POST /api/auth/login |
+| **Dashboard** | Hero Banner d'alerte, 5 Swimlanes Netflix horizontales avec snap-scroll et fondu | usePolling + useApi |
+| **Node Detail** | Décomposition en sous-composants (Header, Metrics, Containers, Services, Logs) | Actions directes (Restart) |
+| **Proposals** | Liste d'actions unifiée, modal de rejet avec raison obligatoire, toast notifications | POST approve/reject |
+| **Audit** | Table d'intégrité SHA256 reléguée dans le menu Administration | GET /api/admin/audit-verify |
+| **Plugins** | Grille d'activation et config reléguée dans le menu Administration, modal de confirmation | GET /api/admin/plugins |
 
 #### Composants clés
 
 | Composant | Technologie |
-|-----------|------------|
-| `ChatPanel` (Copilot sidebar) | EventSource SSE, streaming token-by-token |
-| `MetricsChart` | Recharts (line charts CPU/RAM/disk) |
-| `LogViewer` | Composant scroll avec auto-follow |
-| `ActionProposal` | Card glassmorphic avec boutons approve/reject |
+| ----------- | ------------ |
+| `HeroBanner` | Composant d'état d'alerte de santé globale avec nom des serveurs en panne |
+| `SwimLane` | Container de défilement horizontal fluide avec gradients de fondu et support clavier |
+| `chatStore` | Store Zustand unifié pour la persistance et le streaming SSE des conversations |
+| `InlineError` | Gestionnaire d'erreur et de retry par composant pour éviter les crashs de page |
 
-#### Design System
+#### Design System (Obsidian Command)
 
-- Palette : `#050505` (bg), `#0a0a0c` (surface), `#111114` (surface-2), `teal-400` (accent)
-- Glassmorphism : `bg-white/[0.02] border border-white/[0.05] backdrop-blur-xl`
-- Layout : Sidebar gauche (80→240px hover) + Main + Copilot droite (340-400px)
-- Typographie : Inter uniquement, text-[13px] à text-[15px]
-- Icônes : Tabler Icons SVG
+- Palette : `#0a0a0f` (bg), `#12121a` (surface-0), `#1a1a26` (surface-1), `#6366f1` (accent indigo), `#e8e4f0` (lavande primary)
+- Typographie : Inter (base 16px), JetBrains Mono pour le code/logs
+- Effets : Coins arrondis (12px), bordures fines `#2a2a3d`, plus de grain texture ni de coins HUD complexes
+- Icônes : Lucide React uniquement
 
 ---
 
@@ -452,6 +419,7 @@ vigile/
 **Objectif** : Créer un framework de plugins standardisé avec métadonnées, configuration UI, et les premières intégrations concrètes (Home Assistant, Plex/Arr).
 
 **Critères de sortie** :
+
 - [ ] Format de plugin documenté (manifest.json, hooks, config schema)
 - [ ] Plugin Home Assistant fonctionnel (lire config YAML, proposer des fixes)
 - [ ] Plugin Plex/Arr fonctionnel (monitoring, restart)
@@ -475,6 +443,7 @@ plugins/
 ```
 
 Chaque plugin déclare :
+
 - **Métadonnées** : nom, version, description, auteur, icône
 - **Configuration** : schéma JSON des paramètres (URL, tokens, chemins)
 - **Hooks** : `get_supported_actions`, `handle_intent`, `on_status_report`, etc.
@@ -483,7 +452,7 @@ Chaque plugin déclare :
 #### Intégrations concrètes
 
 | Plugin | Actions | Classification |
-|--------|---------|---------------|
+| -------- | --------- | --------------- |
 | **Home Assistant** | Lire config YAML, diagnostiquer logs, proposer fixes, restart service | READ_ONLY → DESTRUCTIVE |
 | **Plex** | Status API, sessions actives, restart service | READ_ONLY → DESTRUCTIVE |
 | **Radarr/Sonarr** | Status queue, health check, restart | READ_ONLY → DESTRUCTIVE |
@@ -502,6 +471,7 @@ Chaque plugin déclare :
 **Objectif** : Construire un moteur d'automatisations (trigger → condition → action) et un système de notifications multi-canal. C'est ce qui rend Vigile proactif plutôt que réactif.
 
 **Critères de sortie** :
+
 - [ ] Moteur d'automatisations fonctionnel avec au moins 5 triggers différents
 - [ ] Notifications Webhook + Ntfy + Email fonctionnelles
 - [ ] Au moins 3 automatisations pré-configurées (exemples)
@@ -523,7 +493,7 @@ Notification (alerte)
 ```
 
 | Type | Exemples |
-|------|----------|
+| ------ | ---------- |
 | **Triggers** | STATUS_REPORT reçu, métrique > seuil, service down, container restart, CRON timer, webhook entrant |
 | **Conditions** | CPU > 90% depuis 5min, disk usage > 80%, service failed, container exited, AND/OR/NOT |
 | **Actions** | Intent Worker (restart service/container), appel LLM (diagnostic), webhook sortant, notification |
@@ -532,7 +502,7 @@ Notification (alerte)
 #### Automatisations pré-configurées (exemples)
 
 | Nom | Trigger | Condition | Action |
-|-----|---------|-----------|--------|
+| ----- | --------- | ----------- | -------- |
 | **Disk Full Alert** | STATUS_REPORT | disk_usage > 85% | Notification Ntfy |
 | **Container Auto-Restart** | STATUS_REPORT | container exited (non-zero) | Restart container + notification |
 | **HA Config Watch** | Timer CRON (5min) | HA service état changed | Notification + diagnostic LLM |
@@ -540,7 +510,7 @@ Notification (alerte)
 #### Notifications
 
 | Canal | Implémentation |
-|-------|---------------|
+| ------- | --------------- |
 | **Webhook** | POST HTTP configurable (URL, headers, body template) |
 | **Ntfy** | POST sur `https://ntfy.sh/topic` ou instance self-hosted |
 | **Email** | SMTP async (aiosmtplib ou httpx vers un relay) |
@@ -560,6 +530,7 @@ Notification (alerte)
 **Objectif** : Rendre Vigile prêt pour un usage quotidien fiable. Migration SQLite → PostgreSQL, rate limiter robuste, métriques de santé, cross-compilation Worker.
 
 **Critères de sortie** :
+
 - [ ] PostgreSQL fonctionnel en remplacement de SQLite
 - [ ] Migration automatique depuis une base SQLite existante
 - [ ] Métriques `/metrics` Prometheus-compatible
@@ -580,7 +551,7 @@ Notification (alerte)
 #### Hardening
 
 | Fix | Détail |
-|-----|--------|
+| ----- | -------- |
 | Rate limiter | Redis ou PostgreSQL backend (pas memory) |
 | WORKER_TOKEN rotation | Rotation automatique soft (7j) / hard (30j) |
 | CORS validation | Refuser wildcard si `allow_credentials=True` |
@@ -601,6 +572,7 @@ Notification (alerte)
 **Objectif** : Donner à l'IA la capacité de détecter des problèmes avant qu'ils n'arrivent et d'exécuter des procédures de résolution pré-approuvées.
 
 **Critères de sortie** :
+
 - [ ] Baseline automatique des métriques (CPU/RAM/disk normaux vs anormaux)
 - [ ] Alertes prédictives fonctionnelles ("disque plein dans 3 jours")
 - [ ] Bibliothèque de runbooks (≥ 5 scénarios pré-configurés)
@@ -647,6 +619,7 @@ Runbook = {
 **Objectif** : L'IA se souvient des conversations précédentes, apprend des patterns d'approbation/rejet, et ajuste son niveau de confiance.
 
 **Critères de sortie** :
+
 - [ ] Conversations persistées et contextualisées par node
 - [ ] L'IA rappelle les incidents passés dans ses diagnostics
 - [ ] Niveaux de confiance par type d'action (auto-exécution des actions LOW risk)
@@ -663,7 +636,7 @@ Runbook = {
 #### Autonomie Graduée
 
 | Niveau de confiance | Comportement | Exemple |
-|---------------------|-------------|---------|
+| --------------------- | ------------- | --------- |
 | `AUTO` | Exécution directe, notification post-action | Restart container déjà approuvé 5x |
 | `NOTIFY` | Exécution + notification simultanée | Cleanup logs > 1GB |
 | `APPROVE` | Confirmation humaine requise (défaut) | Toute action nouvelle |
@@ -677,7 +650,7 @@ Runbook = {
 ### Sprints futurs (non planifiés en détail)
 
 | Sprint | Titre | Description courte |
-|--------|-------|--------------------|
+| -------- | ------- | -------------------- |
 | 11 | **Distribution & CI/CD** | GitHub Actions, releases binaires, kickstart.sh fonctionnel, Docker Hub |
 | 12 | **Mobile & WhatsApp** | PWA responsive, bot WhatsApp pour chatter avec Vigile |
 | 13+ | **Fleet Scale** | Multi-tenant, coordination multi-nœuds, canary deployment |
