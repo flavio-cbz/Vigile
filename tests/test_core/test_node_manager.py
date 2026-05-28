@@ -2,6 +2,7 @@ import pytest
 import asyncio
 import aiosqlite
 import time
+import unittest.mock as mock
 from unittest.mock import AsyncMock, MagicMock
 from master.core.node_manager import NodeManager, NodeState, ActiveConnection
 
@@ -333,10 +334,28 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
         future.set_result(True)
         node_manager._pending_intents["stale_int_id"] = future
 
-        # Start the monitor with extremely small interval to quickly complete 10+ cycles
-        await node_manager.start(heartbeat_interval=0.0001, lost_threshold=5, stale_threshold=10)
-        await asyncio.sleep(0.3)
-        await node_manager.stop()
+        # Mock asyncio.sleep to run virtualized tiny sleep durations instantly
+        sleep_count = 0
+        original_sleep = asyncio.sleep
+        async def mock_sleep(delay):
+            nonlocal sleep_count
+            if delay < 0.01:
+                sleep_count += 1
+                await original_sleep(0)
+            else:
+                await original_sleep(delay)
+
+        with mock.patch("asyncio.sleep", mock_sleep):
+            # Start the monitor with extremely small interval to quickly complete 10+ cycles
+            await node_manager.start(heartbeat_interval=0.0001, lost_threshold=5, stale_threshold=10)
+            
+            # Wait deterministically until calls reaches at least 12
+            for _ in range(50):
+                if calls >= 12:
+                    break
+                await original_sleep(0.01)
+                
+            await node_manager.stop()
 
         # The future should be cleaned up by the loop's stale intents cleanup
         assert "stale_int_id" not in node_manager._pending_intents

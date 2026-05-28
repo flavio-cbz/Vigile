@@ -268,3 +268,46 @@ async def test_get_node_logs_errors(client: AsyncClient, db, auth_headers):
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     finally:
         node_manager.send_intent = orig_send_intent
+
+
+@pytest.mark.asyncio
+async def test_get_bulk_status(client: AsyncClient, db, auth_headers, security: SecurityManager):
+    # Insert node and metrics snapshot
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at, cached_containers_json) "
+        "VALUES ('n-bulk', 'node-bulk', 'CONNECTED', ?, ?, ?)",
+        (time.time(), time.time(), '["c1", "c2"]')
+    )
+    await db.execute(
+        "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds) "
+        "VALUES ('s-bulk', 'n-bulk', ?, ?, 25.5, 8000, 4000, 50.0, 1000, 100, 20000, 5000, 25.0, 600.0)",
+        (time.time(), time.time())
+    )
+    await db.commit()
+
+    # 1. Test as operator (success)
+    response = await client.get("/api/nodes/bulk/status", headers=auth_headers("operator"))
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "statuses" in data
+    assert "n-bulk" in data["statuses"]
+    status_node = data["statuses"]["n-bulk"]
+    assert status_node["cpu"] == 26
+    assert status_node["mem"] == 50
+    assert status_node["disk"] == 25
+    assert status_node["uptime"] == 600.0
+    assert status_node["containers_count"] == 2
+
+    # 2. Test as viewer (403 forbidden)
+    response_viewer = await client.get("/api/nodes/bulk/status", headers=auth_headers("viewer"))
+    assert response_viewer.status_code == status.HTTP_403_FORBIDDEN
+
+    # 3. Test demo mode
+    # Inject a demo user token
+    token = security.create_access_token("demo-user", "demo", "operator")
+    headers = {"Authorization": f"Bearer {token}"}
+    response_demo = await client.get("/api/nodes/bulk/status", headers=headers)
+    assert response_demo.status_code == status.HTTP_200_OK
+    data_demo = response_demo.json()
+    assert "statuses" in data_demo
+    assert "demo-node-01" in data_demo["statuses"]

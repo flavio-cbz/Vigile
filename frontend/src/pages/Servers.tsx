@@ -51,7 +51,7 @@ export const Servers: React.FC = () => {
     fetchNodes();
   }, 30000);
 
-  // Fetch metrics in parallel for online nodes
+  // Fetch metrics in bulk for online nodes
   const fetchAllNodeDetails = async () => {
     const onlineNodes = nodes.filter((n) => n.online);
     if (onlineNodes.length === 0) return;
@@ -66,48 +66,52 @@ export const Servers: React.FC = () => {
       return next;
     });
 
-    await Promise.all(
-      onlineNodes.map(async (node) => {
-        try {
-          const statsPromise = api<any>(`/api/nodes/${node.id}/stats?limit=1`);
-          const containersPromise = api<{ containers: any[] }>(`/api/nodes/${node.id}/containers`).catch(() => null);
+    try {
+      const bulkData = await api<{ statuses: Record<string, { cpu: number | null, mem: number | null, disk: number | null, uptime: number | null, containers_count: number | null }> }>('/api/nodes/bulk/status');
 
-          const [statsData, containersData] = await Promise.all([statsPromise, containersPromise]);
-
-          let cpu = 0;
-          let mem = 0;
-          let disk = 0;
-          let uptimeStr = 'N/A';
-          let containersCount = 0;
-
-          if (statsData && statsData.snapshots && statsData.snapshots.length > 0) {
-            const snap = statsData.snapshots[0];
-            cpu = Math.round(snap.cpu_percent);
-            mem = Math.round(snap.mem_percent);
-            disk = Math.round(snap.disk_percent);
-
-            const uptSec = snap.uptime_seconds;
-            const days = Math.floor(uptSec / 86400);
-            const hrs = Math.floor((uptSec % 86400) / 3600);
-            uptimeStr = days > 0 ? `${days}j ${hrs}h` : `${hrs}h`;
+      if (bulkData && bulkData.statuses) {
+        const newMetrics: MetricsMap = {};
+        nodes.forEach((node) => {
+          const status = bulkData.statuses[node.id];
+          if (status) {
+            let uptimeStr = 'N/A';
+            if (status.uptime !== null && status.uptime !== undefined) {
+              const uptSec = status.uptime;
+              const days = Math.floor(uptSec / 86400);
+              const hrs = Math.floor((uptSec % 86400) / 3600);
+              uptimeStr = days > 0 ? `${days}j ${hrs}h` : `${hrs}h`;
+            }
+            newMetrics[node.id] = {
+              cpu: status.cpu ?? 0,
+              mem: status.mem ?? 0,
+              disk: status.disk ?? 0,
+              uptime: uptimeStr,
+              containersCount: status.containers_count ?? 0,
+              loading: false,
+            };
+          } else {
+            newMetrics[node.id] = {
+              cpu: 0,
+              mem: 0,
+              disk: 0,
+              uptime: 'N/A',
+              containersCount: 0,
+              loading: false,
+            };
           }
-
-          if (containersData && containersData.containers) {
-            containersCount = containersData.containers.length;
-          }
-
-          setNodeMetrics((prev) => ({
-            ...prev,
-            [node.id]: { cpu, mem, disk, uptime: uptimeStr, containersCount, loading: false }
-          }));
-        } catch (e) {
-          setNodeMetrics((prev) => ({
-            ...prev,
-            [node.id]: { cpu: 0, mem: 0, disk: 0, uptime: 'Error', containersCount: 0, loading: false }
-          }));
-        }
-      })
-    );
+        });
+        setNodeMetrics(newMetrics);
+      }
+    } catch (e) {
+      console.error('Error fetching bulk node details:', e);
+      setNodeMetrics((prev) => {
+        const next = { ...prev };
+        onlineNodes.forEach((node) => {
+          next[node.id] = { cpu: 0, mem: 0, disk: 0, uptime: 'Error', containersCount: 0, loading: false };
+        });
+        return next;
+      });
+    }
   };
 
   useEffect(() => {

@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Path, Query, Requ
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role, Insights, get_insights_manager
+from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role, Insights, get_insights_manager, get_locale
 from master.api.demo_data import DEMO_NODES, DEMO_USER_ID, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
 from master.core.audit import log_action
 from master.core.node_manager import NodeManager, NodeState
@@ -68,6 +68,18 @@ class NodeResponse(BaseModel):
     enrolled_at: float | None
     created_at: float
     updated_at: float
+
+
+class BulkNodeStatus(BaseModel):
+    cpu: int | None = None
+    mem: int | None = None
+    disk: int | None = None
+    uptime: float | None = None
+    containers_count: int | None = None
+
+
+class BulkStatusResponse(BaseModel):
+    statuses: dict[str, BulkNodeStatus]
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +396,93 @@ async def verify_chain(
 
 
 @router.get(
+    "/bulk/status",
+    response_model=BulkStatusResponse,
+    summary="Get bulk status metrics and container counts for all online nodes (Operator+)",
+)
+async def get_bulk_status(
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+) -> BulkStatusResponse:
+    """Get the latest metrics snapshots and container counts for all nodes in bulk."""
+    import json
+    if is_demo(claims):
+        demo_statuses = {}
+        for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
+            is_online = node_id in ("demo-node-01", "demo-node-02")
+            if is_online:
+                snaps = get_demo_metrics(node_id, limit=1)
+                if snaps:
+                    snap = snaps[0]
+                    demo_statuses[node_id] = BulkNodeStatus(
+                        cpu=round(snap["cpu_percent"]) if snap.get("cpu_percent") is not None else None,
+                        mem=round(snap["mem_percent"]) if snap.get("mem_percent") is not None else None,
+                        disk=round(snap["disk_percent"]) if snap.get("disk_percent") is not None else None,
+                        uptime=snap.get("uptime_seconds"),
+                        containers_count=4 if node_id == "demo-node-01" else 0,
+                    )
+            else:
+                demo_statuses[node_id] = BulkNodeStatus()
+        return BulkStatusResponse(statuses=demo_statuses)
+
+    # Real mode
+    # 1. Fetch latest snapshots using window function
+    snapshots_map = {}
+    async with db.execute(
+        """
+        WITH RankedSnapshots AS (
+            SELECT
+                node_id,
+                cpu_percent,
+                mem_percent,
+                disk_percent,
+                uptime_seconds,
+                ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY collected_at DESC) as rn
+            FROM metrics_snapshots
+        )
+        SELECT node_id, cpu_percent, mem_percent, disk_percent, uptime_seconds
+        FROM RankedSnapshots
+        WHERE rn = 1
+        """
+    ) as cursor:
+        for row in await cursor.fetchall():
+            snapshots_map[row["node_id"]] = {
+                "cpu": round(row["cpu_percent"]) if row["cpu_percent"] is not None else None,
+                "mem": round(row["mem_percent"]) if row["mem_percent"] is not None else None,
+                "disk": round(row["disk_percent"]) if row["disk_percent"] is not None else None,
+                "uptime": row["uptime_seconds"],
+            }
+
+    # 2. Combine with container count from nodes cached_containers_json
+    statuses = {}
+    async with db.execute("SELECT id, cached_containers_json FROM nodes") as cursor:
+        for row in await cursor.fetchall():
+            node_id = row["id"]
+            snap = snapshots_map.get(node_id, {})
+            
+            containers_count = None
+            cached_containers = row["cached_containers_json"]
+            if cached_containers:
+                try:
+                    conts = json.loads(cached_containers)
+                    if isinstance(conts, list):
+                        containers_count = len(conts)
+                except Exception:
+                    pass
+            
+            statuses[node_id] = BulkNodeStatus(
+                cpu=snap.get("cpu"),
+                mem=snap.get("mem"),
+                disk=snap.get("disk"),
+                uptime=snap.get("uptime"),
+                containers_count=containers_count,
+            )
+
+    return BulkStatusResponse(statuses=statuses)
+
+
+@router.get(
     "/{node_id}",
     response_model=NodeResponse,
     summary="Get a node's details (Operator+)",
@@ -670,13 +769,9 @@ async def get_node_insights(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     im: Insights,
     nm: NodeManager = Depends(get_node_manager),
-    accept_language: Annotated[str | None, Header()] = None,
+    locale: str = Depends(get_locale),
 ) -> dict:
     """Fetch real-time natural language insights for CPU, memory, and disk usage."""
-    locale = "fr"
-    if accept_language and accept_language.lower().startswith("en"):
-        locale = "en"
-
     if is_demo(claims):
         return {
             "node_id": node_id,
@@ -742,13 +837,9 @@ async def regenerate_node_profile(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     im: Insights,
     nm: NodeManager = Depends(get_node_manager),
-    accept_language: Annotated[str | None, Header()] = None,
+    locale: str = Depends(get_locale),
 ) -> NodeProfile:
     """Manually trigger LLM/heuristic profile regeneration for a node."""
-    locale = "fr"
-    if accept_language and accept_language.lower().startswith("en"):
-        locale = "en"
-
     if is_demo(claims):
         return NodeProfile(
             node_id=node_id,
@@ -785,13 +876,9 @@ async def analyze_node_anomaly(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     im: Insights,
     nm: NodeManager = Depends(get_node_manager),
-    accept_language: Annotated[str | None, Header()] = None,
+    locale: str = Depends(get_locale),
 ) -> DiagnosticReport:
     """Analyze current metrics and services with LLM to produce an anomaly diagnostic report."""
-    locale = "fr"
-    if accept_language and accept_language.lower().startswith("en"):
-        locale = "en"
-
     if is_demo(claims):
         return DiagnosticReport(
             headline="Plex transcoding task detected" if locale == "en" else "Tâche de transcodage Plex détectée",
