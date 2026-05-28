@@ -13,20 +13,23 @@ Run with:
     uvicorn master.main:app --host 0.0.0.0 --port 8000 --reload
 """
 
+import ast
+import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Any
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request, Response, WebSocket, HTTPException
+from fastapi import Depends, FastAPI, Request, Response, WebSocket, HTTPException, UploadFile, File
 from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from master.config import settings
@@ -34,16 +37,14 @@ from master.db.database import close_db, init_db
 from master.db.migrations import run_migrations
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import plugin_manager
-from master.core.audit import verify_chain
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import init_security, load_or_generate_master_key
 from master.api.auth import router as auth_router
 from master.api.nodes import router as nodes_router
 from master.api.services import router as services_router
 from master.api.chat import router as chat_router
-from master.api.frontend import router as frontend_router
 from master.api.audit import router as audit_router
-from master.api.deps import require_role
+from master.api.admin import router as admin_router
 from master.ws.worker_handler import worker_join_handler
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
       1. Close database
     """
     # ── Startup ───────────────────────────────────────────────────────────
+    # Load LLM settings override if exists (files I/O belongs to edge)
+    override_path = Path(settings.database_path).parent / "settings_override.json"
+    if override_path.exists():
+        try:
+            import json
+            with override_path.open("r", encoding="utf-8") as f:
+                overrides = json.load(f)
+            settings.apply_overrides(
+                base_url=overrides.get("llm_base_url", settings.llm_base_url),
+                api_key=overrides.get("llm_api_key", settings.llm_api_key),
+                model=overrides.get("llm_model", settings.llm_model),
+            )
+            logger.info("Loaded LLM settings overrides from %s", override_path)
+        except Exception as e:
+            logger.error("Failed to load settings overrides: %s", e)
+
     logger.info("=" * 60)
     logger.info("Vigile — Master Node starting up")
     logger.info("  Master URL : %s", settings.master_url)
@@ -108,23 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Migrations
     await run_migrations(db)
 
-    # 3. Initialize Jinja2 templates and static files
-    from jinja2 import Environment, FileSystemLoader
-    from starlette.templating import _TemplateResponse
-    jinja_env = Environment(
-        loader=FileSystemLoader("master/templates"),
-        autoescape=True,
-        cache_size=0,
-    )
-    jinja_env.globals["now"] = datetime.utcnow
-    class _Templates:
-        def __init__(self, env):
-            self.env = env
-        def TemplateResponse(self, name, context, status_code=200, headers=None):
-            template = self.env.get_template(name)
-            return _TemplateResponse(template, context, status_code=status_code, headers=headers)
-    app.state.templates = _Templates(jinja_env)
-    logger.info("Jinja2Templates initialized.")
+    # 3. (Jinja2 templates removed in favor of React SPA)
 
     # 4. Initialize SecurityManager (with explicit DI from settings)
     master_key = load_or_generate_master_key(settings.master_key_path)
@@ -139,7 +140,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         jwt_refresh_token_ttl=settings.jwt_refresh_token_ttl,
         master_private_key=master_key,
     )
-    logger.info("SecurityManager initialized.")
+    # 4.5. Initialize PluginManager
+    await plugin_manager.initialize(db)
 
     # 5. Load plugins
     loaded = plugin_manager.load_plugins_from_dir(settings.plugins_dir)
@@ -288,18 +290,14 @@ app.include_router(nodes_router)
 app.include_router(services_router)
 app.include_router(chat_router)
 app.include_router(audit_router)
+app.include_router(admin_router)
 
 # ---------------------------------------------------------------------------
 # Static Files
 # ---------------------------------------------------------------------------
 
+os.makedirs("master/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="master/static"), name="static")
-
-# ---------------------------------------------------------------------------
-# Frontend Routes (SSR + HTMX)
-# ---------------------------------------------------------------------------
-
-app.include_router(frontend_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes
@@ -338,40 +336,23 @@ async def health_check() -> JSONResponse:
     })
 
 
-@app.get("/api/admin/audit-verify", tags=["admin"], summary="Verify audit log integrity")
-async def verify_audit_chain(
-    claims=Depends(require_role("admin")),
-) -> JSONResponse:
-    """
-    Walk the entire audit log and verify the SHA256 hash chain.
-    Returns a report indicating whether the chain is intact.
-    Admin only.
-    """
-    from master.db.database import get_db_conn
-
-    db = get_db_conn()
-    report = await verify_chain(db)
-    status_code = 200 if report["valid"] else 409
-    return JSONResponse(report, status_code=status_code)
-
-
-@app.get("/api/admin/nodes/connections", tags=["admin"], summary="List active WebSocket connections")
-async def list_active_connections(
-    claims=Depends(require_role("admin")),
-) -> JSONResponse:
-    """Debug endpoint: show all currently connected Worker nodes."""
-    return JSONResponse({
-        "connected_nodes": node_manager.connected_node_ids(),
-        "count": len(node_manager.connected_node_ids()),
-    })
-
-
-@app.get("/api/admin/plugins", tags=["admin"], summary="List loaded plugins and hooks")
-async def list_plugins(
-    claims=Depends(require_role("admin")),
-) -> JSONResponse:
-    """Debug endpoint: show the plugin registry."""
-    return JSONResponse({
-        "loaded_plugins": plugin_manager.loaded_plugins,
-        "hooks": plugin_manager.get_hooks(),
-    })
+@app.exception_handler(404)
+async def spa_fallback_exception_handler(request: Request, exc: HTTPException) -> Response:
+    """Serve static assets if they exist, otherwise fall back to SPA index.html."""
+    path = request.url.path.lstrip("/")
+    
+    # 1. Exclude API and WebSocket endpoints
+    if path.startswith("api/") or path.startswith("ws/"):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        
+    # 2. Check if requested file exists in the SPA dist folder
+    file_path = Path("frontend/dist") / path
+    if file_path.is_file():
+        return FileResponse(file_path)
+        
+    # 3. Fallback to index.html for client-side routing
+    index_path = Path("frontend/dist/index.html")
+    if index_path.exists():
+        return FileResponse(index_path)
+        
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})

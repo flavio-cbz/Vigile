@@ -8,15 +8,25 @@ Provides reusable dependency-injected objects:
   - CurrentUser        : type alias for the authenticated user's claims dict
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, AsyncGenerator
 
+import threading
 import aiosqlite
-from fastapi import Depends, Request
+from fastapi import Depends, Request, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from master.db.database import get_db_conn
-from master.core.security_manager import SecurityManager, get_security_instance, bearer_scheme
+from master.db.database import get_db_conn, database_session
+from master.core.security_manager import (
+    SecurityManager,
+    get_security_instance,
+    SecurityError,
+    InvalidTokenError,
+    ExpiredTokenError,
+    ROLES_HIERARCHY,
+)
 from master.core.node_manager import NodeManager, node_manager
-from fastapi.security import HTTPAuthorizationCredentials
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 # ---------------------------------------------------------------------------
@@ -24,13 +34,13 @@ from fastapi.security import HTTPAuthorizationCredentials
 # ---------------------------------------------------------------------------
 
 
-async def get_db() -> aiosqlite.Connection:
+async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
     """
-    Yield the active aiosqlite connection.
+    Yield the active aiosqlite connection from the pool.
     FastAPI will call this for every request that declares it as a dependency.
-    The connection is managed by the lifespan (opened at startup, closed at shutdown).
     """
-    return get_db_conn()
+    async with database_session() as conn:
+        yield conn
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +56,12 @@ def get_security() -> SecurityManager:
 def get_node_manager() -> NodeManager:
     """Return the module-level NodeManager singleton."""
     return node_manager
+
+
+def get_settings() -> Any:
+    """Return the settings singleton (lazy import to prevent module-level coupling)."""
+    from master.config import settings
+    return settings
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +90,32 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    claims = sec.verify_access_token(credentials.credentials)
+    try:
+        claims = sec.verify_access_token(credentials.credentials)
+    except ExpiredTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except SecurityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    if sec.audit_compromised:
+        from fastapi import HTTPException, status
+        user_role = claims.get("role", "viewer")
+        is_operator = user_role in ("operator", "admin")
+        is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
+        if is_operator or is_write:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="System Locked: Security Compromised",
+            )
+
     user_id = claims["sub"]
 
     # Check must_change_password in DB
@@ -98,7 +139,7 @@ async def get_current_user(
     return claims
 
 
-def require_role(*roles: str):
+def require_role(*roles: str) -> Any:
     """
     Dependency factory: Require one of the specified roles.
     SecurityManager is resolved lazily at request time (not at import time).
@@ -113,16 +154,54 @@ def require_role(*roles: str):
             HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
         ],
     ) -> dict[str, Any]:
-        return get_security_instance().require_role(*roles)(credentials)
+        sec = get_security_instance()
+        if sec.audit_compromised:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="System Locked: Security Compromised",
+            )
+        if credentials is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        try:
+            claims = sec.verify_access_token(credentials.credentials)
+        except ExpiredTokenError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+        except SecurityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+        user_role = claims.get("role", "viewer")
+
+        # Check if the user's role satisfies ANY of the required roles
+        user_level = ROLES_HIERARCHY.get(user_role, 0)
+        required_level = min(
+            ROLES_HIERARCHY.get(r, 99) for r in roles
+        )
+        if user_level < required_level:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Insufficient permissions. Required: {roles}",
+            )
+        return claims
     return _dependency
 
 
-# ---------------------------------------------------------------------------
-# LLM Dependencies (lazy — initialized on first call)
-# ---------------------------------------------------------------------------
+import asyncio
 
 _llm_client: "LLMClient | None" = None
 _structured_llm: "StructuredLLM | None" = None
+_insights_manager: Any = None
 
 
 def get_llm_client() -> "LLMClient":
@@ -152,9 +231,32 @@ def get_structured_llm() -> "StructuredLLM":
     return _structured_llm
 
 
+def get_insights_manager() -> Any:
+    """Return the InsightsManager singleton, initializing it on first call."""
+    global _insights_manager
+    if _insights_manager is None:
+        from master.core.insights import InsightsManager
+        llm_client = None
+        try:
+            llm_client = get_llm_client()
+        except RuntimeError:
+            pass
+        _insights_manager = InsightsManager(llm_client=llm_client)
+    return _insights_manager
+
+
+def reset_llm_clients() -> None:
+    """Reset the LLM clients to force re-instantiation with new settings."""
+    global _llm_client, _structured_llm, _insights_manager
+    _llm_client = None
+    _structured_llm = None
+    _insights_manager = None
+
+
 # ---------------------------------------------------------------------------
 # Type aliases for cleaner router signatures
 # ---------------------------------------------------------------------------
 
 CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
 DB = Annotated[aiosqlite.Connection, Depends(get_db)]
+Insights = Annotated[Any, Depends(get_insights_manager)]

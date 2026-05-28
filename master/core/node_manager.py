@@ -64,8 +64,11 @@ VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
     (NodeState.LOST, NodeState.CONNECTED),          # Worker came back
     (NodeState.LOST, NodeState.STALE),
     (NodeState.LOST, NodeState.REVOKED),
+    (NodeState.LOST, NodeState.ENROLLING),          # Re-enrollment allowed
     (NodeState.STALE, NodeState.CONNECTED),         # Worker came back
     (NodeState.STALE, NodeState.REVOKED),
+    (NodeState.STALE, NodeState.ENROLLING),         # Re-enrollment allowed
+    (NodeState.RECONNECTING, NodeState.ENROLLING),  # Re-enrollment allowed
 }
 
 
@@ -106,6 +109,32 @@ _VALID_NODE_FIELDS: set[str] = {
 }
 
 
+class LoopBoundLock:
+    """
+    A helper lock that delegates to an asyncio.Lock bound to the current event loop.
+    Prevents loop mismatch / closed loop errors in tests.
+    """
+    def __init__(self) -> None:
+        self._locks: dict[Any, asyncio.Lock] = {}
+
+    def _get_lock(self) -> asyncio.Lock:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.Lock()
+        # Prune closed event loops to prevent memory leaks
+        self._locks = {lp: lk for lp, lk in self._locks.items() if not lp.is_closed()}
+        if loop not in self._locks:
+            self._locks[loop] = asyncio.Lock()
+        return self._locks[loop]
+
+    async def __aenter__(self) -> Any:
+        return await self._get_lock().__aenter__()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        return await self._get_lock().__aexit__(exc_type, exc_val, exc_tb)
+
+
 class NodeManager:
     """
     Central registry for all Worker Nodes.
@@ -115,12 +144,13 @@ class NodeManager:
     def __init__(self) -> None:
         # node_id → ActiveConnection (only for CONNECTED nodes)
         self._connections: dict[str, ActiveConnection] = {}
-        self._lock: asyncio.Lock = asyncio.Lock()
+        self._lock: Any = LoopBoundLock()
         # Pending intent futures: intent_id → asyncio.Future
         self._pending_intents: dict[str, asyncio.Future] = {}
         # Track which node owns each pending intent (for cleanup on disconnect)
         self._intent_nodes: dict[str, str] = {}
         self._monitor_task: asyncio.Task | None = None
+        self._cache_task: asyncio.Task | None = None
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -132,21 +162,31 @@ class NodeManager:
         lost_threshold: int = 300,
         stale_threshold: int = 86400,
     ) -> None:
-        """Start the background heartbeat monitor. Called at app startup.
+        """Start the background heartbeat monitor and cache updater. Called at app startup.
         Thresholds are injected here — no config coupling inside the loop."""
         self.heartbeat_interval = heartbeat_interval
         self._monitor_task = asyncio.create_task(
             self._heartbeat_monitor(heartbeat_interval, lost_threshold, stale_threshold),
             name="heartbeat_monitor",
         )
-        logger.info("NodeManager started. Heartbeat monitor running.")
+        self._cache_task = asyncio.create_task(
+            self._cache_updater(300),  # Update cache every 5 minutes
+            name="cache_updater",
+        )
+        logger.info("NodeManager started. Heartbeat monitor and cache updater running.")
 
     async def stop(self) -> None:
-        """Stop the heartbeat monitor. Called at app shutdown."""
+        """Stop the heartbeat monitor and cache updater. Called at app shutdown."""
         if self._monitor_task:
             self._monitor_task.cancel()
             try:
                 await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+        if self._cache_task:
+            self._cache_task.cancel()
+            try:
+                await self._cache_task
             except asyncio.CancelledError:
                 pass
         async with self._lock:
@@ -157,6 +197,113 @@ class NodeManager:
                     pass
             self._connections.clear()
         logger.info("NodeManager stopped.")
+
+    async def _cache_updater(self, interval: int) -> None:
+        """Background task that runs every `interval` seconds to update node cache."""
+        logger.info("Cache updater task started. Interval: %ds", interval)
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self.update_all_nodes_cache()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Cache updater error (will retry)")
+
+    async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
+        """Query and cache active services and Docker containers for online node(s)."""
+        from master.plugins.systemd_plugin import parse_service_list
+        from master.plugins.docker_plugin import parse_container_list
+
+        db = get_db_conn()
+        connected = [node_id] if node_id else self.connected_node_ids()
+        if not connected:
+            return
+
+        logger.debug("Cache updater: starting update for nodes: %s", connected)
+        for nid in connected:
+            try:
+                # 1. Get services
+                services_json = None
+                try:
+                    result = await self.send_intent(nid, {"action": "LIST_SERVICES"}, timeout=10.0)
+                    if result.get("success"):
+                        parsed = parse_service_list(result.get("output", ""))
+                        if parsed is not None:
+                            services_json = json.dumps(parsed)
+                except Exception as ex:
+                    logger.warning("Cache updater: failed to get services for node %s: %s", nid, ex)
+
+                # 2. Get containers
+                containers_json = None
+                try:
+                    result = await self.send_intent(nid, {"action": "LIST_CONTAINERS"}, timeout=10.0)
+                    if result.get("success"):
+                        parsed = parse_container_list(result.get("output", ""))
+                        if parsed is not None:
+                            containers_json = json.dumps(parsed)
+                except Exception as ex:
+                    logger.warning("Cache updater: failed to get containers for node %s: %s", nid, ex)
+
+                # 3. Save cache to DB
+                if services_json is not None or containers_json is not None:
+                    fields = []
+                    params = []
+                    if services_json is not None:
+                        fields.append("cached_services_json = ?")
+                        params.append(services_json)
+                    if containers_json is not None:
+                        fields.append("cached_containers_json = ?")
+                        params.append(containers_json)
+                    
+                    params.append(nid)
+                    query = f"UPDATE nodes SET {', '.join(fields)} WHERE id = ?"
+                    await db.execute(query, params)
+                    await db.commit()
+                    logger.debug("Cache updater: successfully updated cache for node %s", nid)
+
+                # 4. Check profile expiration and new container detection for auto-regeneration
+                try:
+                    async with db.execute(
+                        "SELECT insight_profile, insight_profile_generated_at FROM nodes WHERE id = ?",
+                        (nid,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    
+                    if row and row["insight_profile"]:
+                        profile_dict = json.loads(row["insight_profile"])
+                        generated_at = row["insight_profile_generated_at"] or 0.0
+                        now = time.time()
+                        
+                        # 7-day expiration check
+                        expired_time = (now - generated_at) > 7 * 86400
+                        
+                        # New containers check (with 24h cooldown to avoid LLM spam)
+                        new_apps_detected = False
+                        cooldown_ok = (now - generated_at) > 86400
+                        
+                        if cooldown_ok and not expired_time and containers_json:
+                            fresh_conts = parse_container_list(json.loads(containers_json))
+                            fresh_running = [c.get("name") for c in fresh_conts or [] if c.get("state") == "running" or "up" in c.get("status", "").lower()]
+                            known_conts = [p.get("container_name") for p in profile_dict.get("known_heavy_processes", []) if p.get("container_name")]
+                            
+                            for fc in fresh_running:
+                                if fc not in known_conts:
+                                    new_apps_detected = True
+                                    break
+                                    
+                        if expired_time or new_apps_detected:
+                            logger.info(
+                                "Profile expiration / new apps detected for node %s (expired=%s, new_apps=%s). Regenerating profile...",
+                                nid, expired_time, new_apps_detected
+                            )
+                            from master.api.deps import get_insights_manager
+                            im = get_insights_manager()
+                            asyncio.create_task(im.generate_profile(nid, db, self, force=True))
+                except Exception as ex:
+                    logger.warning("Cache updater: failed to check profile expiration for node %s: %s", nid, ex)
+            except Exception as ex:
+                logger.exception("Cache updater: error updating node %s: %s", nid, ex)
 
     # -----------------------------------------------------------------------
     # Node creation (called when Admin generates a join token)
@@ -276,6 +423,21 @@ class NodeManager:
 
         logger.warning("Node REVOKED: id=%s by=%s", node_id, revoked_by)
 
+    async def lockdown(self) -> None:
+        """
+        Close all active WebSocket connections due to security compromise.
+        """
+        async with self._lock:
+            conns = list(self._connections.values())
+            self._connections.clear()
+
+        for conn in conns:
+            try:
+                await conn.websocket.close(code=4433, reason="Security compromise detected")
+            except Exception:
+                pass
+        logger.warning("NodeManager locked down: all active connections closed.")
+
     # -----------------------------------------------------------------------
     # Connection management (called from WebSocket handler)
     # -----------------------------------------------------------------------
@@ -393,11 +555,12 @@ class NodeManager:
             result = await asyncio.wait_for(future, timeout=timeout)
             return result
         except asyncio.TimeoutError:
-            self._intent_nodes.pop(intent_id, None)
-            self._pending_intents.pop(intent_id, None)
             raise TimeoutError(
                 f"Node {node_id} did not respond to intent {intent_id} within {timeout}s"
             )
+        finally:
+            self._intent_nodes.pop(intent_id, None)
+            self._pending_intents.pop(intent_id, None)
 
     # -----------------------------------------------------------------------
     # Background heartbeat monitor
