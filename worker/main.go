@@ -66,12 +66,28 @@ func main() {
 	}
 	logger.Printf("Master URL: %s", url)
 
-	// ── Resolve join token ───────────────────────────────────────────────
+	// ── Load worker token from disk (for reconnection) ───────────────────
+	workerToken, err := readWorkerToken()
+	if err != nil {
+		logger.Printf("Warning: failed to read worker token: %v", err)
+	}
+	if workerToken != "" {
+		logger.Printf("Worker token loaded from disk — reconnecting with existing identity")
+	}
+
+	// ── Resolve join token (not required if worker token exists) ────────
 	token, err := readJoinToken(*joinToken)
 	if err != nil {
-		logger.Fatalf("Failed to read JOIN_TOKEN: %v", err)
+		if workerToken != "" {
+			logger.Printf("No JOIN_TOKEN (already consumed) — using worker token for reconnect")
+			token = ""
+		} else {
+			logger.Fatalf("Failed to read JOIN_TOKEN: %v", err)
+		}
 	}
-	logger.Printf("JOIN_TOKEN hash: %s", computeTokenHash(token))
+	if token != "" {
+		logger.Printf("JOIN_TOKEN hash: %s", computeTokenHash(token))
+	}
 
 	// ── Load or generate Ed25519 keypair ─────────────────────────────────
 	privKey, pubKey, err := loadOrGenerateKeypair()
@@ -85,7 +101,7 @@ func main() {
 	logger.Printf("Fingerprint: hostname=%s arch=%s os=%s", fp.Hostname, fp.Arch, fp.OS)
 
 	// ── Create worker connection ─────────────────────────────────────────
-	wc := NewWorkerConn(url, token, privKey, pubKey, fp)
+	wc := NewWorkerConn(url, token, workerToken, privKey, pubKey, fp)
 
 	// ── Handle OS signals ────────────────────────────────────────────────
 	sigCh := make(chan os.Signal, 1)

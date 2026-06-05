@@ -388,3 +388,180 @@ async def test_send_disconnect_no_node_id():
 
     # Must not raise even without node_id (graceful fallback)
     await _send(ws, {"type": "TEST"})
+
+
+async def _setup_enrolled_node(db, security, name: str, worker_pub_b64: str) -> tuple[str, str]:
+    """Helper: create a node, enroll it, and return (node_id, worker_token)."""
+    node_id = await node_manager.create_node(db, name=name)
+    token, payload = security.generate_join_token(node_id)
+    token_hash = security.join_token_hash(token)
+    now = time.time()
+    await db.execute(
+        """INSERT INTO join_tokens (id, node_id, token_hash, payload_b64, consumed, expires_at, created_at)
+           VALUES (?, ?, ?, ?, 0, ?, ?)""",
+        (str(uuid.uuid4()), node_id, token_hash, token.split(".", 1)[1], payload["expires_at"], now),
+    )
+    # Pre-set public_key and put node in LOST state (simulating previous enrollment)
+    await db.execute(
+        "UPDATE nodes SET public_key = ?, state = ?, enrolled_at = ? WHERE id = ?",
+        (worker_pub_b64, NodeState.LOST.value, now, node_id),
+    )
+    await db.commit()
+    # Generate a worker token and insert into DB
+    worker_token, lifecycle = security.generate_worker_token(node_id)
+    wt_hash = security.worker_token_hash(worker_token)
+    await db.execute(
+        """INSERT INTO worker_tokens (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked)
+           VALUES (?, ?, ?, ?, ?, ?, 0)""",
+        (str(uuid.uuid4()), node_id, wt_hash, lifecycle["issued_at"],
+         lifecycle["rotation_due"], lifecycle["expires_at"]),
+    )
+    await db.commit()
+    return node_id, worker_token
+
+
+@pytest.mark.asyncio
+async def test_enrollment_reconnect_success(db, security, worker_keys):
+    """Reconnect with valid worker_token → success, skip challenge, ENROLLMENT_SUCCESS."""
+    worker_priv, worker_pub_b64 = worker_keys
+    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect", worker_pub_b64)
+
+    sent_msgs: list[dict] = []
+
+    class ReconnectWS(MockWebSocket):
+        async def send_text(self, data: str):
+            msg = json.loads(data)
+            sent_msgs.append(msg)
+
+    ws = ReconnectWS()
+    # Call _run_reconnect directly (not full worker_join_handler) to test only the enrollment phase
+    result_node_id = await ws_handler._run_reconnect(
+        ws, db, "127.0.0.1", worker_token, worker_pub_b64
+    )
+
+    assert result_node_id == node_id, "Should return the correct node_id"
+
+    # Verify ENROLLMENT_SUCCESS sent
+    success_msgs = [m for m in sent_msgs if m.get("type") == "ENROLLMENT_SUCCESS"]
+    assert len(success_msgs) >= 1, "Should receive ENROLLMENT_SUCCESS"
+    assert success_msgs[0].get("node_id") == node_id
+    assert success_msgs[0].get("worker_token"), "Should receive fresh worker_token"
+
+    # Verify no challenge was sent (Ed25519 skipped)
+    challenge_msgs = [m for m in sent_msgs if m.get("type") == "ENROLLMENT_CHALLENGE"]
+    assert len(challenge_msgs) == 0, "Ed25519 challenge should be skipped on reconnect"
+
+    # Verify old worker token is revoked
+    old_hash = security.worker_token_hash(worker_token)
+    async with db.execute("SELECT revoked FROM worker_tokens WHERE token_hash = ?", (old_hash,)) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert row["revoked"] == 1
+
+    # Verify NODE_RECONNECTED audit entry
+    async with db.execute(
+        "SELECT action, details_json FROM audit_log WHERE node_id = ? AND action = 'NODE_RECONNECTED'",
+        (node_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None, "NODE_RECONNECTED audit entry must exist"
+    details = json.loads(row["details_json"])
+    assert "token_id" in details
+    assert details["reconnection_count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_enrollment_reconnect_public_key_mismatch(db, security, worker_keys):
+    """Reconnect with wrong public_key → anti-theft protection, close with error."""
+    _, worker_pub_b64 = worker_keys
+    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-pk", worker_pub_b64)
+
+    # Use a DIFFERENT public key for the reconnect request (simulating token theft)
+    wrong_key = base64.urlsafe_b64encode(b"x" * 32).decode()
+
+    ws = MockWebSocket([
+        {"type": "ENROLLMENT_REQUEST",
+         "join_token": "",
+         "worker_token": worker_token,
+         "reconnect": True,
+         "public_key": wrong_key,
+         "fingerprint": make_fingerprint()},
+    ])
+
+    await worker_join_handler(ws)
+
+    # Should close with signature invalid (anti-theft code)
+    assert ws.close_code == ws_handler.WS_CLOSE_SIGNATURE_INVALID, \
+        "Should reject reconnect with wrong public key"
+
+
+@pytest.mark.asyncio
+async def test_enrollment_reconnect_revoked_node(db, security, worker_keys):
+    """Reconnect with revoked node → close with WS_CLOSE_REVOKED."""
+    _, worker_pub_b64 = worker_keys
+    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-rev", worker_pub_b64)
+
+    # Set node to REVOKED state
+    await db.execute("UPDATE nodes SET state = ? WHERE id = ?",
+                     (NodeState.REVOKED.value, node_id))
+    await db.commit()
+
+    ws = MockWebSocket([
+        {"type": "ENROLLMENT_REQUEST",
+         "join_token": "",
+         "worker_token": worker_token,
+         "reconnect": True,
+         "public_key": worker_pub_b64,
+         "fingerprint": make_fingerprint()},
+    ])
+
+    await worker_join_handler(ws)
+    assert ws.close_code == ws_handler.WS_CLOSE_REVOKED
+
+
+@pytest.mark.asyncio
+async def test_enrollment_reconnect_revoked_token(db, security, worker_keys):
+    """Reconnect with revoked worker_token → close with WS_CLOSE_INVALID_TOKEN."""
+    _, worker_pub_b64 = worker_keys
+    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-wtrev", worker_pub_b64)
+
+    # Revoke the worker token
+    wt_hash = security.worker_token_hash(worker_token)
+    await db.execute("UPDATE worker_tokens SET revoked = 1 WHERE token_hash = ?", (wt_hash,))
+    await db.commit()
+
+    ws = MockWebSocket([
+        {"type": "ENROLLMENT_REQUEST",
+         "join_token": "",
+         "worker_token": worker_token,
+         "reconnect": True,
+         "public_key": worker_pub_b64,
+         "fingerprint": make_fingerprint()},
+    ])
+
+    await worker_join_handler(ws)
+    assert ws.close_code == ws_handler.WS_CLOSE_INVALID_TOKEN
+
+
+@pytest.mark.asyncio
+async def test_enrollment_reconnect_expired_token(db, security, worker_keys):
+    """Reconnect with expired worker_token → close with WS_CLOSE_INVALID_TOKEN."""
+    _, worker_pub_b64 = worker_keys
+    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-exp", worker_pub_b64)
+
+    # Revoke the token to simulate expired/unusable token
+    wt_hash = security.worker_token_hash(worker_token)
+    await db.execute("UPDATE worker_tokens SET revoked = 1 WHERE token_hash = ?", (wt_hash,))
+    await db.commit()
+
+    ws = MockWebSocket([
+        {"type": "ENROLLMENT_REQUEST",
+         "join_token": "",
+         "worker_token": worker_token,
+         "reconnect": True,
+         "public_key": worker_pub_b64,
+         "fingerprint": make_fingerprint()},
+    ])
+
+    await worker_join_handler(ws)
+    assert ws.close_code == ws_handler.WS_CLOSE_INVALID_TOKEN

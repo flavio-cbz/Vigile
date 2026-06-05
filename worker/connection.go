@@ -44,10 +44,12 @@ type WorkerConn struct {
 }
 
 // NewWorkerConn creates a new WorkerConn.
-func NewWorkerConn(masterURL, joinToken string, privKey ed25519.PrivateKey, pubKey ed25519.PublicKey, fp Fingerprint) *WorkerConn {
+// workerToken is an optional persisted token for reconnection (empty on first enrollment).
+func NewWorkerConn(masterURL, joinToken, workerToken string, privKey ed25519.PrivateKey, pubKey ed25519.PublicKey, fp Fingerprint) *WorkerConn {
 	return &WorkerConn{
 		masterURL:   masterURL,
 		joinToken:   joinToken,
+		workerToken: workerToken,
 		privKey:     privKey,
 		pubKey:      pubKey,
 		fingerprint: fp,
@@ -95,16 +97,41 @@ func (wc *WorkerConn) Connect() error {
 }
 
 // runEnrollment performs the Ed25519 challenge/response handshake.
+// When workerToken is set (reconnect mode), the challenge is skipped
+// and the worker token is used for authentication instead.
 func (wc *WorkerConn) runEnrollment() error {
-	// 1. Send ENROLLMENT_REQUEST
-	req := buildEnrollmentRequest(wc.joinToken, wc.pubKey, wc.fingerprint)
-	logger.Printf("ENROLL: sending request (token_len=%d, pubkey_len=%d)",
-		len(wc.joinToken), len(b64enc.EncodeToString(wc.pubKey)))
+	// 1. Send ENROLLMENT_REQUEST (with worker_token if reconnecting)
+	req := buildEnrollmentRequest(wc.joinToken, wc.workerToken, wc.pubKey, wc.fingerprint)
+	logger.Printf("ENROLL: sending request (token_len=%d, pubkey_len=%d, reconnect=%v)",
+		len(wc.joinToken), len(b64enc.EncodeToString(wc.pubKey)), wc.workerToken != "")
 	if err := wc.sendJSON(req); err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
 
-	// 2. Receive ENROLLMENT_CHALLENGE
+	// Reconnect mode: master skips the Ed25519 challenge and sends SUCCESS directly
+	if wc.workerToken != "" {
+		logger.Printf("ENROLL: reconnect mode — waiting for ENROLLMENT_SUCCESS (skip challenge)")
+		success, err := wc.readTyped("ENROLLMENT_SUCCESS")
+		if err != nil {
+			return fmt.Errorf("read success (reconnect): %w", err)
+		}
+		wc.workerToken, _ = success["worker_token"].(string)
+		wc.nodeID, _ = success["node_id"].(string)
+		if wc.nodeID == "" {
+			return fmt.Errorf("no node_id in success message (reconnect)")
+		}
+		// Persist the refreshed worker token
+		if wc.workerToken != "" {
+			if err := persistWorkerToken(wc.workerToken); err != nil {
+				logger.Printf("Warning: failed to persist refreshed worker token: %v", err)
+			}
+		}
+		nodeID = wc.nodeID
+		logger.Printf("ENROLL: reconnect success! node_id=%s", wc.nodeID)
+		return nil
+	}
+
+	// 2. Receive ENROLLMENT_CHALLENGE (first-time enrollment only)
 	challengeMsg, err := wc.readTyped("ENROLLMENT_CHALLENGE")
 	if err != nil {
 		return fmt.Errorf("read challenge: %w", err)
@@ -116,7 +143,6 @@ func (wc *WorkerConn) runEnrollment() error {
 	logger.Printf("ENROLL: got challenge (%d bytes): %s", len(challenge), challenge)
 
 	// 3. Decode challenge from base64, sign the RAW bytes, encode back
-	//    (Master verifies against the decoded challenge, not the base64 string)
 	challengeRaw, err := b64enc.DecodeString(challenge)
 	if err != nil {
 		return fmt.Errorf("decode challenge: %w", err)
@@ -143,6 +169,13 @@ func (wc *WorkerConn) runEnrollment() error {
 
 	if wc.nodeID == "" {
 		return fmt.Errorf("no node_id in success message")
+	}
+
+	// Persist the worker token for future reconnections
+	if wc.workerToken != "" {
+		if err := persistWorkerToken(wc.workerToken); err != nil {
+			logger.Printf("Warning: failed to persist worker token: %v", err)
+		}
 	}
 	nodeID = wc.nodeID
 
@@ -255,8 +288,8 @@ func (wc *WorkerConn) RunOperational() error {
 }
 
 // RunWithBackoff connects and runs with exponential backoff.
-// After successful enrollment, disconnection causes a clean exit
-// (the JOIN_TOKEN is single-use and cannot be reused).
+// After successful enrollment, disconnection triggers automatic reconnect
+// using the persisted worker_token. Falls back to clean exit if no token.
 func (wc *WorkerConn) RunWithBackoff() {
 	backoff := initialBackoff
 	enrolled := false
@@ -277,12 +310,19 @@ func (wc *WorkerConn) RunWithBackoff() {
 
 		if err := wc.Connect(); err != nil {
 			if enrolled {
-				logger.Printf("Reconnect failed (token consumed): %v", err)
-				wc.disconnect()
-				close(wc.doneCh)
-				return
+				logger.Printf("Reconnect failed: %v", err)
+				// If we have a worker token and still fail, keep retrying
+				if wc.workerToken != "" {
+					logger.Printf("Worker token present — will retry reconnect")
+				} else {
+					logger.Printf("No worker token — giving up")
+					wc.disconnect()
+					close(wc.doneCh)
+					return
+				}
+			} else {
+				logger.Printf("Connection failed: %v — retry in %v", err, backoff)
 			}
-			logger.Printf("Connection failed: %v — retry in %v", err, backoff)
 			wc.disconnect()
 
 			select {
@@ -309,11 +349,31 @@ func (wc *WorkerConn) RunWithBackoff() {
 			logger.Printf("Operational ended: %v", err)
 		}
 
-		// After enrollment success, disconnection = clean exit.
-		// JOIN_TOKEN is consumed, cannot reconnect.
+		// Disconnected — try to reconnect with persisted worker token
 		wc.disconnect()
-		close(wc.doneCh)
-		return
+
+		// Load worker token for reconnection (if not already set)
+		if wc.workerToken == "" {
+			wt, err := readWorkerToken()
+			if err != nil {
+				logger.Printf("Cannot read worker token: %v — exiting", err)
+				close(wc.doneCh)
+				return
+			}
+			if wt == "" {
+				logger.Printf("No worker token available — JOIN_TOKEN consumed, exiting")
+				close(wc.doneCh)
+				return
+			}
+			wc.mu.Lock()
+			wc.workerToken = wt
+			wc.mu.Unlock()
+		}
+
+		logger.Printf("Reconnecting with persisted worker token...")
+		_ = backoff // Reset backoff for reconnect attempts
+		backoff = initialBackoff
+		continue
 	}
 }
 

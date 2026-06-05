@@ -159,11 +159,21 @@ async def _run_enrollment(
     req = await _recv_typed(websocket, "ENROLLMENT_REQUEST", timeout=ENROLLMENT_STEP_TIMEOUT)
 
     join_token: str = req.get("join_token", "")
+    worker_token: str = req.get("worker_token", "")
+    reconnect: bool = req.get("reconnect", False)
     public_key_b64: str = req.get("public_key", "")
     fingerprint: dict = req.get("fingerprint", {})
 
-    if not join_token or not public_key_b64:
-        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing join_token or public_key")
+    if not public_key_b64:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing public_key")
+
+    # ── Step 1.5: Reconnect mode — skip JOIN_TOKEN + Ed25519 challenge ─────
+    if reconnect and worker_token:
+        return await _run_reconnect(websocket, db, remote, worker_token, public_key_b64)
+
+    # Regular enrollment: require join_token
+    if not join_token:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing join_token or worker_token")
 
     # ── Step 2: Validate JOIN_TOKEN (HMAC + TTL) ────────────────────────────
     try:
@@ -336,6 +346,142 @@ async def _run_enrollment(
         "✓ Node ENROLLED: id=%s hostname=%s arch=%s os=%s",
         node_id, hostname, arch, os_name,
     )
+    return node_id
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.5: Reconnect enrollment (skip Ed25519 challenge)
+# ---------------------------------------------------------------------------
+
+
+async def _run_reconnect(
+    websocket: WebSocket,
+    db: aiosqlite.Connection,
+    remote: str,
+    worker_token: str,
+    public_key_b64: str,
+) -> str:
+    """Handle reconnect enrollment: validate worker_token, verify public_key match, skip challenge."""
+    security = get_security_instance()
+
+    # ── R1: Verify worker_token (JWT validity + DB revocation) ──────────────
+    try:
+        claims = await security.verify_worker_token_async(worker_token, db)
+    except ValueError as exc:
+        logger.warning("Reconnect rejected: invalid worker_token from %s: %s", remote, exc)
+        raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, f"Invalid worker token: {exc}")
+
+    node_id: str = claims.get("sub", "")
+    if not node_id:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Worker token missing subject")
+
+    # ── R2: Fetch node and verify public_key match (anti-theft) ────────────
+    async with db.execute(
+        "SELECT state, public_key FROM nodes WHERE id = ?", (node_id,)
+    ) as cursor:
+        node_row = await cursor.fetchone()
+
+    if node_row is None:
+        raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "Node not found for worker token")
+
+    stored_pubkey = node_row["public_key"]
+    if not stored_pubkey:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Node has no stored public key (not enrolled)")
+
+    if stored_pubkey != public_key_b64:
+        logger.error(
+            "SECURITY: public_key mismatch for node %s! Token theft detected from %s",
+            node_id, remote,
+        )
+        raise _EnrollmentError(WS_CLOSE_SIGNATURE_INVALID, "Public key mismatch — token theft detected")
+
+    # ── R3: Check node state ───────────────────────────────────────────────
+    node_state = NodeState(node_row["state"])
+    if node_state == NodeState.REVOKED:
+        raise _EnrollmentError(WS_CLOSE_REVOKED, "Node is revoked")
+    if node_state in (NodeState.PENDING, NodeState.ENROLLING, NodeState.CONNECTED):
+        raise _EnrollmentError(
+            WS_CLOSE_PROTOCOL_ERROR,
+            f"Node is in unexpected state for reconnect: {node_state}",
+        )
+
+    # Accepted states for reconnect: RECONNECTING, LOST, STALE
+    logger.info("Reconnect for node %s (state=%s, remote=%s)", node_id, node_state.value, remote)
+
+    # ── R4: Transition to ENROLLING ───────────────────────────────────────
+    await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
+
+    # ── R5: Generate fresh worker_token, update DB ─────────────────────────
+    now = time.time()
+    async with transaction(db):
+        # Revoke old token
+        old_token_hash = security.worker_token_hash(worker_token)
+        await db.execute(
+            "UPDATE worker_tokens SET revoked = 1, revoked_at = ? WHERE token_hash = ?",
+            (now, old_token_hash),
+        )
+
+        # Create new token
+        new_token, lifecycle = security.generate_worker_token(node_id)
+        new_token_hash = security.worker_token_hash(new_token)
+        token_id = str(uuid.uuid4())
+        await db.execute(
+            """
+            INSERT INTO worker_tokens
+                (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (token_id, node_id, new_token_hash, lifecycle["issued_at"],
+             lifecycle["rotation_due"], lifecycle["expires_at"]),
+        )
+
+    # ── R6: Transition to CONNECTED ────────────────────────────────────────
+    await node_manager.transition_state(
+        db,
+        node_id,
+        NodeState.CONNECTED,
+        extra_fields={"last_heartbeat": now},
+    )
+
+    # ── R7: Register WebSocket connection ──────────────────────────────────
+    conn = await node_manager.register_connection(node_id, websocket)
+    conn.remote_address = remote
+
+    # ── R8: Send ENROLLMENT_SUCCESS ────────────────────────────────────────
+    await _send(websocket, {
+        "type": "ENROLLMENT_SUCCESS",
+        "worker_token": new_token,
+        "master_public_key": security.master_public_key_b64,
+        "node_id": node_id,
+        "heartbeat_interval": node_manager.heartbeat_interval,
+    }, node_id=node_id)
+
+    # ── R9: Audit ───────────────────────────────────────────────────────────
+    reconnection_count = 1
+    try:
+        async with db.execute(
+            "SELECT COUNT(*) as cnt FROM audit_log WHERE action = 'NODE_RECONNECTED' AND node_id = ?",
+            (node_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            reconnection_count = row["cnt"] + 1
+    except Exception:
+        pass
+
+    await log_action(
+        db,
+        user_id="system",
+        action="NODE_RECONNECTED",
+        node_id=node_id,
+        details={
+            "token_id": token_id,
+            "reconnection_count": reconnection_count,
+            "remote_ip": remote,
+        },
+    )
+
+    logger.info("↻ Node RECONNECTED: id=%s (count=%d)", node_id, reconnection_count)
     return node_id
 
 
