@@ -32,6 +32,7 @@ import aiosqlite
 from fastapi import WebSocket
 
 from master.db.database import get_db_conn
+from master.core.audit import log_action
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +148,11 @@ class NodeManager:
         self._lock: Any = LoopBoundLock()
         # Pending intent futures: intent_id → asyncio.Future
         self._pending_intents: dict[str, asyncio.Future] = {}
+        self._intent_created_at: dict[str, float] = {}
         # Track which node owns each pending intent (for cleanup on disconnect)
         self._intent_nodes: dict[str, str] = {}
+        self._intent_max_age: dict[str, float] = {}
+        self._default_intent_max_age: float = 300.0
         self._monitor_task: asyncio.Task | None = None
         self._cache_task: asyncio.Task | None = None
 
@@ -161,10 +165,12 @@ class NodeManager:
         heartbeat_interval: int = 30,
         lost_threshold: int = 300,
         stale_threshold: int = 86400,
+        default_intent_max_age: float = 300.0,
     ) -> None:
         """Start the background heartbeat monitor and cache updater. Called at app startup.
         Thresholds are injected here — no config coupling inside the loop."""
         self.heartbeat_interval = heartbeat_interval
+        self._default_intent_max_age = default_intent_max_age
         self._monitor_task = asyncio.create_task(
             self._heartbeat_monitor(heartbeat_interval, lost_threshold, stale_threshold),
             name="heartbeat_monitor",
@@ -207,8 +213,13 @@ class NodeManager:
                 await self.update_all_nodes_cache()
             except asyncio.CancelledError:
                 break
+            except aiosqlite.OperationalError as e:
+                logger.warning("DB unavailable, reconnecting: %s", e)
+                await asyncio.sleep(5)
+                continue
             except Exception:
                 logger.exception("Cache updater error (will retry)")
+                await asyncio.sleep(30)
 
     async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
         """Query and cache active services and Docker containers for online node(s)."""
@@ -261,6 +272,19 @@ class NodeManager:
                     await db.execute(query, params)
                     await db.commit()
                     logger.debug("Cache updater: successfully updated cache for node %s", nid)
+                    try:
+                        await log_action(
+                            db,
+                            user_id="system",
+                            action="CACHE_REFRESH",
+                            node_id=nid,
+                            details={
+                                "services_updated": services_json is not None,
+                                "containers_updated": containers_json is not None,
+                            },
+                        )
+                    except Exception:
+                        logger.warning("Cache updater: failed to log audit trail for node %s", nid)
 
                 # 4. Check profile expiration and new container detection for auto-regeneration
                 try:
@@ -471,6 +495,7 @@ class NodeManager:
         for intent_id, nid in list(self._intent_nodes.items()):
             if nid == node_id:
                 self._intent_nodes.pop(intent_id, None)
+                self._intent_created_at.pop(intent_id, None)
                 future = self._pending_intents.pop(intent_id, None)
                 if future is not None and not future.done():
                     future.cancel()
@@ -500,6 +525,7 @@ class NodeManager:
     async def resolve_intent(self, intent_id: str, result: dict[str, Any]) -> None:
         """Resolve a pending intent with the Worker's response."""
         self._intent_nodes.pop(intent_id, None)
+        self._intent_created_at.pop(intent_id, None)
         future = self._pending_intents.pop(intent_id, None)
         if future is not None and not future.done():
             future.set_result(result)
@@ -514,6 +540,7 @@ class NodeManager:
         intent: dict[str, Any],
         *,
         timeout: float = 30.0,
+        intent_max_age: float | None = None,
     ) -> dict[str, Any]:
         """
         Send an approved Intent to a connected Worker and wait for the result.
@@ -526,6 +553,7 @@ class NodeManager:
             node_id : target node
             intent  : dict with keys: {intent_id, action, params}
             timeout : seconds to wait for response
+            intent_max_age : optional per-intent max age before cleanup falls stale
 
         Returns:
             The result dict from the Worker.
@@ -544,7 +572,10 @@ class NodeManager:
 
             future: asyncio.Future = asyncio.get_running_loop().create_future()
             self._pending_intents[intent_id] = future
+            self._intent_created_at[intent_id] = time.time()
             self._intent_nodes[intent_id] = node_id
+            if intent_max_age is not None:
+                self._intent_max_age[intent_id] = intent_max_age
 
             # Send type last to prevent intent dict from overwriting the message type
             await conn.websocket.send_json({**intent, "type": "INTENT"})
@@ -559,7 +590,9 @@ class NodeManager:
                 f"Node {node_id} did not respond to intent {intent_id} within {timeout}s"
             )
         finally:
+            self._intent_max_age.pop(intent_id, None)
             self._intent_nodes.pop(intent_id, None)
+            self._intent_created_at.pop(intent_id, None)
             self._pending_intents.pop(intent_id, None)
 
     # -----------------------------------------------------------------------
@@ -594,20 +627,31 @@ class NodeManager:
             except Exception:
                 logger.exception("Heartbeat monitor error (will retry)")
 
-    def _cleanup_stale_intents(self, max_age: float = 120.0) -> int:
-        """Remove pending intents that have been waiting longer than max_age seconds."""
+    def _cleanup_stale_intents(self) -> int:
+        """Remove pending intents that are done or have been waiting longer than their max_age."""
         now = time.time()
         stale_ids: list[str] = []
-        for intent_id, future in self._pending_intents.items():
-            if future.done():
+        for intent_id, future in list(self._pending_intents.items()):
+            created = self._intent_created_at.get(intent_id, now)
+            max_age = self._intent_max_age.get(intent_id, self._default_intent_max_age)
+            if future.done() or (now - created) > max_age:
                 stale_ids.append(intent_id)
         for intent_id in stale_ids:
             self._intent_nodes.pop(intent_id, None)
-            self._pending_intents.pop(intent_id, None)
+            self._intent_created_at.pop(intent_id, None)
+            self._intent_max_age.pop(intent_id, None)
+            future = self._pending_intents.pop(intent_id, None)
+            if future is not None and not future.done():
+                future.cancel()
         count = len(stale_ids)
         if count:
             logger.warning("Cleaned up %d stale pending intents.", count)
         return count
+
+    def set_default_intent_max_age(self, value: float) -> None:
+        """Update the default intent max age at runtime (e.g. via admin endpoint)."""
+        self._default_intent_max_age = value
+        logger.info("Default intent max age updated to %.1fs", value)
 
     async def _check_heartbeats(
         self, lost_threshold: float, stale_threshold: float
@@ -628,6 +672,13 @@ class NodeManager:
                 await self.unregister_connection(node_id)
                 try:
                     await self.transition_state(db, node_id, NodeState.LOST)
+                    await log_action(
+                        db,
+                        user_id="system",
+                        action="NODE_LOST",
+                        node_id=node_id,
+                        details={"heartbeat_age": age, "lost_threshold": lost_threshold},
+                    )
                 except Exception:
                     logger.exception("Failed to transition node %s to LOST", node_id)
 
@@ -641,6 +692,13 @@ class NodeManager:
                 if age > stale_threshold:
                     try:
                         await self.transition_state(db, node_id, NodeState.STALE)
+                        await log_action(
+                            db,
+                            user_id="system",
+                            action="NODE_STALE",
+                            node_id=node_id,
+                            details={"heartbeat_age": age, "stale_threshold": stale_threshold},
+                        )
                         logger.warning("Node %s marked STALE (offline %.0fh)", node_id, age / 3600)
                     except Exception:
                         logger.exception("Failed to transition node %s to STALE", node_id)

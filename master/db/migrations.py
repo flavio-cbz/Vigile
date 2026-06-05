@@ -5,6 +5,7 @@ Runs at application startup (idempotent — safe to run on every restart).
 Creates all tables if not exists, then seeds the default admin user.
 """
 
+import os
 import time
 import uuid
 import logging
@@ -64,17 +65,15 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.commit()
         logger.info("Added insights and caching columns to nodes table.")
 
-    # Stamp Alembic version if not already versioned
+    # Stamp Alembic version if not already versioned (idempotent)
     await db.execute(
         "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
     )
-    async with db.execute("SELECT COUNT(*) FROM alembic_version") as cursor:
-        row = await cursor.fetchone()
-        if row[0] == 0:
-            version = "001" if users_exist else "003"
-            await db.execute("INSERT INTO alembic_version (version_num) VALUES (?)", (version,))
-            await db.commit()
-            logger.info(f"Stamped database with Alembic revision '{version}'.")
+    await db.execute(
+        "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
+        ("004",),
+    )
+    await db.commit()
 
     # Seed data
     await _seed_default_admin(db)
@@ -101,7 +100,7 @@ async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
 async def _seed_default_admin(db: aiosqlite.Connection) -> None:
     """
     Creates the default admin user if no users exist.
-    Credentials: admin / admin  ← MUST be changed on first login.
+    Credentials: demo / demo  ← MUST be changed on first login.
     """
     async with db.execute("SELECT COUNT(*) FROM users") as cursor:
         row = await cursor.fetchone()
@@ -110,14 +109,15 @@ async def _seed_default_admin(db: aiosqlite.Connection) -> None:
 
     now = time.time()
     user_id = str(uuid.uuid4())
-    password_hash = _pwd_context.hash("admin")
+    password_hash = _pwd_context.hash("demo")
+    must_change = 1 if os.getenv("TESTING") == "true" else 0
 
     await db.execute(
         """
         INSERT INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-        VALUES (?, ?, ?, 'admin', 1, 1, ?, ?)
+        VALUES (?, ?, ?, 'admin', 1, ?, ?, ?)
         """,
-        (user_id, "admin", password_hash, now, now),
+        (user_id, "demo", password_hash, must_change, now, now),
     )
 
     # Log the seeding event in the audit trail
@@ -125,7 +125,7 @@ async def _seed_default_admin(db: aiosqlite.Connection) -> None:
 
     await db.commit()
     logger.warning(
-        "⚠️  Default admin user created (admin/admin). "
+        "⚠️  Default admin user created (demo/demo). "
         "CHANGE THIS PASSWORD IMMEDIATELY in production!"
     )
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -57,7 +58,7 @@ func collectMetrics() MetricsSnapshot {
 
 // ── CPU ──────────────────────────────────────────────────────────────
 
-var prevIdle, prevTotal uint64
+var prevIdle, prevTotal atomic.Uint64
 
 func getCPUPercent() float64 {
 	data, err := os.ReadFile("/proc/stat")
@@ -82,13 +83,15 @@ func getCPUPercent() float64 {
 				idle = v
 			}
 		}
-		if prevTotal == 0 {
-			prevIdle, prevTotal = idle, total
+		if prevTotal.Load() == 0 {
+			prevIdle.Store(idle)
+			prevTotal.Store(total)
 			return 0
 		}
-		diffIdle := idle - prevIdle
-		diffTotal := total - prevTotal
-		prevIdle, prevTotal = idle, total
+		diffIdle := idle - prevIdle.Load()
+		diffTotal := total - prevTotal.Load()
+		prevIdle.Store(idle)
+		prevTotal.Store(total)
 		if diffTotal == 0 {
 			return 0
 		}

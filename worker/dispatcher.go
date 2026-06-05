@@ -6,6 +6,9 @@ import (
 	"log"
 )
 
+// nodeID is set during enrollment and used for enrichment in action logs.
+var nodeID string
+
 // ALLOWED_ACTIONS is the hardcoded whitelist of actions this Worker can execute.
 // Every incoming INTENT is checked against this map before execution.
 var ALLOWED_ACTIONS = map[string]bool{
@@ -21,9 +24,10 @@ var ALLOWED_ACTIONS = map[string]bool{
 
 // Intent describes a command sent by the Master.
 type Intent struct {
-	IntentID string                 `json:"intent_id"`
-	Action   string                 `json:"action"`
-	Params   map[string]interface{} `json:"params,omitempty"`
+	IntentID    string                 `json:"intent_id"`
+	Action      string                 `json:"action"`
+	Params      map[string]interface{} `json:"params,omitempty"`
+	RequestedBy string                 `json:"requested_by,omitempty"`
 }
 
 // IntentResult is sent back to the Master after execution.
@@ -36,11 +40,7 @@ type IntentResult struct {
 
 // dispatchIntent validates and executes an incoming intent.
 func dispatchIntent(raw []byte) []byte {
-	var msg struct {
-		IntentID string                 `json:"intent_id"`
-		Action   string                 `json:"action"`
-		Params   map[string]interface{} `json:"params,omitempty"`
-	}
+	var msg Intent
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		return mustJSON(IntentResult{Error: fmt.Sprintf("invalid JSON: %v", err)})
 	}
@@ -55,7 +55,7 @@ func dispatchIntent(raw []byte) []byte {
 		})
 	}
 
-	log.Printf("Dispatching intent: action=%s id=%s", msg.Action, msg.IntentID)
+	log.Printf("Dispatching intent: action=%s id=%s requested_by=%s", msg.Action, msg.IntentID, msg.RequestedBy)
 
 	var result IntentResult
 	switch msg.Action {

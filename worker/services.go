@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 )
@@ -81,10 +82,13 @@ func handleStatusService(intent Intent) IntentResult {
 
 // handleRestartService restarts a systemd service.
 func handleRestartService(intent Intent) IntentResult {
-	service := getParamString(intent.Params, "service", "")
-	if service == "" {
-		return IntentResult{Success: false, Error: "service parameter required"}
+	if intent.RequestedBy == "" {
+		return IntentResult{Success: false, Error: "missing requested_by context"}
 	}
+	service := getParamString(intent.Params, "service", "")
+	approvalID := getParamString(intent.Params, "approval_id", "")
+	log.Printf("executing action action=RESTART_SERVICE service=%s node_id=%s requested_by=%s approval_id=%s intent_id=%s",
+		service, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
