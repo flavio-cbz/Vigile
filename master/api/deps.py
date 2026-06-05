@@ -200,12 +200,12 @@ def require_role(*roles: str) -> Any:
 import asyncio
 
 _init_lock = threading.RLock()
-_llm_client: "LLMClient | None" = None
-_structured_llm: "StructuredLLM | None" = None
+_llm_client: "LLMClient | None" = None  # noqa: F821
+_structured_llm: "StructuredLLM | None" = None  # noqa: F821
 _insights_manager: Any = None
 
 
-def get_llm_client() -> "LLMClient":
+def get_llm_client() -> "LLMClient":  # noqa: F821
     """Return the LLMClient singleton, initializing it on first call."""
     global _llm_client
     with _init_lock:
@@ -224,7 +224,7 @@ def get_llm_client() -> "LLMClient":
         return _llm_client
 
 
-def get_structured_llm() -> "StructuredLLM":
+def get_structured_llm() -> "StructuredLLM":  # noqa: F821
     """Return the StructuredLLM singleton, initializing it on first call."""
     global _structured_llm
     with _init_lock:

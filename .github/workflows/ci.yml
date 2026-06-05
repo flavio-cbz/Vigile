@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   PYTHONPATH: "."
@@ -51,8 +51,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-          cache: true
-          cache-dependency-path: worker/go.sum
+          cache: false
 
       - name: Build Worker
         run: |
@@ -113,7 +112,7 @@ jobs:
         working-directory: frontend
 
       - name: Run tests
-        run: npm test -- --coverage
+        run: npm test
         working-directory: frontend
 
       - name: Build

@@ -31,6 +31,8 @@ htmlcov/
 
 ## Environment & Configuration
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 
@@ -69,6 +71,8 @@ desktop.ini
 *~
 .project
 .classpath
+.antigravity/
+.omo/
 
 ## Logs
 *.log
@@ -93,4 +97,7 @@ AGENTS.md
 .sisyphus/
 .playwright-mcp/
 .browserstack-local/
-
+.agents/
+scratch/
+interview/
+opencode.json

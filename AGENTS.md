@@ -1,83 +1,76 @@
-# Vigile — Agent Guide
+# PROJECT KNOWLEDGE BASE
 
-## Session start
+**Generated:** 2026-06-03T23:31:04+02:00
+**Commit:** c9812a7
+**Branch:** master
 
-Read `docs/SESSION.md` first — it has the current sprint status.
-Read `RULES.md` second — **coding standards, DI rules, typing, tests**.
-Read `docs/LIMITS.md` third — known bugs and architectural limits.
+## OVERVIEW
+Vigile is a zero-trust fleet management server and agent system. The Python/FastAPI Master node coordinates authenticated operator commands via an LLM agent with human-in-the-loop validation, communicating with autonomous, zero-dependency Go Workers over WebSocket.
 
-**IMPORTANT:** `RULES.md` contains strict non-negotiable quality rules (DI, typing, zero-dependency, tests). Apply every rule to every line.
-
-## Commit & Push policy
-
-**Never commit or push without explicit approval.**
-At end of feature/sprint, present summary (files changed, tests passed) and wait for go-ahead.
-
-## Project structure
-
+## STRUCTURE
 ```text
-master/main.py           # FastAPI entrypoint (v0.2.0-sprint2 — Sprint 3 IA done but version not bumped)
-master/config.py         # Settings via os.getenv + pydantic.BaseModel (not pydantic-settings)
-master/core/             # SecurityManager, NodeManager, PluginManager, audit, rate_limiter, LLM, proposals
-master/api/              # auth.py, nodes.py, services.py, chat.py (REST), deps.py (FastAPI DI)
-master/ws/               # worker_handler.py (WebSocket enrollment + operational, 491 lines)
-master/db/               # database.py, models.py (pure SQL), migrations.py
-master/plugins/          # metrics_plugin.py, systemd_plugin.py, docker_plugin.py
-tests/                   # Pytest test suite (91 tests)
-  conftest.py            # Global fixtures
-  test_core/             # Unit tests for core logic
-  test_api/              # Unit tests for API endpoints & test_integration.py
-  test_plugins/          # Unit tests for plugin system
-  test_ws/               # Unit tests for WebSocket handlers
-scripts/                 # setup_test.sh, test_all_simulation.py (~46 checks), test_complex.py
-docs/                    # PLAN.md, SESSION.md, LIMITS.md
-worker/                  # Go binary (stdlib-only, zero imports, flat package)
-  main.go               # Entrypoint, CLI flags (--master, --token, --key-dir), signal handling
-  wsclient.go            # WebSocket RFC 6455 pure stdlib (295 lines)
-  connection.go          # Reconnect exponential backoff, heartbeat 30s, STATUS_REPORT 60s
-  enrollment.go          # Ed25519 keypair generation, challenge/response handshake
-  dispatcher.go          # Hardcoded action whitelist + dispatch
-  discovery.go           # Hostname, machine-id, OS, arch detection
-  stats.go               # CPU/RAM/disk/uptime from /proc
-  logs.go                # journalctl + file-based log reading
-  containers.go          # Docker API via Unix socket
-  services.go            # systemd service management
-  Dockerfile             # Multi-stage (golang:1.23-alpine → alpine), 300 lines incl. inline test fixtures
-frontend/                # React SPA (Vite + TS + Tailwind v4 + Zustand + Recharts)
-master/static/           # React build served by FastAPI static files fallback
+master/                  # Control plane FastAPI server
+├── api/                 # REST API layer (auth, nodes, services, chat)
+├── core/                # Trusted domain logic (state, crypto, LLM, audit)
+├── db/                  # Raw SQL SQLite database & Alembic migrations
+├── plugins/             # OS systemd/Docker/metrics telemetry plugins
+├── ws/                  # Two-phase WebSocket enrollment & operational connection handler
+├── static/              # Compiled React SPA files served directly by FastAPI
+worker/                  # Zero-dependency autonomous Go agent binary
+frontend/                # React Vite SPA for operator interaction & Copilot
+tests/                   # Pytest test suite (93% coverage)
+scripts/                 # Dev launcher and Docker-based simulation tests
+docs/                    # Planning, known limits, and session logs
 ```
 
-## Sprint status
+## WHERE TO LOOK
 
-| Sprint | Content | Status |
-| -------- | --------- | -------- |
-| 1 | Core sec, enrollment, DB, Worker Go basics | ✅ Done |
-| 2 | Plugins OS (metrics, systemd, docker), APIs, simulation stack | ✅ Done |
-| 3 | LLMClient, StructuredLLM, ActionProposal, Chat API (+ SSE stream) | ✅ Done |
-| 4 | Prototype Frontend (Jinja2 + HTMX + Tailwind) | ✅ Done |
-| 4.5/4.6| Stabilisation, tests, rate limiter fixes, 93% coverage | ✅ Done |
-| 5 | Frontend React SPA (Vite + TS + Tailwind v4 + Zustand + Recharts) | 🔜 Next / In progress |
-| 6 | Plugin ecosystem (Home Assistant-like) | 📅 Planned |
+| Task | Location | Notes |
+|------|----------|-------|
+| Core logic (state machine, crypto, audit, LLM, insights) | [master/core/](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core) | See [core/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/AGENTS.md) |
+| REST API endpoints (auth, nodes, services, chat, admin, audit, demo) | [master/api/](file:///Users/flavio/Documents/Projets/Youcloud-API/master/api) | See [api/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/master/api/AGENTS.md) |
+| Go Worker binary | [worker/](file:///Users/flavio/Documents/Projets/Youcloud-API/worker) | See [worker/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/worker/AGENTS.md) |
+| Database (pure SQL, migrations, alembic) | [master/db/](file:///Users/flavio/Documents/Projets/Youcloud-API/master/db) | See [db/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/master/db/AGENTS.md) |
+| Plugins (metrics, systemd, docker) | [master/plugins/](file:///Users/flavio/Documents/Projets/Youcloud-API/master/plugins) | Auto-register via hooks; see [plugins/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/master/plugins/AGENTS.md) |
+| WebSocket protocol handler | [master/ws/](file:///Users/flavio/Documents/Projets/Youcloud-API/master/ws) | Two-phase enrollment + operational; see [ws/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/master/ws/AGENTS.md) |
+| Pytest test suite | [tests/](file:///Users/flavio/Documents/Projets/Youcloud-API/tests) | See [tests/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/tests/AGENTS.md) |
+| Simulation & dev launcher | [scripts/](file:///Users/flavio/Documents/Projets/Youcloud-API/scripts) | See [scripts/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/scripts/AGENTS.md) |
+| React SPA | [frontend/](file:///Users/flavio/Documents/Projets/Youcloud-API/frontend) | See [frontend/AGENTS.md](file:///Users/flavio/Documents/Projets/Youcloud-API/frontend/AGENTS.md) |
 
-See `docs/SESSION.md` for detailed status.
+## CODE MAP
 
-## Key architecture facts
+| Symbol | Type | Location | Refs | Role |
+|--------|------|----------|------|------|
+| `SecurityManager` | Class | [security_manager.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/security_manager.py) | High | Cryptography, JOIN_TOKEN (HMAC), JWT, Ed25519 challenge/response verification |
+| `NodeManager` | Class | [node_manager.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/node_manager.py) | High | Worker lifecycle state machine and active WebSocket registries |
+| `PluginManager` | Class | [plugin_manager.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/plugin_manager.py) | Medium | Hook-based plugin loading and sync/async hook dispatching |
+| `RateLimiter` | Class | [rate_limiter.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/rate_limiter.py) | Medium | Sliding window rate limiting per IP + endpoint with lifespan cleanups |
+| `LLMClient` | Class | [llm_client.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/llm_client.py) | Medium | Native HTTP client for OpenAI-compatible chat completion & streams |
+| `StructuredLLM` | Class | [structured_llm.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/structured_llm.py) | Medium | System prompts for JSON schema validation & LLM retry feedback loops |
+| `ActionProposal` | Class | [action_proposal.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/action_proposal.py) | Medium | Operator-approved action model (PENDING to APPROVED to EXECUTED/FAILED) |
+| `worker_join_handler` | Function | [worker_handler.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/ws/worker_handler.py) | High | Entry point router `/ws/worker/join` for worker connections |
+| `verify_chain` | Function | [audit.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/audit.py) | Medium | Full SHA256 chain verification walking the entire audit log table |
+| `run_migrations` | Function | [migrations.py](file:///Users/flavio/Documents/Projets/Youcloud-API/master/db/migrations.py) | Medium | Idempotent table creation, indexes registration, and admin seeder |
 
-- **No ORM** — pure SQL via aiosqlite. All DDL in `master/db/models.py`.
-- **No SSH** — Workers initiate connections via WebSocket (`/ws/worker/join`).
-- **No interactive shell** — Worker has a hardcoded action whitelist.
-- **State machine**: `PENDING → ENROLLING → CONNECTED → LOST/REVOKED → STALE`. Transitions validated.
-- **Audit trail**: append-only SHA256 hash chain. Every DB mutation must call `log_action()`.
-- **Ed25519 handshake**: challenge/response over WebSocket for Worker enrollment.
-- **JOIN_TOKEN**: HMAC-SHA256, single-use, 30-min TTL. Atomic consumption via `UPDATE ... WHERE consumed=0`.
-- **Rate limiter**: in-memory sliding window (60 req/min per route, 10 req/min on `/login`). `cleanup_expired()` exists but is **never called**.
-- **Zero-dependency rule**: see `RULES.md` §12.
-- **DI rule**: `core/` classes never read `settings`/`os.getenv` — config injected via constructor (RULES.md §1).
-- **Settings via os.getenv + pydantic.BaseModel**: not `pydantic-settings`. Auto-generates secrets if env vars empty (`model_post_init` → `secrets.token_hex(32)`), dev only.
-- **Config auto-secret generation**: if `SERVER_SECRET_KEY` or `JWT_SECRET_KEY` empty, generated at import time with `secrets.token_hex(32)`. Safe for dev, **never for prod**.
+## CONVENTIONS
+- **No ORM**: Raw SQL text queries via `aiosqlite`.
+- **No pyproject.toml**: Only bare `requirements.txt`. Execution relies on setting `PYTHONPATH="."`.
+- **DI at edge**: Domain logic constructors in `master/core/` are lightweight and receive raw configuration/arguments, never reading env vars or settings directly.
+- **WebSocket Handshake**: Ed25519 challenge-response sequence over raw WS frames implemented from scratch in both Python and Go (zero external WS libraries in Go worker).
 
-## Commands
+## ANTI-PATTERNS (THIS PROJECT)
+- **CORS Wildcard**: CORS origins allow wildcards mapped dynamically via echoing middleware, but must be configured securely in production.
+- **Dependency Injection leakage**: Module-level import `from master.config import settings` in `master/api/deps.py` (lines 63, 213) violates DI rules.
+- **Sync call of async hooks**: Running async plugin hooks via sync `call()` emits a warning and is ignored. Always use `async_call()`.
+- **Database transaction locks**: Shared single aiosqlite Connection; multi-statement mutations must be wrapped in `transaction()` context to prevent sequence conflicts.
+- **Dynamic execution**: `compile()` and `exec()` inside `master/api/admin.py:337` allow dynamic python running; access must remain strictly role-gated.
 
+## UNIQUE STYLES
+- **Hash Chain Audit Trail**: Cryptographically linked logs where each entry contains `SHA256(previous_hash + sequence + data)`.
+- **Two-phase WebSocket Enrollment**: challenge-response protocol with `JOIN_TOKEN` verification before operational heartbeats start.
+- **Zero-Dependency Go worker**: Raw network socket frame decoding for RFC 6455 WebSocket connectivity without standard library extensions.
+
+## COMMANDS
 ```bash
 # Lancer les tests unitaires (ne requiert pas le serveur actif)
 $env:PYTHONPATH="."  # Windows PowerShell
@@ -104,114 +97,25 @@ docker compose up -d master
 # Default admin: admin / admin (Changement obligatoire à la première connexion)
 ```
 
-| Suite / Folder | Description / Tests |
-| ------ | -------- |
-| `tests/test_core/` | Tests unitaires pour SecurityManager, NodeManager, PluginManager, Audit, LLM. |
-| `tests/test_api/` | Tests unitaires pour Chat, Logs, Services et le test d'intégration. |
-| `tests/test_plugins/` | Tests unitaires pour les hooks, snap de métriques, enregistrement de plugins. |
-| `tests/test_ws/` | Tests unitaires pour l'enrôlement et les opérations WebSocket. |
-| **Unit total** | **90 tests unitaires réussis** |
-| **Integration** | **1 test d'intégration complet réussi** |
-
-**Note:** Les tests ont été entièrement migrés de l'ancien harnais fait maison (`check()`) vers le framework `pytest`. Les assertions sont maintenant standards (`assert`).
-
-## Gotchas
-
-- `data/` and `__pycache__/` are gitignored — `data/` contains the DB and the master Ed25519 private key. Never commit.
-- Secrets auto-generated if env vars empty — fine for dev, **never for prod**. Always set `SERVER_SECRET_KEY` and `JWT_SECRET_KEY` in production.
-- `generate_join_token()` returns `(token_string, payload_dict)`, not just a string.
-- `NodeManager` methods `get_connection`, `touch_heartbeat`, `is_connected` are `async` — always `await`.
-- `transaction()` context manager exists in `database.py` — use it for multi-statement DB operations.
-- Plugin hooks have sync (`call()`) and async (`async_call()`) dispatch. Async hooks called via `call()` emit a `warning` log and are silently ignored.
-- `PYTHONIOENCODING=utf-8` required on Windows (emoji in test names crash cp1252).
-- `.venv` may have broken symlinks when moving between OS — system Python with `PYTHONPATH="."` works as fallback.
-- New plugins go in `master/plugins/` and auto-register via hooks — no config change needed.
-- `master/api/deps.py` imports `from master.config import settings` at module level — violates RULES.md §1 (should use lazy injection).
-- `master/config.py` uses `pydantic.BaseModel` + `os.getenv` directly, **not** `pydantic-settings`. The `model_post_init` hook auto-generates dev secrets.
-- CORS wildcard (`CORS_ORIGINS=*`) with `allow_credentials=True` is invalid per spec — see `docs/LIMITS.md`.
-- `master/templates/` has been deleted (deprecated Jinja2/HTMX SSR frontend).
-- `frontend/` contains the React SPA application (Vite + TypeScript + React 19).
-- `docker-compose.yml` has a hardcoded LLM API key — security risk.
-- **No CI/CD**: no `.github/`, no `.editorconfig`, no `.pre-commit-config.yaml`, no Makefile, no pyproject.toml.
-
-## Reference files
-
-| File | Purpose |
-| ------ | --------- |
-| `RULES.md` | Coding standards, DI, typing, tests, security, zero-dependency |
-| `docs/PLAN.md` | Full architecture plan, protocol specs, future sprints |
-| `docs/SESSION.md` | Current sprint status |
-| `docs/LIMITS.md` | Known bugs, races, scalability limits |
-| `.env.example` | All configurable env vars with defaults |
-| `master/core/AGENTS.md` | Core domain logic guide |
-| `master/api/AGENTS.md` | REST API layer guide |
-| `worker/AGENTS.md` | Go Worker binary guide |
-
-## WHERE TO LOOK (Task → Location)
-
-| Task | Directory | Notes |
-| ------ | ----------- | ------- |
-| Core logic (state machine, crypto, audit, LLM) | `master/core/` | See `master/core/AGENTS.md` |
-| REST API endpoints (auth, nodes, services, chat) | `master/api/` | See `master/api/AGENTS.md` |
-| Go Worker binary | `worker/` | See `worker/AGENTS.md` |
-| Database (pure SQL, migrations) | `master/db/` | All DDL in `models.py` |
-| Plugins (metrics, systemd, docker) | `master/plugins/` | Auto-register via hooks |
-| WebSocket protocol handler | `master/ws/` | Two-phase enrollment + operational |
-| Unit tests | `tests/unit/` | Custom harness, no pytest |
-| Integration tests | `tests/integration/` | Requires running server on :8000 |
-| Simulation tests | `scripts/` | test_all_simulation.py, test_complex.py |
-
-## CONVENTIONS (Deviations from Standard Python/FastAPI)
-
-- **No pyproject.toml** — bare `requirements.txt` only. Forces `PYTHONPATH="."` everywhere.
-- **Pytest** — framework utilisé avec fixtures dans `tests/conftest.py` et assertions standards.
-- **No ORM** — pure SQL via `aiosqlite`, all DDL in `master/db/models.py` as strings.
-- **No Makefile** — all commands documented in AGENTS.md.
-- **No linting/formatting config** — no ruff, mypy, black, isort configs.
-- **Settings via `os.getenv`** — not `pydantic-settings`, no `.env` auto-loading.
-- **DI at edge** — `core/` classes never read `settings` directly; config injected via constructor.
-- **Singleton DI pattern** — module-level singletons for lightweight constructors, factory functions for parameterized ones.
-- **App name `master/`** — unconventional (typical: `app/`, `api/`, `server/`).
-- **Config class uses pydantic.BaseModel directly** with `model_post_init` for auto-secret generation (not `pydantic-settings`).
-
-## ANTI-PATTERNS (THIS PROJECT)
-
-- **`from master.config import settings` in `api/` or `core/`** — Résolu et corrigé (les dépendances sont injectées proprement).
-- **Async hooks called via sync `call()`** — use `async_call()` instead (async hooks silently ignored with warning)
-- **~~Rate limiter memory leak~~** — Corrigé (nettoyage automatique via tâche d'arrière-plan asynchrone).
-- **Hardcoded LLM API key** in `docker-compose.yml` (security risk)
-- **CORS wildcard + credentials incompatibility** — `allow_credentials=True` with `CORS_ORIGINS=*` breaks browsers
-- **~~No pagination~~** — Corrigé (pagination implémentée pour `list_nodes` et `verify_chain`).
-- **`_pending_intents` non nettoyé après timeout** — stale entries in dict
-- **~~Plugin double-registration~~** — Corrigé (protection contre la double-inscription des plugins).
-
-## UNIQUE STYLES
-
-- **Audit trail**: append-only SHA256 hash chain. Every DB mutation calls `log_action()`.
-- **Ed25519 handshake**: challenge/response over WebSocket for Worker enrollment.
-- **Zero-dependency Go**: Worker binary is stdlib-only (RFC 6455 WebSocket implemented by hand).
-- **Custom LLM client**: native OpenAI-compatible `complete()` + `stream()` — no `openai` library.
-- **Action proposals**: Pydantic state machine (PENDING→APPROVED→EXECUTED|FAILED) with human-in-the-loop.
-- **Test harness**: custom `check()` + `results` pattern, no pytest — each file runnable standalone.
+## AGENT BEHAVIORAL PROTOCOLS
+To ensure the integrity, consistency, and long-term maintainability of the project, the agent MUST strictly adhere to the following behavioral protocols before, during, and after any task:
+- **Mandatory Global Scanning**: Before modifying any shared behavior, API contract, or core component, the agent must perform a global scan to identify all downstream impacts, references, and dependencies across Python (master), Go (worker), and React (frontend) codebases.
+- **Proactive Inconsistency Detection**: During any audit, refactoring, or code modification task, the agent must actively look for and report implicit inconsistencies, code duplication, hardcoded values, style deviations, or tech debt in neighboring or related modules.
+- **Long-Term Memory Updates**: Every architectural decision, design pattern discovery, new convention, style invariant, or tech debt finding must be recorded and updated in the project's markdown memory files (`AGENTS.md` and `RULES.md`). The agent must systematically keep these files synchronized with the current state of the code.
+- **No Blind Local Patching**: Local hotfixes or workarounds are strictly forbidden if they introduce style divergence, bypass defined abstractions, or conflict with the architectural guidelines of this project.
 
 ## NOTES
+- `data/` and `__pycache__` are gitignored.
+- `AGENTS.md` and `RULES.md` are gitignored to preserve developer workspace preferences.
+- SQLite WAL mode enables parallel reads but writes are serialized.
+- Auto-generated secrets (`secrets.token_hex(32)`) occur dynamically if config values are blank in development.
 
-- `data/` (DB + Ed25519 key) is gitignored. Never commit.
-- `generate_join_token()` returns `(token_string, payload_dict)`, not just a string.
-- `PYTHONIOENCODING=utf-8` required on Windows (emoji in test names).
-- `.venv` may break across OS — `PYTHONPATH="."` with system Python works as fallback.
-- `master/templates/components/` is empty/dead directory — ignore.
-- `frontend/` is empty — placeholders for Sprint 4 React app.
-- No `.editorconfig`, `.pre-commit-config.yaml`, `.github/`, or CI workflow files exist.
-- `scripts/test_complex.py` exists but contains no test assertions — may be a draft or scratch file.
+## AUDIT FINDINGS (2026-06-04)
+File-by-file audit (4 specialists + cross-critique + Oracle verification) found **79 issues** the 8 audit documents in `docs/` missed:
+- **Cross-cutting**: 8 mega-issues (e.g., no TLS anywhere, no fix enforcement, no worker concurrency)
+- **Backend**: 13 new issues (require_role bypasses must_change_password/is_active, migration stamping broken)
+- **Worker**: 10 new issues (no TLS, no exec timeouts, frame parse panic)
+- **Frontend**: 18 new issues (zero AbortSignal, stale closures, localStorage token bypass)
+- **Infra**: 30 new issues (live API key in .env, zero Go/frontend tests, CI no pre-commit/securité)
 
-## Repository Map
-
-A full codemap is available at `codemap.md` in the project root.
-
-Before working on any task, read `codemap.md` to understand:
-- Project architecture and entry points
-- Directory responsibilities and design patterns
-- Data flow and integration points between modules
-
-For deep work on a specific folder, also read that folder's `codemap.md`.
+Full report: `.sisyphus/reports/audit-missed-report.md`
