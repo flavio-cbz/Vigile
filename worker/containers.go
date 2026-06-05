@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -106,7 +107,14 @@ func handleListContainers(intent Intent) IntentResult {
 }
 
 func handleRestartContainer(intent Intent) IntentResult {
+	if intent.RequestedBy == "" {
+		return IntentResult{Success: false, Error: "missing requested_by context"}
+	}
 	containerID := getParamString(intent.Params, "container_id", "")
+	approvalID := getParamString(intent.Params, "approval_id", "")
+	log.Printf("executing action action=RESTART_CONTAINER container_id=%s node_id=%s requested_by=%s approval_id=%s intent_id=%s",
+		containerID, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
+
 	if containerID == "" {
 		return IntentResult{Success: false, Error: "container_id parameter required"}
 	}

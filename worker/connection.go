@@ -144,6 +144,7 @@ func (wc *WorkerConn) runEnrollment() error {
 	if wc.nodeID == "" {
 		return fmt.Errorf("no node_id in success message")
 	}
+	nodeID = wc.nodeID
 
 	logger.Printf("ENROLL: success! node_id=%s", wc.nodeID)
 	return nil
