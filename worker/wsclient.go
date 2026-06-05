@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec // required for RFC 6455
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -66,7 +67,7 @@ const (
 	opPing   = 0x9
 	opPong   = 0xA
 
-	wsMagicGUID = "258EAFA5-E914-47DA-95CA-5AB5E20B12A"
+	wsMagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 )
 
 // WSConn wraps a net.Conn after WebSocket upgrade.
@@ -104,7 +105,12 @@ func DialWebSocket(rawURL string) (*WSConn, error) {
 	var dialer net.Dialer
 	dialer.Timeout = 10 * time.Second
 
-	conn, err := dialer.Dial("tcp", host)
+	var conn net.Conn
+	if u.Scheme == "wss" || u.Scheme == "https" {
+		conn, err = tls.DialWithDialer(&dialer, "tcp", host, &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12})
+	} else {
+		conn, err = dialer.Dial("tcp", host)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ws: dial %s: %w", host, err)
 	}
@@ -136,8 +142,10 @@ func DialWebSocket(rawURL string) (*WSConn, error) {
 		return nil, fmt.Errorf("ws: expected 101, got %d", statusCode)
 	}
 
-	// Sec-WebSocket-Accept validation skipped (see note above).
-	_ = headers
+	if headers["Sec-WebSocket-Accept"] != computeAcceptKey(wsKey) {
+		conn.Close()
+		return nil, errors.New("ws: invalid Sec-WebSocket-Accept")
+	}
 
 	return &WSConn{
 		conn:   conn,
@@ -232,8 +240,14 @@ func (ws *WSConn) readFrame() (opcode byte, payload []byte, err error) {
 
 	opcode = header[0] & 0x0F
 	// fin := header[0]&0x80 != 0 (we assume single frames for simplicity)
+
+	// Validate RSV bits (MUST be 0 per RFC 6455)
+	if header[0]&0x70 != 0 {
+		return 0, nil, errors.New("ws: invalid RSV bits")
+	}
+
 	masked := header[1]&0x80 != 0
-	length := int64(header[1] & 0x7F)
+	length := uint64(header[1] & 0x7F)
 
 	switch {
 	case length == 126:
@@ -241,13 +255,16 @@ func (ws *WSConn) readFrame() (opcode byte, payload []byte, err error) {
 		if _, err := io.ReadFull(ws.reader, ext); err != nil {
 			return 0, nil, fmt.Errorf("ws: read ext length 16: %w", err)
 		}
-		length = int64(binary.BigEndian.Uint16(ext))
+		length = uint64(binary.BigEndian.Uint16(ext))
 	case length == 127:
 		ext := make([]byte, 8)
 		if _, err := io.ReadFull(ws.reader, ext); err != nil {
 			return 0, nil, fmt.Errorf("ws: read ext length 64: %w", err)
 		}
-		length = int64(binary.BigEndian.Uint64(ext))
+		length = binary.BigEndian.Uint64(ext)
+		if length&(1<<63) != 0 {
+			return 0, nil, errors.New("ws: invalid 64-bit payload length")
+		}
 	}
 
 	var maskKey [4]byte

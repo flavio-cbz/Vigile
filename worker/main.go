@@ -20,6 +20,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -28,7 +29,7 @@ var logger = log.New(os.Stdout, "[vigile-worker] ", log.Ldate|log.Ltime|log.Lmsg
 
 func main() {
 	// ── CLI flags ────────────────────────────────────────────────────────
-	masterURL := flag.String("master", "", "Master WebSocket URL (e.g. http://master:8000)")
+	masterURL := flag.String("master", "", "Master WebSocket URL (e.g. https://master:8443)")
 	joinToken := flag.String("token", "", "JOIN_TOKEN for enrollment")
 	flag.Parse()
 
@@ -37,18 +38,32 @@ func main() {
 	if url == "" {
 		logger.Fatal("MASTER_URL is required. Set --master flag or write to /etc/vigile/master_url")
 	}
-	// Normalize: ensure http:// scheme for WebSocket upgrade
-	if url[:4] != "http" {
-		if url[:3] == "wss" {
-			url = "https" + url[3:]
-		} else if url[:2] == "ws" {
-			url = "http" + url[2:]
-		} else {
-			url = "http://" + url
-		}
+
+	allowInsecure := os.Getenv("ALLOW_INSECURE") == "true"
+
+	// Normalize: ensure http/https scheme for WebSocket upgrade
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") &&
+		!strings.HasPrefix(url, "ws://") && !strings.HasPrefix(url, "wss://") {
+		// No scheme: default to https
+		url = "https://" + url
+	}
+
+	if strings.HasPrefix(url, "ws://") {
+		url = "http://" + url[5:]
+	} else if strings.HasPrefix(url, "wss://") {
+		url = "https://" + url[6:]
+	}
+
+	if strings.HasPrefix(url, "http://") && !allowInsecure {
+		logger.Fatal("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set ALLOW_INSECURE=true to bypass.")
 	}
 
 	logger.Printf("Vigile Worker starting")
+	if allowInsecure {
+		logger.Printf("⚠️  WARNING: ALLOW_INSECURE=true is set. Traffic to the Master will not be encrypted. DO NOT USE IN PRODUCTION!")
+	} else {
+		logger.Printf("🔒 Secure transport enforced (HTTPS/WSS)")
+	}
 	logger.Printf("Master URL: %s", url)
 
 	// ── Resolve join token ───────────────────────────────────────────────
