@@ -12,6 +12,9 @@ export interface Message {
     action: string;
     risk_level: string;
     reasoning?: string;
+    target?: string;
+    status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
+    params?: Record<string, any>;
   };
 }
 
@@ -159,11 +162,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Optimistic UI update: append user message
     const userMessage: Message = { role: 'user', content };
-    const initialHistory = [...(currentSession.history || []), userMessage];
+    const baseHistory = [...(currentSession.history || []), userMessage];
     
     set(state => {
       if (!state.activeSession) return {};
-      const updatedSession = { ...state.activeSession, history: initialHistory };
+      const updatedSession = { ...state.activeSession, history: baseHistory };
       return {
         isStreaming: true,
         activeSession: updatedSession,
@@ -177,8 +180,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       message: content,
       node_id: currentSession.node_id,
       session_id: currentSession.id,
-      history: initialHistory.slice(0, -1) // send everything except the last optimistic user message
+      history: baseHistory.slice(0, -1) // send everything except the last optimistic user message
     };
+
+    const abortController = new AbortController();
+    const fetchTimeout = window.setTimeout(() => abortController.abort(), 30000);
 
     try {
       const response = await fetch('/api/chat', {
@@ -188,6 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           'Authorization': `Bearer ${token}`,
           'Accept-Language': locale
         },
+        signal: abortController.signal,
         body: JSON.stringify(body)
       });
 
@@ -200,13 +207,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
         throw new Error('ReadableStream non disponible');
       }
 
-      // Add empty placeholder assistant message
+      // Add empty placeholder assistant message (mutable ref for SSE updates)
       const assistantMessage: Message = { role: 'assistant', content: '' };
-      let updatedHistory = [...initialHistory, assistantMessage];
+      const sessionId = currentSession.id;
 
+      // Helper: update to the latest history snapshot
+      const updateAssistantMessage = () => {
+        const state = get();
+        if (!state.activeSession || state.activeSession.id !== sessionId) return;
+        // Build history from scratch using the latest state to avoid stale closures
+        const currentHistory = state.activeSession.history;
+        // Replace the last message (assistant placeholder) with current content
+        const updatedHistory = currentHistory.length > 0
+          ? [...currentHistory.slice(0, -1), { ...assistantMessage }]
+          : [{ ...assistantMessage }];
+        const updatedSession = { ...state.activeSession, history: updatedHistory };
+        set({
+          activeSession: updatedSession,
+          sessions: state.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
+        });
+      };
+
+      // Insert placeholder
       set(state => {
         if (!state.activeSession) return {};
-        const updatedSession = { ...state.activeSession, history: updatedHistory };
+        const withPlaceholder = [...(state.activeSession.history || []), { ...assistantMessage }];
+        const updatedSession = { ...state.activeSession, history: withPlaceholder };
         return {
           activeSession: updatedSession,
           sessions: state.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
@@ -237,35 +263,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             if (data.type === 'token') {
               assistantMessage.content += data.content;
-              set(state => {
-                if (!state.activeSession) return {};
-                const updatedSession = { 
-                  ...state.activeSession, 
-                  history: [...initialHistory, { ...assistantMessage }] 
-                };
-                return {
-                  activeSession: updatedSession,
-                  sessions: state.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
-                };
-              });
+              updateAssistantMessage();
             } else if (data.type === 'proposal') {
               assistantMessage.proposal = {
                 id: data.proposal_id,
                 action: data.action,
                 risk_level: data.risk_level,
-                reasoning: data.reasoning
+                reasoning: data.reasoning,
+                target: data.target,
+                status: data.status || 'PENDING',
+                params: data.params,
               };
-              set(state => {
-                if (!state.activeSession) return {};
-                const updatedSession = { 
-                  ...state.activeSession, 
-                  history: [...initialHistory, { ...assistantMessage }] 
-                };
-                return {
-                  activeSession: updatedSession,
-                  sessions: state.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
-                };
-              });
+              updateAssistantMessage();
             } else if (data.type === 'error') {
               useToastStore.getState().addToast('error', 'Erreur IA', data.detail || 'Erreur inconnue');
             }
@@ -278,9 +287,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error('SSE Error:', err);
       useToastStore.getState().addToast('error', 'Erreur Réseau', 'La connexion IA a été interrompue.');
     } finally {
+      window.clearTimeout(fetchTimeout);
       set({ isStreaming: false });
       // Fetch latest sessions to sync titles and history
-      get().fetchSessions(currentSession.node_id);
+      const state = get();
+      const nodeIdForFetch = state.activeSession?.node_id || null;
+      get().fetchSessions(nodeIdForFetch);
     }
   },
 
