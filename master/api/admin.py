@@ -6,6 +6,7 @@ Endpoints:
   - GET  /api/admin/settings               → Get masked system settings
   - POST /api/admin/settings/llm           → Update LLM configuration
   - POST /api/admin/settings/llm/test      → Test connection to configured LLM
+  - POST /api/admin/intent-config          → Update default intent max age
   - GET  /api/admin/plugins                → List all registered and available plugins
   - POST /api/admin/plugins/upload         → Upload a new plugin module
   - POST /api/admin/plugins/{plugin_id}/config → Update a plugin's DB configuration
@@ -30,7 +31,7 @@ from master.core.plugin_manager import plugin_manager
 from master.core.audit import verify_chain, log_action
 from master.core.security_manager import SecurityManager
 from master.api.deps import require_role, get_db, get_security, reset_llm_clients, get_settings
-from master.api.schemas.admin import LLMSettingsUpdate
+from master.api.schemas.admin import LLMSettingsUpdate, IntentConfigUpdate
 from master.api.demo_data import is_demo
 
 logger = logging.getLogger(__name__)
@@ -234,6 +235,23 @@ async def test_llm_settings(
             {"status": "error", "message": f"Erreur inattendue: {str(e)}"},
             status_code=500
         )
+
+
+@router.post("/intent-config", summary="Update default intent max age")
+async def update_intent_config(
+    body: IntentConfigUpdate,
+    claims=Depends(require_role("admin")),
+) -> JSONResponse:
+    """Update the default max age for pending intents. Admin only."""
+    node_manager.set_default_intent_max_age(body.default_intent_max_age)
+    db = get_db_conn()
+    await log_action(
+        db,
+        user_id=claims["sub"],
+        action="UPDATE_INTENT_CONFIG",
+        details={"default_intent_max_age": body.default_intent_max_age},
+    )
+    return JSONResponse({"status": "ok", "default_intent_max_age": body.default_intent_max_age})
 
 
 @router.get("/plugins", summary="List loaded plugins and hooks")

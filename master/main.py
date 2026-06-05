@@ -112,11 +112,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("  Debug mode : %s", settings.debug)
     logger.info("=" * 60)
 
-    if settings.master_url.startswith("http://"):
+    if settings.allow_insecure:
         logger.warning(
-            "⚠️  Master URL uses HTTP — traffic is NOT encrypted. "
-            "Use HTTPS/WSS in production!"
+            "⚠️  INSECURE MODE ENABLED (ALLOW_INSECURE=true). "
+            "HTTPS/WSS enforcement is disabled and cookies are not secure. "
+            "DO NOT USE IN PRODUCTION!"
         )
+    else:
+        logger.info("🔒 Secure mode active: HTTPS/WSS is enforced.")
 
     # 1. Init DB
     db = await init_db(settings.database_path)
@@ -152,11 +155,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         heartbeat_interval=settings.heartbeat_interval,
         lost_threshold=settings.heartbeat_lost_threshold,
         stale_threshold=settings.heartbeat_stale_threshold,
+        default_intent_max_age=settings.default_intent_max_age,
     )
 
     app.state.startup_time = time.time()
     app.state.master_url = settings.master_url
     app.state.trusted_proxies = settings.trusted_proxies
+    rate_limiter.trusted_proxies = settings.trusted_proxies
     
     # 7. Start Rate Limiter Cleanup Task
     import asyncio
@@ -164,7 +169,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             while True:
                 await asyncio.sleep(60)
-                rate_limiter.cleanup_expired()
+                await rate_limiter.cleanup_expired()
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -200,7 +205,7 @@ app = FastAPI(
         "Fleet Manager for servers and homelabs. "
         "Zero-Trust. Zero SSH. Human-in-the-Loop AI."
     ),
-    version="0.2.0-sprint2",
+    version="0.5.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -330,7 +335,7 @@ async def health_check() -> JSONResponse:
     uptime = time.time() - getattr(app.state, "startup_time", time.time())
     return JSONResponse({
         "status": "ok",
-        "version": "0.2.0-sprint2",
+        "version": "0.5.0",
         "uptime_seconds": round(uptime, 1),
         "connected_nodes": len(node_manager.connected_node_ids()),
     })
