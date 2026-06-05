@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -9,8 +10,14 @@ import (
 
 // handleListServices lists all systemd services.
 func handleListServices(intent Intent) IntentResult {
-	cmd := exec.Command("systemctl", "list-units", "--type=service", "--no-pager", "--no-legend")
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--no-pager", "--no-legend")
 	out, err := cmd.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return IntentResult{Success: false, Error: "systemctl timed out"}
+	}
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("systemctl failed: %v", err)}
 	}
@@ -48,11 +55,20 @@ func handleStatusService(intent Intent) IntentResult {
 		return IntentResult{Success: false, Error: "service parameter required"}
 	}
 
-	cmd := exec.Command("systemctl", "is-active", service)
-	active, _ := cmd.Output()
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
 
-	cmd2 := exec.Command("systemctl", "is-enabled", service)
+	cmd := exec.CommandContext(ctx, "systemctl", "is-active", service)
+	active, _ := cmd.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return IntentResult{Success: false, Error: "systemctl is-active timed out"}
+	}
+
+	cmd2 := exec.CommandContext(ctx, "systemctl", "is-enabled", service)
 	enabled, _ := cmd2.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return IntentResult{Success: false, Error: "systemctl is-enabled timed out"}
+	}
 
 	result := map[string]string{
 		"service": service,
@@ -70,8 +86,14 @@ func handleRestartService(intent Intent) IntentResult {
 		return IntentResult{Success: false, Error: "service parameter required"}
 	}
 
-	cmd := exec.Command("systemctl", "restart", service)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", service)
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return IntentResult{Success: false, Error: "systemctl restart timed out"}
+	}
 	if err != nil {
 		return IntentResult{
 			Success: false,

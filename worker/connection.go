@@ -152,6 +152,11 @@ func (wc *WorkerConn) runEnrollment() error {
 // RunOperational enters the operational phase: heartbeat + status + intent dispatch.
 func (wc *WorkerConn) RunOperational() error {
 	wc.mu.Lock()
+	ws := wc.ws
+	if ws == nil {
+		wc.mu.Unlock()
+		return errors.New("websocket not connected")
+	}
 	wc.state = stateOperational
 	wc.mu.Unlock()
 
@@ -172,8 +177,8 @@ func (wc *WorkerConn) RunOperational() error {
 	msgCh := make(chan wsMsg, 1)
 	go func() {
 		for {
-			wc.ws.SetReadDeadline(time.Now().Add(90 * time.Second))
-			data, err := wc.ws.ReadText()
+			_ = ws.SetReadDeadline(time.Now().Add(90 * time.Second))
+			data, err := ws.ReadText()
 			select {
 			case msgCh <- wsMsg{data, err}:
 			default:
@@ -342,11 +347,23 @@ func (wc *WorkerConn) sendJSON(data interface{}) error {
 	if err != nil {
 		return fmt.Errorf("json marshal: %w", err)
 	}
-	return wc.ws.WriteText(msg)
+	wc.mu.Lock()
+	ws := wc.ws
+	wc.mu.Unlock()
+	if ws == nil {
+		return errors.New("websocket not connected")
+	}
+	return ws.WriteText(msg)
 }
 
 func (wc *WorkerConn) readTyped(expectedType string) (map[string]interface{}, error) {
-	data, err := wc.ws.ReadText()
+	wc.mu.Lock()
+	ws := wc.ws
+	wc.mu.Unlock()
+	if ws == nil {
+		return nil, errors.New("websocket not connected")
+	}
+	data, err := ws.ReadText()
 	if err != nil {
 		return nil, err
 	}
