@@ -73,6 +73,23 @@ async def worker_join_handler(websocket: WebSocket) -> None:
     the operational loop. Handles all errors by closing with appropriate codes.
     """
     logger.debug("HANDLER CALLED for WS %s", id(websocket))
+
+    from master.config import settings
+    if settings.enforce_https:
+        url = getattr(websocket, "url", None)
+        scheme = getattr(url, "scheme", None) if url else None
+        headers = getattr(websocket, "headers", {})
+        x_proto = headers.get("x-forwarded-proto", "") if hasattr(headers, "get") else ""
+        is_secure = (
+            scheme == "wss" or
+            x_proto.lower() == "https"
+        )
+        if not is_secure:
+            logger.warning("Rejecting unencrypted WebSocket connection (enforce_https=True)")
+            await websocket.accept()
+            await websocket.close(code=4426, reason="WSS/TLS required")
+            return
+
     await websocket.accept()
     logger.debug("WEBSOCKET ACCEPTED for WS %s", id(websocket))
     remote = _get_remote_address(websocket)
@@ -203,7 +220,7 @@ async def _run_enrollment(
 
     # ── Step 7: Generate and send CHALLENGE ─────────────────────────────────
     challenge = get_security_instance().generate_challenge()
-    await _send(websocket, {"type": "ENROLLMENT_CHALLENGE", "challenge": challenge})
+    await _send(websocket, {"type": "ENROLLMENT_CHALLENGE", "challenge": challenge}, node_id=node_id)
 
     # ── Step 8: Receive ENROLLMENT_RESPONSE ─────────────────────────────────
     resp = await _recv_typed(websocket, "ENROLLMENT_RESPONSE", timeout=ENROLLMENT_STEP_TIMEOUT)
@@ -298,7 +315,7 @@ async def _run_enrollment(
         "master_public_key": get_security_instance().master_public_key_b64,
         "node_id": node_id,
         "heartbeat_interval": node_manager.heartbeat_interval,
-    })
+    }, node_id=node_id)
 
     # ── Step 14: Audit ───────────────────────────────────────────────────────
     await log_action(
@@ -370,7 +387,7 @@ async def _run_operational(
 
         if msg_type == "HEARTBEAT":
             await node_manager.touch_heartbeat(node_id)
-            await _send(websocket, {"type": "HEARTBEAT_ACK", "ts": time.time()})
+            await _send(websocket, {"type": "HEARTBEAT_ACK", "ts": time.time()}, node_id=node_id)
 
         elif msg_type == "INTENT_RESULT":
             intent_id = msg.get("intent_id", "?")
@@ -464,9 +481,19 @@ async def _recv_typed(
     return msg
 
 
-async def _send(websocket: WebSocket, data: dict[str, Any]) -> None:
-    """Serialize and send a JSON message over the WebSocket."""
-    await websocket.send_text(json.dumps(data, separators=(",", ":")))
+async def _send(websocket: WebSocket, data: dict[str, Any], node_id: str | None = None) -> None:
+    """Serialize and send a JSON message over the WebSocket.
+
+    Protected against WebSocketDisconnect: catches the exception, cleans up
+    any pending intent futures for the given node, logs a warning, and does
+    NOT re-raise (avoids orphan futures and worker handler crashes).
+    """
+    try:
+        await websocket.send_text(json.dumps(data, separators=(",", ":")))
+    except WebSocketDisconnect:
+        logger.warning("WebSocket disconnected mid-send (node=%s)", node_id)
+        if node_id:
+            await node_manager.unregister_connection(node_id)
 
 
 async def _close(websocket: WebSocket, code: int, reason: str) -> None:

@@ -7,11 +7,12 @@ import time
 import types
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from fastapi import WebSocketDisconnect
 
 from master.core.security_manager import SecurityManager
 from master.core.node_manager import NodeManager, NodeState, node_manager
 from master.ws import worker_handler as ws_handler
-from master.ws.worker_handler import worker_join_handler, _run_operational
+from master.ws.worker_handler import worker_join_handler, _run_operational, _send
 
 # Autouse fixture to setup node_manager settings for testing
 @pytest.fixture(autouse=True)
@@ -32,7 +33,8 @@ class MockWebSocket:
         self.close_code: int | None = None
         self.close_reason: str = ""
         self.client = types.SimpleNamespace(host="127.0.0.1", port=8000)
-        self.headers: dict[str, str] = {}
+        self.headers: dict[str, str] = {"x-forwarded-proto": "https"}
+        self.url = types.SimpleNamespace(scheme="wss")
         self.app = app or types.SimpleNamespace(state=types.SimpleNamespace(trusted_proxies=[]))
 
         if messages:
@@ -343,3 +345,46 @@ async def test_operational_intent_result(db, security, worker_keys):
         assert result.get("intent_id") == intent_id and result.get("success")
     except asyncio.TimeoutError:
         pytest.fail("future not resolved")
+
+
+@pytest.mark.asyncio
+async def test_send_disconnect_cleanup():
+    """H1: _send() catches WebSocketDisconnect and cleans up pending intents."""
+    node_id = "send-disconnect-node"
+    intent_id = "test-intent-disconnect"
+
+    # Setup: register a pending intent for this node
+    future = asyncio.get_running_loop().create_future()
+    node_manager._pending_intents[intent_id] = future
+    node_manager._intent_nodes[intent_id] = node_id
+
+    class DisconnectWS(MockWebSocket):
+        async def send_text(self, data: str):
+            raise WebSocketDisconnect(code=1000)
+
+    ws = DisconnectWS()
+
+    # _send must NOT raise — catches WebSocketDisconnect internally
+    await _send(ws, {"type": "TEST"}, node_id=node_id)
+
+    # Verify the pending intent was cleaned up (cancelled)
+    assert intent_id not in node_manager._pending_intents, \
+        "pending intent must be removed on disconnect"
+    assert future.done(), "future must be resolved (cancelled) on disconnect"
+
+    # Cleanup test artifacts
+    node_manager._pending_intents.pop(intent_id, None)
+    node_manager._intent_nodes.pop(intent_id, None)
+
+
+@pytest.mark.asyncio
+async def test_send_disconnect_no_node_id():
+    """H1: _send() handles WebSocketDisconnect gracefully without node_id."""
+    class DisconnectWS(MockWebSocket):
+        async def send_text(self, data: str):
+            raise WebSocketDisconnect(code=1000)
+
+    ws = DisconnectWS()
+
+    # Must not raise even without node_id (graceful fallback)
+    await _send(ws, {"type": "TEST"})
