@@ -1,0 +1,42 @@
+# Vigile — Caddy reverse proxy for HTTPS termination
+#
+# HTTPS termination via Caddy — Master listens HTTP only on internal network.
+#
+# Dev mode:  uses `tls internal` (self-signed certs, auto-generated at runtime)
+#             no certificate files needed
+# Prod mode: replace `tls internal` with `tls yourdomain.com` for Let's Encrypt
+#             (see docs/TLS.md for details)
+#
+# Network: caddy -> master:8000 (HTTP, Docker internal network)
+
+{
+    # Disable automatic HTTPS so we control exactly which ports listen
+    auto_https off
+}
+
+# HTTPS endpoint — accept connections from both Docker internal (caddy) and host (localhost)
+caddy:443, localhost:443 {
+    # Self-signed certs for development (Caddy internal CA, runtime-generated)
+    tls internal
+
+    # Reverse proxy to Master (HTTP) on the Docker internal network
+    # WebSocket upgrade is handled automatically by Caddy 2.x
+    reverse_proxy master:8000
+
+    # Security headers
+    header {
+        # Enable HTTP Strict Transport Security (1 year)
+        Strict-Transport-Security "max-age=63072000; includeSubDomains"
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        # Prevent clickjacking
+        X-Frame-Options "DENY"
+        # Remove Caddy's server header
+        -Server
+    }
+}
+
+# HTTP redirect — convenience for curl / browser testing
+:80 {
+    redir https://{host}{uri} permanent
+}

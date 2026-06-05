@@ -44,12 +44,12 @@ echo ""
 echo "=== Building images ==="
 docker compose -f "$COMPOSE_FILE" build master worker
 
-echo "=== Starting Master ==="
-docker compose -f "$COMPOSE_FILE" up -d master
+echo "=== Starting Caddy + Master ==="
+docker compose -f "$COMPOSE_FILE" up -d caddy master
 
 echo "Waiting for Master to be healthy..."
 for i in $(seq 1 30); do
-  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -sk https://localhost:443/health >/dev/null 2>&1; then
     echo "Master is ready!"
     break
   fi
@@ -64,9 +64,9 @@ done
 # ── 2. Login as admin ─────────────────────────────────────────────────
 echo ""
 echo "=== Authenticating as admin ==="
-ADMIN_LOGIN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+ADMIN_LOGIN=$(curl -sk -X POST https://localhost:443/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin"}')
+  -d '{"username":"demo","password":"demo"}')
 
 ACCESS_TOKEN=$(echo "$ADMIN_LOGIN" | jq -r '.access_token')
 if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
@@ -82,7 +82,7 @@ for i in $(seq 1 "$WORKERS"); do
   echo "=== Setting up $NODE ==="
 
   # Generate JOIN_TOKEN via Master API
-  JOIN=$(curl -s -X POST http://localhost:8000/api/nodes/generate-join \
+  JOIN=$(curl -sk -X POST https://localhost:443/api/nodes/generate-join \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -d "{\"name\":\"$NODE\"}")
@@ -111,22 +111,22 @@ echo "========================================="
 echo "  Setup Complete"
 echo "========================================="
 echo ""
-echo "Master:    http://localhost:8000"
-echo "API Docs:  http://localhost:8000/api/docs"
+echo "Master:    https://localhost:443"
+echo "API Docs:  https://localhost:443/api/docs"
 echo "Workers:   $WORKERS deployed"
 echo ""
 echo "Quick checks:"
 echo "  docker compose logs -f master    # Watch Master logs"
 echo ""
 echo "  # List nodes with enrollment status:"
-echo "  TOKEN=\$(curl -s http://localhost:8000/api/auth/login \\"
+echo "  TOKEN=\$(curl -sk https://localhost:443/api/auth/login \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"username\":\"admin\",\"password\":\"admin\"}' | jq -r '.access_token')"
-echo "  curl -s http://localhost:8000/api/nodes \\"
+echo "    -d '{\"username\":\"demo\",\"password\":\"demo\"}' | jq -r '.access_token')"
+echo "  curl -sk https://localhost:443/api/nodes \\"
 echo "    -H \"Authorization: Bearer \$TOKEN\" | jq '.[] | {id, name, state, hostname}'"
 echo ""
 echo "  # Get stats for a node:"
-echo '  curl -s http://localhost:8000/api/nodes/<NODE_ID>/stats \'
+echo '  curl -sk https://localhost:443/api/nodes/<NODE_ID>/stats \'
 echo "    -H \"Authorization: Bearer \$TOKEN\" | jq"
 echo ""
 echo "  # Cleanup:"

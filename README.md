@@ -92,6 +92,28 @@ Le Master va initialiser la base de données SQLite `./data/vigile.db` et créer
 > [!IMPORTANT]
 > Lors de la première connexion, Vigile impose un changement immédiat du mot de passe administrateur pour des raisons de sécurité.
 
+### Stack Docker (avec TLS)
+
+Pour déployer la stack complète avec le reverse proxy TLS (recommandé) :
+
+```bash
+# Lancer Caddy (proxy TLS) + Master
+docker compose up -d caddy master
+
+# Vérifier que le Master répond en HTTPS
+curl -sk https://localhost:443/health
+
+# Enrôler des Workers
+./scripts/setup_test.sh --workers 2
+```
+
+Le trafic est chiffré de bout en bout :
+- **Caddy** termine le TLS sur le port 443 (certificats auto-signés en dev, Let's Encrypt en prod)
+- **Master** écoute en HTTP uniquement sur le réseau Docker interne (port 8000)
+- **Worker** se connecte en `wss://` à Caddy
+
+Voir [docs/TLS.md](docs/TLS.md) pour la configuration détaillée.
+
 ### 2. Enrôler un Worker
 
 1. Connectez-vous à l'interface d'administration ou utilisez l'API pour générer un jeton d'enrôlement :
@@ -101,7 +123,7 @@ Le Master va initialiser la base de données SQLite `./data/vigile.db` et créer
 2. Lancez le Worker Go en lui transmettant le jeton généré :
    ```bash
    cd worker
-   go run . --master ws://127.0.0.1:8000 --token <JOIN_TOKEN> --key-dir ./data
+   go run . --master wss://localhost:443 --token <JOIN_TOKEN> --key-dir ./data
    ```
 3. Une fois l'enrôlement Ed25519 complété, la paire de clés privée/publique du Worker est enregistrée et toute communication ultérieure passera par le WebSocket authentifié cryptographiquement.
 
