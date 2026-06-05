@@ -8,6 +8,8 @@ import secrets
 from pathlib import Path
 from pydantic import BaseModel, field_validator, ConfigDict
 
+from master.core.secret_loader import load_secret
+
 
 class Settings(BaseModel):
     """Application settings loaded from environment variables."""
@@ -52,12 +54,19 @@ class Settings(BaseModel):
     trusted_proxies: list[str] = os.getenv("TRUSTED_PROXIES", "").split(",") if os.getenv("TRUSTED_PROXIES") else []
 
     # --- Security: HTTPS enforcement ---
-    enforce_https: bool = os.getenv("ENFORCE_HTTPS", "false").lower() == "true"
+    allow_insecure: bool = os.getenv("ALLOW_INSECURE", "false").lower() == "true"
+    enforce_https: bool = os.getenv("ENFORCE_HTTPS", "true").lower() == "true"
+    cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").lower() == "true"
+    cookie_samesite: str = os.getenv("COOKIE_SAMESITE", "lax")
+    cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
 
     # --- LLM Provider ---
     llm_base_url: str = os.getenv("LLM_BASE_URL", "")
-    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_api_key: str = load_secret("LLM_API_KEY")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    # --- Intent GC ---
+    default_intent_max_age: int = int(os.getenv("INTENT_DEFAULT_MAX_AGE", "300"))
 
     # --- Plugins ---
     plugins_dir: str = os.getenv("PLUGINS_DIR", "./master/plugins")
@@ -94,6 +103,9 @@ class Settings(BaseModel):
         """Generate secrets if not provided (dev convenience, NOT for production)."""
         import logging
         _log = logging.getLogger(__name__)
+        if not self.allow_insecure:
+            self.enforce_https = True
+            self.cookie_secure = True
         if not self.server_secret_key:
             self.server_secret_key = secrets.token_hex(32)
             _log.warning("SERVER_SECRET_KEY auto-generated (dev mode). Set it in production.")

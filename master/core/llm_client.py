@@ -23,6 +23,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from master.core.secret_loader import load_secret
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +48,7 @@ class LLMClient:
         timeout: int = 30,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
+        self.api_key = api_key or load_secret("LLM_API_KEY")
         self.model = model
         self.timeout = timeout
 
