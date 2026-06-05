@@ -1,10 +1,11 @@
 # Vigile — Docker Compose Test Environment
 #
-# Fully isolated test stack. Run on any Docker host.
+# HTTPS termination via Caddy — Master listens HTTP only on internal network.
+# Caddy terminates TLS with self-signed certs (dev) or Let's Encrypt (prod).
 #
 # Quick start:
 #   docker compose build
-#   docker compose up -d master
+#   docker compose up -d caddy master
 #   ./scripts/setup_test.sh --workers 2
 #
 # Cleanup:
@@ -12,14 +13,33 @@
 
 services:
 
+  # ── Reverse Proxy (HTTPS termination) ───────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"    # HTTP→HTTPS redirect
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      master:
+        condition: service_healthy
+    networks:
+      - default
+
   # ── Master Node ──────────────────────────────────────────────────────
   master:
     build:
       context: .
       dockerfile: Dockerfile.master
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # Master listens HTTP only on internal network (port 8000).
+    # External HTTPS access is handled by Caddy reverse proxy.
+    expose:
+      - "8000"
     volumes:
       - vigile_data:/app/data
     environment:
@@ -50,7 +70,11 @@ services:
       - /proc:/host/proc:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - MASTER_URL=http://master:8000
+      # Connect via Caddy (HTTPS) — Caddy terminates TLS.
+      # ALLOW_INSECURE=true for dev self-signed certs.
+      # In prod with real certs, remove ALLOW_INSECURE.
+      - MASTER_URL=https://caddy:443
+      - ALLOW_INSECURE=true
     healthcheck:
       test: ["CMD-SHELL", "pgrep vigile-worker || exit 1"]
       interval: 30s
@@ -61,3 +85,5 @@ services:
 
 volumes:
   vigile_data:
+  caddy_data:
+  caddy_config:
