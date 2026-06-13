@@ -2,6 +2,8 @@
 
 L'IA est un excellent codeur, mais un administrateur système catastrophique sans garde-fou.
 
+![Vigile Dashboard](docs/images/dashboard.png)
+
 ---
 
 ## L'histoire
@@ -59,6 +61,27 @@ Pour pallier ces faiblesses, **Vigile** sépare le cerveau décisionnel du bras 
 1. **Pas de shell interactif** : Le Worker n'offre aucun terminal arbitraire à l'IA. Il utilise un ensemble d'actions structurées whitelistées (gestion de services systemd, contrôle de conteneurs Docker, lecture de journaux systemd ou fichiers log).
 2. **Reverse WebSocket** : C'est le Worker qui se connecte au Master. Pas besoin d'exposer vos machines locales au web.
 3. **Audit Trail immuable** : Les mutations et actions exécutées sont enregistrées sous forme de chaîne de hash cryptographique SHA-256 (append-only) pour garantir la traçabilité.
+
+---
+
+## Aperçu de l'Interface
+
+Voici un aperçu de la console d'administration Vigile avec des données de simulation (mode Démo) :
+
+### 🔐 Écran de Connexion
+L'écran de connexion sécurisé permet de s'authentifier de manière robuste ou d'accéder au mode Démo pour tester les fonctionnalités en mémoire.
+
+![Écran de Connexion](docs/images/login.png)
+
+### 📈 Supervision détaillée des Nœuds
+Chaque nœud de la flotte expose des métriques détaillées d'activité (CPU, RAM, Disque) ainsi que l'état en direct de ses services systemd et conteneurs Docker.
+
+![Détails du Nœud](docs/images/nodes.png)
+
+### 🛡️ Registre d'Audit Cryptographique
+L'ensemble des actions et mutations ordonnées par l'opérateur ou proposées par le copilote IA sont scellées dans une chaîne append-only de hashs SHA-256 pour garantir une traçabilité totale et infalsifiable.
+
+![Registre d'Audit](docs/images/audit.png)
 
 ---
 
