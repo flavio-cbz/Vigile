@@ -304,7 +304,7 @@ async def test_get_bulk_status(client: AsyncClient, db, auth_headers, security: 
 
     # 3. Test demo mode
     # Inject a demo user token
-    token = security.create_access_token("demo-user", "demo", "operator")
+    token = security.create_access_token("demo-user", "guest", "operator")
     headers = {"Authorization": f"Bearer {token}"}
     response_demo = await client.get("/api/nodes/bulk/status", headers=headers)
     assert response_demo.status_code == status.HTTP_200_OK

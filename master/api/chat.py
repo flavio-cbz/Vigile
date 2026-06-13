@@ -23,7 +23,6 @@ from pydantic import BaseModel
 
 from master.api.deps import (
     DB,
-    CurrentUser,
     get_llm_client,
     get_node_manager,
     get_structured_llm,
@@ -162,7 +161,6 @@ async def chat(
 
     async def _event_stream() -> Any:
         token_buffer = ""
-        full_reasoning = ""
         tool_calls_detected: list[dict] = []
 
         try:
@@ -192,15 +190,14 @@ async def chat(
                 )
                 if proposal:
                     await _persist_proposal(db, proposal)
-                    yield (
-                        f"data: {json.dumps({
-                            'type': 'proposal',
-                            'proposal_id': proposal.id,
-                            'action': proposal.action,
-                            'risk_level': proposal.risk_level,
-                            'reasoning': proposal.reasoning,
-                        }, separators=(',', ':'))}\n\n"
-                    )
+                    proposal_json = json.dumps({
+                        'type': 'proposal',
+                        'proposal_id': proposal.id,
+                        'action': proposal.action,
+                        'risk_level': proposal.risk_level,
+                        'reasoning': proposal.reasoning,
+                    }, separators=(',', ':'))
+                    yield f"data: {proposal_json}\n\n"
 
             # Save chat history to DB if session_id is provided
             if session_id:
@@ -277,9 +274,10 @@ async def list_proposals(
 ) -> list[dict[str, Any]]:
     """List all action proposals, optionally filtered by status."""
     if is_demo(claims):
+        props = DEMO_PROPOSALS
         if status_filter:
-            return list(p for p in DEMO_PROPOSALS if p["status"] == status_filter)
-        return list(DEMO_PROPOSALS)
+            props = [p for p in props if p["status"] == status_filter]
+        return [ActionProposal.from_db_row(p).model_dump() for p in props]
 
     if status_filter:
         async with db.execute(
@@ -292,7 +290,7 @@ async def list_proposals(
             "SELECT * FROM action_proposals ORDER BY created_at DESC",
         ) as cursor:
             rows = [dict(r) for r in await cursor.fetchall()]
-    return rows
+    return [ActionProposal.from_db_row(row).model_dump() for row in rows]
 
 
 @router.get(
@@ -309,7 +307,7 @@ async def get_proposal(
         prop = get_demo_proposal(proposal_id)
         if prop is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
-        return dict(prop)
+        return ActionProposal.from_db_row(prop).model_dump()
 
     async with db.execute(
         "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
@@ -317,7 +315,7 @@ async def get_proposal(
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
-    return dict(row)
+    return ActionProposal.from_db_row(dict(row)).model_dump()
 
 
 @router.post(
@@ -352,7 +350,7 @@ async def approve_proposal(
             "result_json": '{"success": true, "simulated": true}',
         }
         updated = update_demo_proposal(proposal_id, updates)
-        return dict(updated)
+        return ActionProposal.from_db_row(updated).model_dump()
 
     # Fetch proposal
     async with db.execute(
@@ -416,12 +414,13 @@ async def approve_proposal(
         details={
             "proposal_id": proposal.id,
             "action": proposal.action,
+            "target": proposal.params.get("target") or proposal.params.get("container") or proposal.params.get("service") or "",
             "status": proposal.status,
             "result": db_data["result_json"],
         },
     )
 
-    return db_data
+    return proposal.model_dump()
 
 
 @router.post(
@@ -455,7 +454,7 @@ async def reject_proposal(
             "rejection_reason": reason,
         }
         updated = update_demo_proposal(proposal_id, updates)
-        return dict(updated)
+        return ActionProposal.from_db_row(updated).model_dump()
 
     async with db.execute(
         "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
@@ -499,11 +498,12 @@ async def reject_proposal(
         details={
             "proposal_id": proposal.id,
             "action": proposal.action,
+            "target": proposal.params.get("target") or proposal.params.get("container") or proposal.params.get("service") or "",
             "reason": reason,
         },
     )
 
-    return db_data
+    return proposal.model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +791,8 @@ async def _try_extract_proposal(
                 {"role": "system", "content": (
                     "Based on the conversation, determine if a server action is needed. "
                     "If yes, output action, params, reasoning, and risk_level as JSON. "
-                    "Set action to 'NONE' if no action is needed."
+                    "Set action to 'NONE' if no action is needed. "
+                    "Crucial: The 'reasoning' field MUST be written in French (ensure all explanations, risks, and details are translated into French)."
                 )},
                 {"role": "user", "content": user_message},
                 {"role": "assistant", "content": ai_response},

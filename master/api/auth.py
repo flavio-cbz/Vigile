@@ -13,7 +13,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from master.api.deps import CurrentUser, DB, get_security
@@ -21,6 +21,7 @@ from master.api.demo_data import DEMO_USERNAME, DEMO_PASSWORD, DEMO_USER_ID, is_
 from master.core.security_manager import SecurityManager, SecurityError
 from master.core.rate_limiter import rate_limiter
 from master.core.audit import log_action
+from master.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -57,6 +58,66 @@ class UserProfile(BaseModel):
     user_id: str
     username: str
     role: str
+
+
+ACCESS_TOKEN_COOKIE = "vigile_access_token"
+REFRESH_TOKEN_COOKIE = "vigile_refresh_token"
+
+
+def _cookie_domain() -> str | None:
+    return settings.cookie_domain or None
+
+
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str, sec: SecurityManager) -> None:
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE,
+        access_token,
+        max_age=sec.jwt_access_token_ttl,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        domain=_cookie_domain(),
+        path="/",
+    )
+    response.set_cookie(
+        REFRESH_TOKEN_COOKIE,
+        refresh_token,
+        max_age=sec.jwt_refresh_token_ttl,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        domain=_cookie_domain(),
+        path="/api/auth",
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(
+        ACCESS_TOKEN_COOKIE,
+        domain=_cookie_domain(),
+        path="/",
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+        httponly=True,
+    )
+    response.delete_cookie(
+        REFRESH_TOKEN_COOKIE,
+        domain=_cookie_domain(),
+        path="/api/auth",
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+        httponly=True,
+    )
+
+
+def _get_refresh_token(body: RefreshRequest, request: Request) -> str:
+    token = body.refresh_token or request.cookies.get(REFRESH_TOKEN_COOKIE)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token required",
+        )
+    return token
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +138,7 @@ class UserProfile(BaseModel):
 )
 async def login(
     body: LoginRequest,
+    response: Response,
     db: DB,
     sec: SecurityManager = Depends(get_security),
 ) -> TokenResponse:
@@ -96,6 +158,7 @@ async def login(
         )
         refresh_token, _ = sec.create_refresh_token(user_id=DEMO_USER_ID)
         logger.info("Demo user '%s' logged in (no DB).", DEMO_USERNAME)
+        _set_auth_cookies(response, access_token, refresh_token, sec)
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -170,6 +233,7 @@ async def login(
 
     logger.info("User '%s' (role=%s) logged in.", user["username"], user["role"])
 
+    _set_auth_cookies(response, access_token, refresh_token, sec)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -184,6 +248,8 @@ async def login(
 )
 async def refresh_token(
     body: RefreshRequest,
+    request: Request,
+    response: Response,
     db: DB,
     sec: SecurityManager = Depends(get_security),
 ) -> TokenResponse:
@@ -191,8 +257,9 @@ async def refresh_token(
     Exchange a valid refresh token for a new access token and rotated refresh token.
     Implements token rotation and family-based theft detection.
     """
+    refresh_token_value = _get_refresh_token(body, request)
     try:
-        claims = sec.verify_refresh_token(body.refresh_token)
+        claims = sec.verify_refresh_token(refresh_token_value)
     except SecurityError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -208,6 +275,7 @@ async def refresh_token(
         )
         new_refresh_token, _ = sec.create_refresh_token(user_id=DEMO_USER_ID)
         logger.info("Demo user refresh token rotated (no DB).")
+        _set_auth_cookies(response, access_token, new_refresh_token, sec)
         return TokenResponse(
             access_token=access_token,
             refresh_token=new_refresh_token,
@@ -215,7 +283,7 @@ async def refresh_token(
         )
 
     user_id = claims["sub"]
-    token_hash = sec.hash_refresh_token(body.refresh_token)
+    token_hash = sec.hash_refresh_token(refresh_token_value)
 
     # Look up token in DB
     async with db.execute(
@@ -300,8 +368,15 @@ async def refresh_token(
         """,
         (new_token_id, user["id"], new_token_hash, db_token["family_id"], now, expires_at),
     )
+    await log_action(
+        db,
+        user_id=user["id"],
+        action="TOKEN_REFRESH",
+        details={"family_id": db_token["family_id"], "token_hash_prefix": new_token_hash[:8]},
+    )
     await db.commit()
 
+    _set_auth_cookies(response, access_token, new_refresh_token, sec)
     return TokenResponse(
         access_token=access_token,
         refresh_token=new_refresh_token,
@@ -316,14 +391,20 @@ async def refresh_token(
 )
 async def logout(
     body: RefreshRequest,
+    request: Request,
+    response: Response,
     db: DB,
     sec: SecurityManager = Depends(get_security),
 ):
     """Log out by revoking the provided refresh token."""
-    token_hash = sec.hash_refresh_token(body.refresh_token)
+    refresh_token_value = body.refresh_token or request.cookies.get(REFRESH_TOKEN_COOKIE)
+    if not refresh_token_value:
+        _clear_auth_cookies(response)
+        return
+    token_hash = sec.hash_refresh_token(refresh_token_value)
 
     try:
-        claims = sec.verify_refresh_token(body.refresh_token)
+        claims = sec.verify_refresh_token(refresh_token_value)
         user_id = claims["sub"]
     except Exception:
         user_id = "unknown"
@@ -341,6 +422,7 @@ async def logout(
         details={"token_hash_prefix": token_hash[:8]},
     )
     await db.commit()
+    _clear_auth_cookies(response)
 
 
 @router.post(

@@ -158,35 +158,27 @@ async def test_verify_worker_token_async(security: SecurityManager, db):
     assert "revoked" in str(excinfo.value).lower()
 
 
-def test_require_role(security: SecurityManager):
+@pytest.mark.asyncio
+async def test_require_role(security: SecurityManager):
     from master.api.deps import require_role
     dependency = require_role("operator", "admin")
 
-    # 1. No credentials
+    # 1. Viewer role (insufficient)
+    viewer_claims = {"sub": "user-1", "role": "viewer"}
     with pytest.raises(HTTPException) as excinfo:
-        dependency(None)
-    assert excinfo.value.status_code == 401
-
-    # 2. Viewer role (insufficient)
-    viewer_token = security.create_access_token("user-1", "viewer_user", "viewer")
-    from fastapi.security import HTTPAuthorizationCredentials
-    viewer_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=viewer_token)
-    with pytest.raises(HTTPException) as excinfo:
-        dependency(viewer_creds)
+        await dependency(viewer_claims)
     assert excinfo.value.status_code == 403
     assert "insufficient permissions" in excinfo.value.detail.lower()
 
-    # 3. Operator role (sufficient)
-    op_token = security.create_access_token("user-2", "op_user", "operator")
-    op_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=op_token)
-    claims = dependency(op_creds)
+    # 2. Operator role (sufficient)
+    op_claims = {"sub": "user-2", "role": "operator"}
+    claims = await dependency(op_claims)
     assert claims["sub"] == "user-2"
     assert claims["role"] == "operator"
 
-    # 4. Admin role (sufficient)
-    admin_token = security.create_access_token("user-3", "admin_user", "admin")
-    admin_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=admin_token)
-    claims = dependency(admin_creds)
+    # 3. Admin role (sufficient)
+    admin_claims = {"sub": "user-3", "role": "admin"}
+    claims = await dependency(admin_claims)
     assert claims["sub"] == "user-3"
     assert claims["role"] == "admin"
 

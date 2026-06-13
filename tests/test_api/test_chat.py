@@ -176,7 +176,7 @@ async def test_approve_proposal(db, client, auth_headers):
         assert d["status"] == "EXECUTED"
         assert d["approved_by"] == "test-user"
         assert d["executed_at"] is not None
-        assert d.get("result_json") is not None
+        assert d.get("result") is not None
     finally:
         node_manager.send_intent = orig
 

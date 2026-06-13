@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from master.api.deps import DB, require_role
 from master.api.demo_data import is_demo, DEMO_AUDIT_ENTRIES
@@ -22,6 +22,7 @@ class AuditEntryResponse(BaseModel):
     sequence: int
     timestamp: float
     user_id: str
+    actor: str | None = None
     action: str
     node_id: str | None
     details: dict[str, Any]
@@ -48,7 +49,8 @@ async def list_audit_entries(
     """Fetch audit log entries, ordered by sequence descending, with pagination."""
     # Demo mode: return mock data, no DB queries
     if is_demo(claims):
-        entries = DEMO_AUDIT_ENTRIES
+        # Demo entries must be sorted newest-first to match real SQL behavior
+        entries = sorted(DEMO_AUDIT_ENTRIES, key=lambda e: e["sequence"], reverse=True)
         if node_id:
             entries = [e for e in entries if e.get("node_id") == node_id]
         if action:
@@ -74,13 +76,11 @@ async def list_audit_entries(
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    # Get total count
     count_sql = f"SELECT COUNT(*) as cnt FROM audit_log {where}"
     async with db.execute(count_sql, params) as cursor:
         row = await cursor.fetchone()
         total = row["cnt"] if row else 0
 
-    # Get paginated results
     sql = f"""
         SELECT id, sequence, timestamp, user_id, action, node_id,
                details_json, previous_hash, entry_hash

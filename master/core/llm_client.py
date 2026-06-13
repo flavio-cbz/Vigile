@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMError(Exception):
-    """Raised when the LLM provider returns an error or times out."""
+    pass
 
 
 class LLMClient:
@@ -58,10 +58,6 @@ class LLMClient:
                 max_keepalive_connections=5,
             ),
         )
-
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
 
     async def complete(
         self,
@@ -160,12 +156,7 @@ class LLMClient:
             return
 
     async def close(self) -> None:
-        """Close the persistent HTTP client and release all connections."""
         await self._client.aclose()
-
-    # -----------------------------------------------------------------------
-    # Internal helpers
-    # -----------------------------------------------------------------------
 
     def _build_headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -184,6 +175,5 @@ class LLMClient:
             "messages": messages,
             "stream": stream,
         }
-        # Pass through any additional kwargs (temperature, tools, etc.)
         body.update(kwargs)
         return body

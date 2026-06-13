@@ -7,7 +7,7 @@ import json
 import time
 import urllib.request
 
-BASE = "http://localhost:8002"
+BASE = "http://localhost:8000"
 
 
 def login():

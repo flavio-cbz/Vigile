@@ -91,6 +91,30 @@ def test_rate_limiter_dependency():
     assert r3.status_code == 429
     assert "Too many requests" in r3.json()["detail"]
 
+
+@pytest.mark.asyncio
+async def test_rate_limiter_uses_x_forwarded_for_only_from_trusted_proxy(monkeypatch):
+    from master.config import settings
+
+    limiter = RateLimiter(max_requests=1, window_seconds=10, trusted_proxies=["10.0.0.1"])
+    app = FastAPI()
+    limiter.middleware(app)
+    monkeypatch.setattr(settings, "trusted_proxies", ["10.0.0.1"])
+
+    @app.get("/xff-test")
+    def xff_route(request: Request):
+        return {"client": limiter.client_ip(request)}
+
+    from httpx import AsyncClient, ASGITransport
+    transport = ASGITransport(app=app, client=("10.0.0.1", 50000))
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first = await client.get("/xff-test", headers={"X-Forwarded-For": "203.0.113.10"})
+        second = await client.get("/xff-test", headers={"X-Forwarded-For": "203.0.113.11"})
+
+        assert first.status_code == 200
+        assert first.json()["client"] == "203.0.113.10"
+        assert second.status_code == 200
+
 @pytest.mark.asyncio
 async def test_rate_limiter_cleanup_task():
     limiter = RateLimiter()
@@ -118,4 +142,3 @@ async def test_rate_limiter_cleanup_task():
         except asyncio.CancelledError:
             pass
         assert task_err.done()
-

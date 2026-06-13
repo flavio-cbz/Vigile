@@ -15,7 +15,7 @@ def auth_headers(security: SecurityManager):
     def _make(role: str = "admin", demo: bool = False):
         # In demo mode, the user ID is DEMO_USER_ID and username is DEMO_USERNAME
         sub = "demo-user-id" if demo else "test-user"
-        username = "demo" if demo else "test_user"
+        username = "guest" if demo else "test_user"
         token = security.create_access_token(sub, username, role)
         return {"Authorization": f"Bearer {token}"}
     return _make

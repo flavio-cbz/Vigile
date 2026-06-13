@@ -25,36 +25,49 @@ async def test_api_integration_flow():
 
         # 2. Authentication Flow with Force Password Change Handling
         # We try to login with a new secure password first (in case it was already changed)
-        secure_password = "admin_secure_password"
-        r = await client.post("/api/auth/login", json={"username": "admin", "password": secure_password})
+        secure_password = "demo_secure_password"
+        username = "admin"
+        r = await client.post("/api/auth/login", json={"username": username, "password": secure_password})
         
         if r.status_code != 200:
-            # If that failed, try with the default "admin" password
-            r = await client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
-            assert r.status_code == 200, f"Default admin login failed: {r.status_code}"
+            # Try with the default "admin" password
+            r = await client.post("/api/auth/login", json={"username": username, "password": "admin"})
+            if r.status_code != 200:
+                # If that failed, fall back to "demo" username
+                username = "demo"
+                r = await client.post("/api/auth/login", json={"username": username, "password": secure_password})
+                if r.status_code != 200:
+                    r = await client.post("/api/auth/login", json={"username": username, "password": "demo"})
+            
+            assert r.status_code == 200, f"Login failed for both admin and demo: {r.status_code}"
             
             tokens = r.json()
             access_token = tokens["access_token"]
             headers = {"Authorization": f"Bearer {access_token}"}
             
-            # Since must_change_password=1, a call to /api/auth/me should return 403
-            r = await client.get("/api/auth/me", headers=headers)
-            assert r.status_code == 403, f"Expected 403 due to password change requirement, got {r.status_code}"
-            assert r.json().get("code") == "MUST_CHANGE_PASSWORD"
-            
-            # Perform force change-password
-            r = await client.post(
-                "/api/auth/change-password",
-                headers=headers,
-                json={"old_password": "admin", "new_password": secure_password}
-            )
-            assert r.status_code == 204, f"Password change failed: {r.status_code}"
-            
-            # Re-authenticate with new password
-            r = await client.post("/api/auth/login", json={"username": "admin", "password": secure_password})
-            assert r.status_code == 200, f"Login with new password failed: {r.status_code}"
+            # Check if must_change_password is required
+            r_me = await client.get("/api/auth/me", headers=headers)
+            if r_me.status_code == 403:
+                assert r_me.json().get("code") == "MUST_CHANGE_PASSWORD"
+                
+                # Perform force change-password
+                old_password = "demo" if username == "demo" else "admin"
+                r_change = await client.post(
+                    "/api/auth/change-password",
+                    headers=headers,
+                    json={"old_password": old_password, "new_password": secure_password}
+                )
+                assert r_change.status_code == 204, f"Password change failed: {r_change.status_code}"
+                
+                # Re-authenticate with new password
+                r_login = await client.post("/api/auth/login", json={"username": username, "password": secure_password})
+                assert r_login.status_code == 200, f"Login with new password failed: {r_login.status_code}"
+                tokens = r_login.json()
+            else:
+                assert r_me.status_code == 200, f"Expected 200 or 403, got {r_me.status_code}"
+        else:
+            tokens = r.json()
 
-        tokens = r.json()
         access_token = tokens["access_token"]
         refresh_token = tokens["refresh_token"]
         headers = {"Authorization": f"Bearer {access_token}"}

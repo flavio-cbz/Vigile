@@ -68,6 +68,17 @@ async def test_lockdown_closes_active_connections():
 
 @pytest.mark.asyncio
 async def test_get_current_user_lockdown_rules(security, db):
+    # Seed users first
+    await db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES ('admin-id', 'admin_user', 'no-hash', 'admin', 1, 0, 0, 0)"
+    )
+    await db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES ('viewer-id', 'viewer_user', 'no-hash', 'viewer', 1, 0, 0, 0)"
+    )
+    await db.commit()
+
     # Setup mock request
     class MockRequest:
         def __init__(self, method: str):
@@ -105,15 +116,37 @@ async def test_get_current_user_lockdown_rules(security, db):
 
 
 @pytest.mark.asyncio
-async def test_require_role_lockdown(security):
+async def test_require_role_lockdown(security, db):
+    # Seed users first
+    await db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES ('admin-id', 'admin_user', 'no-hash', 'admin', 1, 0, 0, 0)"
+    )
+    await db.commit()
+
     security.audit_compromised = True
     admin_token = security.create_access_token("admin-id", "admin_user", "admin")
     admin_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=admin_token)
 
-    dep = deps.require_role("admin")
+    class MockRequest:
+        def __init__(self, method: str):
+            self.method = method
+
+    # Under lockdown, resolving current_user claims fails with 503
     with pytest.raises(HTTPException) as excinfo:
-        dep(admin_creds)
+        await deps.get_current_user(MockRequest("GET"), admin_creds, security, db)
     assert excinfo.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # Test require_role role validation directly using claims dict
+    dep = deps.require_role("admin")
+    claims = {"sub": "admin-id", "role": "admin"}
+    assert await dep(claims) == claims
+
+    # Test require_role raises 403 on insufficient permissions
+    viewer_claims = {"sub": "viewer-id", "role": "viewer"}
+    with pytest.raises(HTTPException) as excinfo:
+        await dep(viewer_claims)
+    assert excinfo.value.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio

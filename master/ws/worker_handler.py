@@ -36,12 +36,12 @@ import uuid
 from typing import Any
 
 import aiosqlite
-from fastapi import WebSocket, WebSocketDisconnect, WebSocketException, status
+from fastapi import WebSocket, WebSocketDisconnect
 
 from master.core.audit import log_action
-from master.core.node_manager import NodeManager, NodeState, node_manager
+from master.core.node_manager import NodeState, node_manager
 from master.core.plugin_manager import plugin_manager
-from master.core.security_manager import SecurityManager, get_security_instance
+from master.core.security_manager import get_security_instance
 from master.db.database import get_db_conn, transaction
 
 logger = logging.getLogger(__name__)

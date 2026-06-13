@@ -1,0 +1,34 @@
+"""
+Vigile — Demo Mode Management
+Resets in-memory demo state (proposals, chat sessions).
+"""
+
+from fastapi import APIRouter
+from fastapi import HTTPException
+from fastapi import status
+
+from master.api.deps import CurrentUser, DB
+from master.api.demo_data import is_demo, reset_demo_state
+
+router = APIRouter(prefix="/api/demo", tags=["demo"])
+
+
+@router.post("/reset")
+async def reset_demo(
+    claims: CurrentUser,
+    db: DB,
+) -> dict:
+    """Reset all in-memory demo mutable state and clear proposals in database.
+
+    Only callable by the demo user (guest/guest).
+    Restores proposals and chat sessions to their default state.
+    """
+    if not is_demo(claims):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo reset only available in demo mode",
+        )
+    await db.execute("DELETE FROM action_proposals")
+    await db.commit()
+    reset_demo_state()
+    return {"success": True, "message": "Demo state reset successfully"}
