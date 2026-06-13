@@ -5,7 +5,8 @@ Loads all settings from environment variables with sensible defaults.
 
 import os
 import secrets
-from pydantic import BaseModel, field_validator, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from master.core.secret_loader import load_secret
 
@@ -47,10 +48,14 @@ class Settings(BaseModel):
     master_key_path: str = os.getenv("MASTER_KEY_PATH", "./data/master_ed25519.key")
 
     # --- CORS ---
-    cors_origins: list[str] = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+    cors_origins: list[str] = (
+        os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+    )
 
     # --- Security: Trusted proxies for X-Forwarded-For ---
-    trusted_proxies: list[str] = os.getenv("TRUSTED_PROXIES", "").split(",") if os.getenv("TRUSTED_PROXIES") else []
+    trusted_proxies: list[str] = (
+        os.getenv("TRUSTED_PROXIES", "").split(",") if os.getenv("TRUSTED_PROXIES") else []
+    )
 
     # --- Security: HTTPS enforcement ---
     allow_insecure: bool = os.getenv("ALLOW_INSECURE", "false").lower() == "true"
@@ -82,6 +87,7 @@ class Settings(BaseModel):
     def _reject_wildcard_with_credentials(cls, v: list[str]) -> list[str]:
         if "*" in v:
             import logging
+
             _log = logging.getLogger(__name__)
             _log.warning(
                 "CORS_ORIGINS contains '*' — this is incompatible with "
@@ -101,6 +107,7 @@ class Settings(BaseModel):
     def model_post_init(self, __context) -> None:
         """Generate secrets if not provided (dev convenience, NOT for production)."""
         import logging
+
         _log = logging.getLogger(__name__)
         if not self.allow_insecure:
             self.enforce_https = True

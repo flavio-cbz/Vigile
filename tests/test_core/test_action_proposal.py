@@ -1,12 +1,18 @@
 import json
+
 import pytest
+
 from master.core.action_proposal import ActionProposal
 
 
 def test_proposal_creation():
     """ActionProposal can be created with defaults."""
-    p = ActionProposal(node_id="n1", action="RESTART_CONTAINER",
-                       params={"container_id": "web"}, reasoning="It is down")
+    p = ActionProposal(
+        node_id="n1",
+        action="RESTART_CONTAINER",
+        params={"container_id": "web"},
+        reasoning="It is down",
+    )
     assert bool(p.id)
     assert p.status == "PENDING"
     assert p.risk_level == "MEDIUM"

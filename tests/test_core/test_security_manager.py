@@ -1,14 +1,15 @@
-import time
 import base64
-import json
-import hmac
 import hashlib
+import hmac
+import json
+import time
+
 import pytest
-from fastapi import HTTPException
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from master.core.security_manager import SecurityManager
+from fastapi import HTTPException
 
+from master.core.security_manager import SecurityManager
 
 
 def test_join_token_round_trip(security: SecurityManager):
@@ -36,7 +37,11 @@ def test_expired_token_rejected(security: SecurityManager):
         "single_use": True,
         "jti": "abc",
     }
-    payload_b64 = base64.urlsafe_b64encode(json.dumps(old_payload, sort_keys=True).encode()).decode().rstrip("=")
+    payload_b64 = (
+        base64.urlsafe_b64encode(json.dumps(old_payload, sort_keys=True).encode())
+        .decode()
+        .rstrip("=")
+    )
     sig = hmac.new(security._server_secret, payload_b64.encode(), "sha256").hexdigest()
     expired_token = f"{sig}.{payload_b64}"
     with pytest.raises(ValueError) as excinfo:
@@ -108,6 +113,7 @@ def test_refresh_token_lifecycle(security: SecurityManager):
 
     # Test invalid token
     from master.core.security_manager import SecurityError
+
     with pytest.raises(SecurityError) as excinfo:
         security.verify_refresh_token("invalid-token")
     assert "invalid" in str(excinfo.value).lower()
@@ -139,7 +145,7 @@ async def test_verify_worker_token_async(security: SecurityManager, db):
     await db.execute(
         "INSERT INTO worker_tokens (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked) "
         "VALUES ('tok-1', 'node-123', ?, ?, ?, ?, 0)",
-        (token_hash, lifecycle["issued_at"], lifecycle["rotation_due"], lifecycle["expires_at"])
+        (token_hash, lifecycle["issued_at"], lifecycle["rotation_due"], lifecycle["expires_at"]),
     )
     await db.commit()
 
@@ -147,10 +153,7 @@ async def test_verify_worker_token_async(security: SecurityManager, db):
     assert claims["sub"] == "node-123"
 
     # 3. Revoke token
-    await db.execute(
-        "UPDATE worker_tokens SET revoked = 1 WHERE token_hash = ?",
-        (token_hash,)
-    )
+    await db.execute("UPDATE worker_tokens SET revoked = 1 WHERE token_hash = ?", (token_hash,))
     await db.commit()
 
     with pytest.raises(ValueError) as excinfo:
@@ -161,6 +164,7 @@ async def test_verify_worker_token_async(security: SecurityManager, db):
 @pytest.mark.asyncio
 async def test_require_role(security: SecurityManager):
     from master.api.deps import require_role
+
     dependency = require_role("operator", "admin")
 
     # 1. Viewer role (insufficient)
@@ -194,7 +198,9 @@ def test_token_hashing_utilities(security: SecurityManager):
 
 def test_load_or_generate_master_key(temp_dir):
     import os
-    from cryptography.hazmat.primitives.serialization import PrivateFormat, NoEncryption
+
+    from cryptography.hazmat.primitives.serialization import NoEncryption, PrivateFormat
+
     from master.core.security_manager import load_or_generate_master_key
 
     key_path = os.path.join(temp_dir, "master.key")
@@ -214,15 +220,14 @@ def test_load_or_generate_master_key(temp_dir):
 
 def test_security_manager_ephemeral_key():
     sm = SecurityManager(
-        server_secret="server_secret",
-        jwt_secret="jwt_secret",
-        master_private_key=None
+        server_secret="server_secret", jwt_secret="jwt_secret", master_private_key=None
     )
     assert sm.master_public_key_b64 is not None
 
 
 def test_security_manager_already_initialized():
     import master.core.security_manager as sm
+
     with pytest.raises(RuntimeError) as excinfo:
         sm.init_security("sec", "jwt")
     assert "already initialized" in str(excinfo.value)
@@ -230,6 +235,7 @@ def test_security_manager_already_initialized():
 
 def test_security_manager_not_initialized():
     import master.core.security_manager as sm
+
     # Temporarily clear _security_instance
     orig = sm._security_instance
     sm._security_instance = None
@@ -249,6 +255,7 @@ def test_decode_join_token_malformed(security: SecurityManager):
     # To test invalid base64 encoding, we must provide a signature that is valid
     # for the invalid base64 payload.
     import hmac
+
     payload_b64 = "invalid_b64_!!!"
     sig = hmac.new(security._server_secret, payload_b64.encode(), "sha256").hexdigest()
     token = f"{sig}.{payload_b64}"
@@ -264,6 +271,7 @@ def test_verify_ed25519_signature_exception(security: SecurityManager):
 
 def test_verify_access_token_type_mismatch(security: SecurityManager):
     from master.core.security_manager import SecurityError
+
     rt, _ = security.create_refresh_token("user-1")
     with pytest.raises(SecurityError) as excinfo:
         security.verify_access_token(rt)
@@ -288,36 +296,36 @@ def test_verify_worker_token_errors(security: SecurityManager):
 
 def test_jwt_token_isolation(security: SecurityManager):
     from master.core.security_manager import SecurityError
+
     # Create access token, try decoding it as refresh or worker token
     at = security.create_access_token("user-1", "user", "viewer")
-    
+
     # Should fail decoding as refresh token
     with pytest.raises(SecurityError):
         security.verify_refresh_token(at)
-        
+
     # Should fail decoding as worker token
     with pytest.raises(ValueError):
         security.verify_worker_token(at)
 
     # Create refresh token
     rt, _ = security.create_refresh_token("user-1")
-    
+
     # Should fail decoding as access token
     with pytest.raises(SecurityError):
         security.verify_access_token(rt)
-        
+
     # Should fail decoding as worker token
     with pytest.raises(ValueError):
         security.verify_worker_token(rt)
 
     # Create worker token
     wt, _ = security.generate_worker_token("node-123")
-    
+
     # Should fail decoding as access token
     with pytest.raises(SecurityError):
         security.verify_access_token(wt)
-        
+
     # Should fail decoding as refresh token
     with pytest.raises(SecurityError):
         security.verify_refresh_token(wt)
-

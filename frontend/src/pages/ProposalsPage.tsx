@@ -52,7 +52,7 @@ const ProposalRow: React.FC<{
         </div>
 
         <h4 className="font-mono text-xs text-text-1 font-bold truncate">
-          Action : <span className="text-accent">{prop.action}</span> 
+          Action : <span className="text-accent">{prop.action}</span>
           {prop.params?.target && (
             <> · Cible : <code className="text-text-2">{prop.params.target}</code></>
           )}
@@ -72,7 +72,7 @@ const ProposalRow: React.FC<{
             </button>
           )}
         </p>
-        
+
         {prop.params?.result && (
           <div className="p-3 rounded bg-black/35 border border-border font-mono text-[10px] text-text-3 leading-relaxed max-h-24 overflow-y-auto mt-2">
             Result: {prop.params.result}
@@ -160,8 +160,8 @@ export const ProposalsPage: React.FC = () => {
   const fetchProposals = async () => {
     setLoading(true);
     try {
-      const url = filterStatus === 'ALL' 
-        ? '/api/chat/proposals' 
+      const url = filterStatus === 'ALL'
+        ? '/api/chat/proposals'
         : `/api/chat/proposals?status=${filterStatus}`;
       const data = await api<ActionProposal[]>(url);
       if (data) setProposals(data);
@@ -313,7 +313,7 @@ export const ProposalsPage: React.FC = () => {
                 Veuillez justifier le rejet de cette proposition d'action.
               </p>
             </div>
-            
+
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
@@ -321,7 +321,7 @@ export const ProposalsPage: React.FC = () => {
               className="w-full h-24 bg-surface-2 border border-border focus:border-accent/40 rounded-lg p-3 text-xs text-text-1 placeholder:text-text-3 focus:outline-none resize-none font-sans"
               autoFocus
             />
-            
+
             <div className="flex justify-end gap-2.5 font-interface text-[10px] font-bold">
               <button
                 type="button"

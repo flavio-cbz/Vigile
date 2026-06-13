@@ -17,22 +17,9 @@ import time
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-
-from master.api.deps import (
-    DB,
-    get_llm_client,
-    get_node_manager,
-    get_structured_llm,
-    require_role,
-)
-from master.core.action_proposal import ActionProposal
-from master.core.audit import log_action
-from master.core.llm_client import LLMClient
-from master.core.node_manager import NodeManager
-from master.core.structured_llm import StructuredLLM
 
 from master.api.demo_data import (
     DEMO_PROPOSALS,
@@ -46,6 +33,18 @@ from master.api.demo_data import (
     save_demo_chat_session,
     update_demo_proposal,
 )
+from master.api.deps import (
+    DB,
+    get_llm_client,
+    get_node_manager,
+    get_structured_llm,
+    require_role,
+)
+from master.core.action_proposal import ActionProposal
+from master.core.audit import log_action
+from master.core.llm_client import LLMClient
+from master.core.node_manager import NodeManager
+from master.core.structured_llm import StructuredLLM
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +97,7 @@ async def chat(
 
     # Demo mode: intercept with simulated streaming (no LLM, no DB)
     if is_demo(claims):
+
         async def _demo_event_stream():
             demo_tokens = get_demo_chat_tokens(message)
             for token in demo_tokens:
@@ -112,7 +112,7 @@ async def chat(
             if session_id:
                 new_history = list(history) + [
                     {"role": "user", "content": message},
-                    {"role": "assistant", "content": ' '.join(demo_tokens)},
+                    {"role": "assistant", "content": " ".join(demo_tokens)},
                 ]
                 title = message[:40] + ("..." if len(message) > 40 else "")
                 save_demo_chat_session(
@@ -190,30 +190,33 @@ async def chat(
                 )
                 if proposal:
                     await _persist_proposal(db, proposal)
-                    proposal_json = json.dumps({
-                        'type': 'proposal',
-                        'proposal_id': proposal.id,
-                        'action': proposal.action,
-                        'risk_level': proposal.risk_level,
-                        'reasoning': proposal.reasoning,
-                    }, separators=(',', ':'))
+                    proposal_json = json.dumps(
+                        {
+                            "type": "proposal",
+                            "proposal_id": proposal.id,
+                            "action": proposal.action,
+                            "risk_level": proposal.risk_level,
+                            "reasoning": proposal.reasoning,
+                        },
+                        separators=(",", ":"),
+                    )
                     yield f"data: {proposal_json}\n\n"
 
             # Save chat history to DB if session_id is provided
             if session_id:
                 new_history = history + [
                     {"role": "user", "content": message},
-                    {"role": "assistant", "content": token_buffer}
+                    {"role": "assistant", "content": token_buffer},
                 ]
                 now = time.time()
                 history_str = json.dumps(new_history)
-                
+
                 async with db.execute(
                     "SELECT title FROM chat_sessions WHERE id = ? AND user_id = ?",
                     (session_id, claims["sub"]),
                 ) as cursor:
                     sess_row = await cursor.fetchone()
-                
+
                 if sess_row:
                     await db.execute(
                         """
@@ -309,9 +312,7 @@ async def get_proposal(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
         return ActionProposal.from_db_row(prop).model_dump()
 
-    async with db.execute(
-        "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
-    ) as cursor:
+    async with db.execute("SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)) as cursor:
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
@@ -350,12 +351,15 @@ async def approve_proposal(
             "result_json": '{"success": true, "simulated": true}',
         }
         updated = update_demo_proposal(proposal_id, updates)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Proposal not found",
+            )
         return ActionProposal.from_db_row(updated).model_dump()
 
     # Fetch proposal
-    async with db.execute(
-        "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
-    ) as cursor:
+    async with db.execute("SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)) as cursor:
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
@@ -414,7 +418,10 @@ async def approve_proposal(
         details={
             "proposal_id": proposal.id,
             "action": proposal.action,
-            "target": proposal.params.get("target") or proposal.params.get("container") or proposal.params.get("service") or "",
+            "target": proposal.params.get("target")
+            or proposal.params.get("container")
+            or proposal.params.get("service")
+            or "",
             "status": proposal.status,
             "result": db_data["result_json"],
         },
@@ -454,11 +461,14 @@ async def reject_proposal(
             "rejection_reason": reason,
         }
         updated = update_demo_proposal(proposal_id, updates)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Proposal not found",
+            )
         return ActionProposal.from_db_row(updated).model_dump()
 
-    async with db.execute(
-        "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
-    ) as cursor:
+    async with db.execute("SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)) as cursor:
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
@@ -498,7 +508,10 @@ async def reject_proposal(
         details={
             "proposal_id": proposal.id,
             "action": proposal.action,
-            "target": proposal.params.get("target") or proposal.params.get("container") or proposal.params.get("service") or "",
+            "target": proposal.params.get("target")
+            or proposal.params.get("container")
+            or proposal.params.get("service")
+            or "",
             "reason": reason,
         },
     )
@@ -532,16 +545,19 @@ async def list_sessions(
         return get_demo_chat_sessions(claims["sub"])
 
     user_id = claims["sub"]
+    params: tuple[str, ...]
     if node_id and node_id != "all":
-        query = "SELECT * FROM chat_sessions WHERE user_id = ? AND node_id = ? ORDER BY updated_at DESC"
+        query = (
+            "SELECT * FROM chat_sessions WHERE user_id = ? AND node_id = ? ORDER BY updated_at DESC"
+        )
         params = (user_id, node_id)
     else:
         query = "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC"
         params = (user_id,)
-        
+
     async with db.execute(query, params) as cursor:
         rows = await cursor.fetchall()
-        
+
     results = []
     for r in rows:
         d = dict(r)
@@ -577,7 +593,7 @@ async def get_session(
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-        
+
     d = dict(row)
     try:
         d["history"] = json.loads(d.pop("history_json"))
@@ -614,16 +630,16 @@ async def save_session(
     node_id = body.node_id
     if node_id == "all":
         node_id = None
-        
+
     now = time.time()
     history_str = json.dumps(body.history)
-    
+
     async with db.execute(
         "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?",
         (sess_id, user_id),
     ) as cursor:
         exists = await cursor.fetchone() is not None
-        
+
     if exists:
         await db.execute(
             """
@@ -642,7 +658,7 @@ async def save_session(
             (sess_id, user_id, node_id, body.title, history_str, now, now),
         )
     await db.commit()
-    
+
     return {
         "id": sess_id,
         "user_id": user_id,
@@ -678,7 +694,7 @@ async def delete_session(
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-        
+
     await db.execute(
         "DELETE FROM chat_sessions WHERE id = ? AND user_id = ?",
         (session_id, user_id),
@@ -699,7 +715,11 @@ async def _build_chat_context(
     Build a system prompt with node context.
     If no node_id is specified, returns a generic sysadmin prompt.
     """
-    lang_instruction = "You must always reply in English." if locale == "en" else "Tu dois toujours répondre en français."
+    lang_instruction = (
+        "You must always reply in English."
+        if locale == "en"
+        else "Tu dois toujours répondre en français."
+    )
     if not node_id or node_id == "all":
         return (
             "You are a server fleet management AI assistant. "
@@ -767,6 +787,7 @@ async def _build_chat_context(
 
 class _ProposalRequest(BaseModel):
     """Simplified model for LLM to fill — only needs action/reasoning/risk."""
+
     action: str = ""
     params: dict[str, Any] = {}
     reasoning: str = ""
@@ -788,18 +809,23 @@ async def _try_extract_proposal(
         req = await sllm.create(
             _ProposalRequest,
             [
-                {"role": "system", "content": (
-                    "Based on the conversation, determine if a server action is needed. "
-                    "If yes, output action, params, reasoning, and risk_level as JSON. "
-                    "Set action to 'NONE' if no action is needed. "
-                    "Crucial: The 'reasoning' field MUST be written in French (ensure all explanations, risks, and details are translated into French)."
-                )},
+                {
+                    "role": "system",
+                    "content": (
+                        "Based on the conversation, determine if a server action is needed. "
+                        "If yes, output action, params, reasoning, and risk_level as JSON. "
+                        "Set action to 'NONE' if no action is needed. "
+                        "Crucial: The 'reasoning' field MUST be written in French (ensure all explanations, risks, and details are translated into French)."
+                    ),
+                },
                 {"role": "user", "content": user_message},
                 {"role": "assistant", "content": ai_response},
-                {"role": "user", "content": (
-                    f"Is a {_list_available_actions()} action needed? "
-                    "Reply with JSON only."
-                )},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Is a {_list_available_actions()} action needed? " "Reply with JSON only."
+                    ),
+                },
             ],
             temperature=0.1,
             max_retries=2,
@@ -846,7 +872,9 @@ async def _persist_proposal(db: DB, proposal: ActionProposal) -> None:
     await db.commit()
     logger.info(
         "Proposal created: id=%s action=%s node=%s",
-        proposal.id, proposal.action, proposal.node_id,
+        proposal.id,
+        proposal.action,
+        proposal.node_id,
     )
 
 

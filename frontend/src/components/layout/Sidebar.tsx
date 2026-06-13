@@ -200,7 +200,7 @@ export const Sidebar: React.FC = () => {
                 )}
               </div>
             </div>
-            
+
             <div className="max-h-60 overflow-y-auto divide-y divide-border-strong/10 scrollable-list">
               <button
                 onClick={() => {
@@ -218,7 +218,7 @@ export const Sidebar: React.FC = () => {
                 <span className="font-mono text-[10px]">TOUS LES SERVEURS</span>
                 <span className="ml-auto text-[9px] font-mono text-text-3">{nodes.length}</span>
               </button>
-              
+
               {nodes
                 .filter(node => !serverSearch || node.name.toLowerCase().includes(serverSearch.toLowerCase()))
                 .map((node) => (
@@ -250,7 +250,7 @@ export const Sidebar: React.FC = () => {
                   </span>
                 </button>
               ))}
-              
+
               {isAdmin && (
                 <button
                   onClick={() => {
@@ -346,7 +346,7 @@ export const Sidebar: React.FC = () => {
           {!collapsed && (
             <span className="text-[11px] xl:text-[12.5px] font-medium flex-1 truncate uppercase font-mono tracking-wide">{item.label}</span>
           )}
-          
+
           {!collapsed && item.badge !== undefined && (
             <span className="text-[9px] xl:text-[10px] font-bold px-1.5 py-0.5 rounded bg-severity-warning/15 border border-severity-warning/25 text-severity-warning">
               {item.badge}
@@ -363,7 +363,7 @@ export const Sidebar: React.FC = () => {
           {collapsed && item.dot && !isActive && (
             <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-surface shadow-[0_0_4px_var(--color-accent-glow)]" title="Nouvelle activité" />
           )}
-          
+
           {/* Floating CSS Tooltip when collapsed */}
           {collapsed && (
             <div className="absolute left-full ml-3 px-2 py-1 rounded bg-surface-2 border border-border-strong/70 text-text-1 text-[10px] font-medium tracking-wide whitespace-nowrap shadow-lg pointer-events-none opacity-0 translate-x-[-4px] group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-150 z-50 uppercase font-mono max-w-[200px] break-words">
@@ -470,8 +470,8 @@ export const Sidebar: React.FC = () => {
           >
             <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-surface-2/20 border border-border-strong/10">
               <div className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 ${
-                isAdmin 
-                  ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15' 
+                isAdmin
+                  ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15'
                   : 'border-[#2dd4bf] shadow-[0_0_8px_rgba(45,212,191,0.15)] bg-teal-500/5'
               }`}>
                 <span className={`text-[11px] font-bold uppercase font-mono ${
@@ -485,8 +485,8 @@ export const Sidebar: React.FC = () => {
                   {user?.username || 'Utilisateur'}
                 </div>
                 <div className={`text-[8px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
-                  isAdmin 
-                    ? 'text-accent border-accent/20 bg-accent-muted/5' 
+                  isAdmin
+                    ? 'text-accent border-accent/20 bg-accent-muted/5'
                     : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
                 }`}>
                   {user?.role || 'visiteur'}
@@ -554,8 +554,8 @@ export const Sidebar: React.FC = () => {
             <div className={`rounded-full border flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 ${
               collapsed ? 'w-8 h-8' : 'w-8 h-8 xl:w-9.5 xl:h-9.5'
             } ${
-              isAdmin 
-                ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15' 
+              isAdmin
+                ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15'
                 : 'border-[#2dd4bf] shadow-[0_0_8px_rgba(45,212,191,0.15)] bg-teal-500/5'
             }`}>
               <span className={`text-[11px] xl:text-[13px] font-bold uppercase font-mono ${
@@ -564,15 +564,15 @@ export const Sidebar: React.FC = () => {
                 {user?.username?.charAt(0) || 'U'}
               </span>
             </div>
-            
+
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] xl:text-[12.5px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
                   {user?.username || 'Utilisateur'}
                 </div>
                 <div className={`text-[8px] xl:text-[9.5px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
-                  isAdmin 
-                    ? 'text-accent border-accent/20 bg-accent-muted/5' 
+                  isAdmin
+                    ? 'text-accent border-accent/20 bg-accent-muted/5'
                     : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
                 }`}>
                   {user?.role || 'visiteur'}

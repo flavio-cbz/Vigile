@@ -25,16 +25,16 @@ const getOfflineMiniInsight = (metrics: any): string | null => {
   const cpu = metrics.cpu;
   const mem = metrics.mem;
   const disk = metrics.disk;
-  
+
   const parts: string[] = [];
   if (cpu !== null) parts.push(`CPU ${cpu}%`);
   if (mem !== null) parts.push(`RAM ${mem}%`);
   if (disk !== null) parts.push(`Disque ${disk}%`);
-  
+
   if (parts.length === 0) return null;
-  
+
   const base = `Dernière métrique connue : ${parts.join(', ')}`;
-  
+
   if (mem !== null && mem >= 85 && cpu !== null && cpu >= 90) {
     return `${base} — possible crash OOM ou surcharge sévère`;
   }

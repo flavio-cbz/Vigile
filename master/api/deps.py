@@ -8,22 +8,26 @@ Provides reusable dependency-injected objects:
   - CurrentUser        : type alias for the authenticated user's claims dict
 """
 
-from typing import Annotated, Any, AsyncGenerator
-
 import threading
+from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator
+
 import aiosqlite
-from fastapi import Depends, Request, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from master.db.database import database_session
+from master.core.node_manager import NodeManager, node_manager
 from master.core.security_manager import (
+    ROLES_HIERARCHY,
+    ExpiredTokenError,
+    SecurityError,
     SecurityManager,
     get_security_instance,
-    SecurityError,
-    ExpiredTokenError,
-    ROLES_HIERARCHY,
 )
-from master.core.node_manager import NodeManager, node_manager
+from master.db.database import database_session
+
+if TYPE_CHECKING:
+    from master.core.llm_client import LLMClient
+    from master.core.structured_llm import StructuredLLM
 
 bearer_scheme = HTTPBearer(auto_error=False)
 ACCESS_TOKEN_COOKIE = "vigile_access_token"
@@ -60,6 +64,7 @@ def get_node_manager() -> NodeManager:
 def get_settings() -> Any:
     """Return the settings singleton (lazy import to prevent module-level coupling)."""
     from master.config import settings
+
     return settings
 
 
@@ -70,9 +75,7 @@ def get_settings() -> Any:
 
 async def get_current_user(
     request: Request,
-    credentials: Annotated[
-        HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
-    ],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     sec: Annotated[SecurityManager, Depends(get_security)],
     db: Annotated[aiosqlite.Connection, Depends(get_db)],
 ) -> dict[str, Any]:
@@ -82,7 +85,11 @@ async def get_current_user(
     Returns the full claims dict. Raises HTTP 401 on authentication failure,
     HTTP 403 (MUST_CHANGE_PASSWORD) if password change is required.
     """
-    token = credentials.credentials if credentials is not None else request.cookies.get(ACCESS_TOKEN_COOKIE)
+    token = (
+        credentials.credentials
+        if credentials is not None
+        else request.cookies.get(ACCESS_TOKEN_COOKIE)
+    )
     if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -138,10 +145,7 @@ async def get_current_user(
         if path not in ["/api/auth/change-password", "/api/auth/logout", "/api/auth/login"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "detail": "Password change required",
-                    "code": "MUST_CHANGE_PASSWORD"
-                }
+                detail={"detail": "Password change required", "code": "MUST_CHANGE_PASSWORD"},
             )
 
     return claims
@@ -157,6 +161,7 @@ def require_role(*roles: str) -> Any:
         async def admin_endpoint(claims=Depends(require_role("admin"))):
             ...
     """
+
     async def _dependency(
         current_user: Annotated[dict[str, Any], Depends(get_current_user)],
     ) -> dict[str, Any]:
@@ -164,15 +169,14 @@ def require_role(*roles: str) -> Any:
 
         # Check if the user's role satisfies ANY of the required roles
         user_level = ROLES_HIERARCHY.get(user_role, 0)
-        required_level = min(
-            ROLES_HIERARCHY.get(r, 99) for r in roles
-        )
+        required_level = min(ROLES_HIERARCHY.get(r, 99) for r in roles)
         if user_level < required_level:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required: {roles}",
             )
         return current_user
+
     return _dependency
 
 
@@ -188,10 +192,9 @@ def get_llm_client() -> "LLMClient":  # noqa: F821
         if _llm_client is None:
             from master.config import settings
             from master.core.llm_client import LLMClient
+
             if not settings.llm_base_url:
-                raise RuntimeError(
-                    "LLM not configured. Set LLM_BASE_URL environment variable."
-                )
+                raise RuntimeError("LLM not configured. Set LLM_BASE_URL environment variable.")
             _llm_client = LLMClient(
                 base_url=settings.llm_base_url,
                 api_key=settings.llm_api_key,
@@ -205,6 +208,7 @@ def get_structured_llm() -> "StructuredLLM":  # noqa: F821
     with _init_lock:
         if _structured_llm is None:
             from master.core.structured_llm import StructuredLLM
+
             _structured_llm = StructuredLLM(llm_client=get_llm_client())
         return _structured_llm
 
@@ -214,6 +218,7 @@ def get_insights_manager() -> Any:
     with _init_lock:
         if _insights_manager is None:
             from master.core.insights import InsightsManager
+
             llm_client = None
             try:
                 llm_client = get_llm_client()
@@ -231,8 +236,6 @@ def reset_llm_clients() -> None:
         _structured_llm = None
         _insights_manager = None
 
-
-from fastapi import Header
 
 def get_locale(accept_language: Annotated[str | None, Header()] = None) -> str:
     """Parse Accept-Language header to determine the client's locale ('fr' or 'en')."""

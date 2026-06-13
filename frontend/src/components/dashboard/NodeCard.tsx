@@ -33,7 +33,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
     >
       {/* Light glow pattern inside on hover */}
       <div className="absolute top-0 right-0 w-24 h-24 bg-accent/2 pointer-events-none rounded-bl-full group-hover:bg-accent/5 transition-colors duration-200" />
-      
+
       {/* Card Header */}
       <div className="flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-2 truncate">

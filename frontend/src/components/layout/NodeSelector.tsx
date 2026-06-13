@@ -53,7 +53,7 @@ export const NodeSelector: React.FC = () => {
             <span className="font-medium">Toute la flotte</span>
             <span className="text-[9px] opacity-60 font-mono">{nodes.length} machines</span>
           </button>
-          
+
           <div className="h-px bg-border-strong/30 my-1" />
 
           <div className="max-h-60 overflow-y-auto scrollable-list">

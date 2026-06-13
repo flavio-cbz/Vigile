@@ -86,15 +86,6 @@ jobs:
       - name: Run pre-commit hooks
         uses: pre-commit/action@v3.0.1
 
-      - name: Check formatting (black)
-        run: black --check --diff --line-length=100 master/ tests/
-
-      - name: Check imports (isort)
-        run: isort --check-only --profile black --line-length=100 master/ tests/
-
-      - name: Lint (flake8)
-        run: flake8 --max-line-length=100 --exclude=tests/ --ignore=E203,W503 master/
-
   build-frontend:
     runs-on: ubuntu-latest
     steps:

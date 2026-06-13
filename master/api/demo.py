@@ -3,12 +3,10 @@ Vigile — Demo Mode Management
 Resets in-memory demo state (proposals, chat sessions).
 """
 
-from fastapi import APIRouter
-from fastapi import HTTPException
-from fastapi import status
+from fastapi import APIRouter, HTTPException, status
 
-from master.api.deps import CurrentUser, DB
 from master.api.demo_data import is_demo, reset_demo_state
+from master.api.deps import DB, CurrentUser
 
 router = APIRouter(prefix="/api/demo", tags=["demo"])
 

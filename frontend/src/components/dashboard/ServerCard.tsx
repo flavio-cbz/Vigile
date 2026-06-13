@@ -24,7 +24,7 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
 
   // State-based card styling logic for visual color highlights
   let cardStatusClass = "card-success";
-  
+
   if (!isOnline) {
     cardStatusClass = "card-offline";
   } else if (topInsight) {
@@ -50,12 +50,12 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
             {node.name}
           </span>
           {isOnline && topInsight && (
-            <span 
+            <span
               className="inline-flex shrink-0 cursor-help"
               title={`${topInsight.severity === 'critical' ? 'Critique' : topInsight.severity === 'warning' ? 'Attention' : 'Info'}: ${topInsight.headline}`}
             >
-              <AlertTriangle 
-                size={13} 
+              <AlertTriangle
+                size={13}
                 className={
                   topInsight.severity === 'critical' ? 'text-severity-critical animate-pulse' :
                   topInsight.severity === 'warning' ? 'text-severity-warning' : 'text-severity-info'

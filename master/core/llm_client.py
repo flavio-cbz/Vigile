@@ -110,7 +110,10 @@ class LLMClient:
 
         try:
             async with self._client.stream(
-                "POST", url, headers=headers, json=body,
+                "POST",
+                url,
+                headers=headers,
+                json=body,
                 timeout=httpx.Timeout(self.timeout, read=120),
             ) as resp:
                 if resp.status_code >= 400:

@@ -54,7 +54,7 @@ export const SettingsPage: React.FC = () => {
   const { theme, setTheme } = useUiStore();
   const { locale, setLocale } = useLocale();
   const availableThemes = Object.keys(themes) as ThemeKey[];
-  
+
   const [activeTab, setActiveTab] = useState<'profile' | 'system'>('profile');
   const { isAdmin, can } = usePermission();
 
@@ -270,7 +270,7 @@ export const SettingsPage: React.FC = () => {
                   <User className="w-4 h-4 text-accent" />
                   <span>Votre Profil</span>
                 </h3>
-                
+
                 <div className="flex items-center gap-3 p-3 bg-surface-2 border border-border rounded">
                   <div className="w-10 h-10 rounded-full border border-accent bg-accent-muted flex items-center justify-center font-bold text-accent">
                     {user?.username?.substring(0, 2).toUpperCase() || 'US'}
@@ -339,9 +339,9 @@ export const SettingsPage: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                  
+
                   <div className="border-t border-border/40 my-4" />
-                  
+
                   <label className="block text-[10px] font-bold text-text-3 uppercase tracking-wider mb-1.5 font-interface">
                     Langue de l'interface
                   </label>

@@ -5,16 +5,16 @@ Runs at application startup (idempotent — safe to run on every restart).
 Creates all tables if not exists, then seeds the default admin user.
 """
 
+import logging
 import os
 import time
 import uuid
-import logging
 
 import aiosqlite
 from passlib.context import CryptContext
 
-from master.db.models import ALL_TABLES, CREATE_INDEXES
 from master.core.audit import GENESIS_HASH, compute_entry_hash
+from master.db.models import ALL_TABLES, CREATE_INDEXES
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     # Idempotent dynamic columns upgrade for insights and caching
     async with db.execute("PRAGMA table_info(nodes)") as cursor:
         columns = [row["name"] for row in await cursor.fetchall()]
-    
+
     mutated = False
     if "insight_profile" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile TEXT")
@@ -56,7 +56,7 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "cached_containers_json" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_containers_json TEXT")
         mutated = True
-        
+
     if mutated:
         await db.commit()
         logger.info("Added insights and caching columns to nodes table.")

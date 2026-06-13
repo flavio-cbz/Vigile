@@ -45,7 +45,7 @@ export const CopilotInput: React.FC<CopilotInputProps> = ({ onSend, disabled = f
           className="w-full bg-transparent text-text-1 text-xs px-3.5 py-2.5 focus:outline-none resize-none max-h-32 min-h-[36px] placeholder:text-text-3 font-normal"
         />
       </div>
-      
+
       <button
         onClick={handleSubmit}
         disabled={disabled || !text.trim()}

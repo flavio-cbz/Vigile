@@ -1,11 +1,13 @@
 import json
 import time
+
 import pytest
 from fastapi import status
-from httpx import AsyncClient, ASGITransport
-from master.main import app
+from httpx import ASGITransport, AsyncClient
+
 from master.api import deps
 from master.core.security_manager import SecurityManager
+from master.main import app
 
 
 @pytest.fixture
@@ -13,6 +15,7 @@ def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
         token = security.create_access_token("demo-user", "guest", role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
 
 
@@ -29,6 +32,7 @@ async def client(db):
 @pytest.fixture(autouse=True)
 def clear_rate_limiter():
     from master.core.rate_limiter import rate_limiter
+
     rate_limiter._buckets.clear()
 
 
@@ -296,6 +300,7 @@ async def test_demo_chat_stream(client: AsyncClient, auth_headers):
 @pytest.mark.asyncio
 async def test_demo_chat_with_session(client: AsyncClient, auth_headers):
     import uuid
+
     session_id = str(uuid.uuid4())
     async with client.stream(
         "POST",
@@ -414,6 +419,7 @@ async def test_demo_proposal_already_approved(client: AsyncClient, auth_headers)
 @pytest.mark.asyncio
 async def test_demo_chat_sessions_crud(client: AsyncClient, auth_headers):
     import uuid
+
     session_id = str(uuid.uuid4())
 
     create_resp = await client.post(
@@ -487,12 +493,8 @@ def test_is_demo_recognizes_both_guest_and_demo_usernames():
 
 
 @pytest.mark.asyncio
-async def test_demo_user_via_jwt_sees_mock_nodes(
-    client: AsyncClient, security: SecurityManager
-):
-    token = security.create_access_token(
-        user_id="demo-user", username="demo", role="admin"
-    )
+async def test_demo_user_via_jwt_sees_mock_nodes(client: AsyncClient, security: SecurityManager):
+    token = security.create_access_token(user_id="demo-user", username="demo", role="admin")
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.get("/api/nodes", headers=headers)
@@ -505,12 +507,8 @@ async def test_demo_user_via_jwt_sees_mock_nodes(
 
 
 @pytest.mark.asyncio
-async def test_demo_user_via_jwt_sees_mock_audit(
-    client: AsyncClient, security: SecurityManager
-):
-    token = security.create_access_token(
-        user_id="demo-user", username="demo", role="admin"
-    )
+async def test_demo_user_via_jwt_sees_mock_audit(client: AsyncClient, security: SecurityManager):
+    token = security.create_access_token(user_id="demo-user", username="demo", role="admin")
     headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.get("/api/audit", headers=headers)

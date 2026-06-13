@@ -1,12 +1,13 @@
+import importlib
+import json
 import os
 import sys
-import importlib
-import pytest
 import time
-import json
 from pathlib import Path
-from fastapi import status, HTTPException
-from httpx import AsyncClient, ASGITransport
+
+import pytest
+from fastapi import HTTPException, status
+from httpx import ASGITransport, AsyncClient
 
 # Set environment variables before reloading the app and settings to trigger all code paths
 os.environ["CORS_ORIGINS"] = "*"
@@ -14,38 +15,43 @@ os.environ["ENFORCE_HTTPS"] = "true"
 
 import master.config
 import master.main
+
 importlib.reload(master.config)
 importlib.reload(master.main)
 
-from master.main import app
 from master.config import settings
-from master.db.database import reset_db
 from master.core.security_manager import SecurityManager
+from master.db.database import reset_db
+from master.main import app
+
 
 @pytest.fixture
 def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
         token = security.create_access_token("test-user", "test_user", role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
+
 
 @pytest.mark.asyncio
 async def test_main_lifespan(temp_dir, monkeypatch):
     # Ensure database is clean
     await reset_db()
-    
+
     db_path = os.path.join(temp_dir, "lifespan_test.db")
     key_path = os.path.join(temp_dir, "master_ed25519.key")
-    
+
     monkeypatch.setattr(settings, "database_path", db_path)
     monkeypatch.setattr(settings, "master_key_path", key_path)
     monkeypatch.setattr(settings, "plugins_dir", temp_dir)
-    
+
     # Temporarily reset the security manager singleton to allow the lifespan to initialize it
     import master.core.security_manager as sm
+
     old_security = sm._security_instance
     sm._security_instance = None
-    
+
     try:
         # Run the lifespan context manager directly to guarantee startup/shutdown are executed
         async with app.router.lifespan_context(app):
@@ -57,20 +63,23 @@ async def test_main_lifespan(temp_dir, monkeypatch):
                 data = response.json()
                 assert data["status"] == "ok"
                 assert data["uptime_seconds"] >= 0
-                
+
                 # Test admin connections endpoint
-                token = sm.get_security_instance().create_access_token("demo-user", "demo-user", "admin")
+                token = sm.get_security_instance().create_access_token(
+                    "demo-user", "demo-user", "admin"
+                )
                 headers = {"Authorization": f"Bearer {token}"}
                 response = await c.get("/api/admin/nodes/connections", headers=headers)
                 assert response.status_code == status.HTTP_200_OK
                 assert response.json()["connected_nodes"] == []
-                
+
                 # Test admin plugins endpoint
                 response = await c.get("/api/admin/plugins", headers=headers)
                 assert response.status_code == status.HTTP_200_OK
                 assert "loaded_plugins" in response.json()
     finally:
         sm._security_instance = old_security
+
 
 @pytest.mark.asyncio
 async def test_custom_http_exception_handlers(db):
@@ -93,6 +102,7 @@ async def test_custom_http_exception_handlers(db):
         assert resp_str.status_code == status.HTTP_400_BAD_REQUEST
         assert resp_str.json() == {"detail": "str_error"}
 
+
 @pytest.mark.asyncio
 async def test_cors_echo_origin_middleware(db):
     transport = ASGITransport(app=app)
@@ -100,6 +110,7 @@ async def test_cors_echo_origin_middleware(db):
         # Request with Origin header should echo it back
         response = await c.get("/health", headers={"Origin": "https://example.com"})
         assert response.headers.get("Access-Control-Allow-Origin") == "https://example.com"
+
 
 @pytest.mark.asyncio
 async def test_https_enforcement_middleware(db):
@@ -117,6 +128,7 @@ async def test_https_enforcement_middleware(db):
         # 3. Request path starts with /ws -> bypassed even with http proto
         response = await c.get("/ws/worker/join", headers={"X-Forwarded-Proto": "http"})
         assert response.status_code != status.HTTP_426_UPGRADE_REQUIRED
+
 
 @pytest.mark.asyncio
 async def test_admin_audit_verify_endpoint(db, auth_headers):
@@ -141,7 +153,7 @@ async def test_admin_settings_endpoint(db, auth_headers):
         assert "master_url" in data
         assert "server_secret_key" in data
         assert data["server_secret_key"] == "••••••••"
-        
+
         # 2. Operator user -> 200 OK
         response2 = await c.get("/api/admin/settings", headers=auth_headers("operator"))
         assert response2.status_code == status.HTTP_200_OK
@@ -162,6 +174,7 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
     monkeypatch.setattr(settings, "database_path", db_path)
     try:
         import master.api.admin
+
         monkeypatch.setattr(master.api.admin.settings, "database_path", db_path)
     except Exception:
         pass
@@ -172,6 +185,7 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
         override_file.unlink()
 
     from master.core.security_manager import get_security_instance
+
     security = get_security_instance()
     demo_token = security.create_access_token("demo-user", "guest", "admin")
     demo_headers = {"Authorization": f"Bearer {demo_token}"}
@@ -182,35 +196,25 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
         payload = {
             "llm_base_url": "http://updated-from-api",
             "llm_api_key": "some-key",
-            "llm_model": "some-model"
+            "llm_model": "some-model",
         }
         res1 = await c.post(
-            "/api/admin/settings/llm",
-            json=payload,
-            headers=auth_headers("operator")
+            "/api/admin/settings/llm", json=payload, headers=auth_headers("operator")
         )
         assert res1.status_code == status.HTTP_403_FORBIDDEN
 
         # 2. Demo user -> 403
-        res2 = await c.post(
-            "/api/admin/settings/llm",
-            json=payload,
-            headers=demo_headers
-        )
+        res2 = await c.post("/api/admin/settings/llm", json=payload, headers=demo_headers)
         assert res2.status_code == status.HTTP_403_FORBIDDEN
 
         # 3. Admin user -> 200 (Success)
-        res3 = await c.post(
-            "/api/admin/settings/llm",
-            json=payload,
-            headers=auth_headers("admin")
-        )
+        res3 = await c.post("/api/admin/settings/llm", json=payload, headers=auth_headers("admin"))
         assert res3.status_code == status.HTTP_200_OK
         data = res3.json()
         assert data["llm_base_url"] == "http://updated-from-api"
         assert data["llm_model"] == "some-model"
         assert data["llm_api_key"] == "••••••••"
-        
+
         # Verify settings_override.json was written to disk
         assert override_file.exists()
         with override_file.open("r", encoding="utf-8") as f:
@@ -223,15 +227,13 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
         payload_masked = {
             "llm_base_url": "http://updated-from-api-2",
             "llm_api_key": "••••••••",
-            "llm_model": "some-model-2"
+            "llm_model": "some-model-2",
         }
         res4 = await c.post(
-            "/api/admin/settings/llm",
-            json=payload_masked,
-            headers=auth_headers("admin")
+            "/api/admin/settings/llm", json=payload_masked, headers=auth_headers("admin")
         )
         assert res4.status_code == status.HTTP_200_OK
-        
+
         # Verify JSON file has original key
         with override_file.open("r", encoding="utf-8") as f:
             saved_override2 = json.load(f)
@@ -244,6 +246,7 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
 async def test_test_llm_settings(db, auth_headers):
     """Test testing LLM settings via POST /api/admin/settings/llm/test."""
     from master.core.security_manager import get_security_instance
+
     security = get_security_instance()
     demo_token = security.create_access_token("demo-user", "guest", "admin")
     demo_headers = {"Authorization": f"Bearer {demo_token}"}
@@ -253,33 +256,26 @@ async def test_test_llm_settings(db, auth_headers):
         payload = {
             "llm_base_url": "http://updated-from-api",
             "llm_api_key": "some-key",
-            "llm_model": "some-model"
+            "llm_model": "some-model",
         }
 
         # 1. Non-admin -> 403
         res1 = await c.post(
-            "/api/admin/settings/llm/test",
-            json=payload,
-            headers=auth_headers("operator")
+            "/api/admin/settings/llm/test", json=payload, headers=auth_headers("operator")
         )
         assert res1.status_code == status.HTTP_403_FORBIDDEN
 
         # 2. Demo user -> 403
-        res2 = await c.post(
-            "/api/admin/settings/llm/test",
-            json=payload,
-            headers=demo_headers
-        )
+        res2 = await c.post("/api/admin/settings/llm/test", json=payload, headers=demo_headers)
         assert res2.status_code == status.HTTP_403_FORBIDDEN
 
         # 3. Success (Admin) with mocked complete()
         import unittest.mock as mock
+
         mock_complete = mock.AsyncMock(return_value={"choices": [{"message": {"content": "pong"}}]})
         with mock.patch("master.core.llm_client.LLMClient.complete", mock_complete):
             res3 = await c.post(
-                "/api/admin/settings/llm/test",
-                json=payload,
-                headers=auth_headers("admin")
+                "/api/admin/settings/llm/test", json=payload, headers=auth_headers("admin")
             )
             assert res3.status_code == status.HTTP_200_OK
             assert res3.json()["status"] == "success"
@@ -292,7 +288,9 @@ async def test_llm_client_lazy_recreation():
     from master.config import settings
 
     # 1. Access initial client
-    settings.apply_overrides(base_url="http://initial-base-url", api_key="key", model="initial-model")
+    settings.apply_overrides(
+        base_url="http://initial-base-url", api_key="key", model="initial-model"
+    )
     client1 = get_llm_client()
     assert client1.base_url == "http://initial-base-url"
 

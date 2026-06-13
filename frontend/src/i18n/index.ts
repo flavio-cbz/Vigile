@@ -20,7 +20,7 @@ export function t(key: string, variables?: Record<string, string | number>): str
 
 export function useLocale() {
   const { locale, setLocale } = useLocaleStore();
-  
+
   const translate = (key: string, variables?: Record<string, string | number>) => {
     const dict = translations[locale] || translations['fr'];
     let text = dict[key] || key;

@@ -83,7 +83,7 @@ export const TopBar: React.FC = () => {
         <div className="w-px h-4 bg-border-strong/50 hidden md:block" />
 
         <NodeSelector />
-        
+
         <div className="w-px h-4 bg-border-strong/50" />
 
         <nav className="flex items-center gap-1">
@@ -147,9 +147,9 @@ export const TopBar: React.FC = () => {
                 </p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {Object.keys(themes).map((t) => {
-                    const dotColor = 
-                      t === 'warm-dark' ? 'bg-[#6366f1]' : 
-                      t === 'cool-dark' ? 'bg-[#2dd4bf]' : 
+                    const dotColor =
+                      t === 'warm-dark' ? 'bg-[#6366f1]' :
+                      t === 'cool-dark' ? 'bg-[#2dd4bf]' :
                       'bg-[#e8650a]';
                     return (
                       <button

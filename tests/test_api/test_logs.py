@@ -1,26 +1,33 @@
-import pytest
 import asyncio
+
+import pytest
 from httpx import AsyncClient
-from master.main import app
+
 from master.api import deps
-from master.core.node_manager import node_manager, NodeState
+from master.core.node_manager import NodeState, node_manager
 from master.core.security_manager import SecurityManager
+from master.main import app
+
 
 @pytest.fixture
 def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
         token = security.create_access_token("test-user", "test_user", role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
+
 
 @pytest.fixture
 async def client(db):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     app.dependency_overrides[deps.get_db] = lambda: db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.pop(deps.get_db, None)
+
 
 async def mock_send_intent_success(node_id, intent, *, timeout=30.0):
     return {
@@ -30,6 +37,7 @@ async def mock_send_intent_success(node_id, intent, *, timeout=30.0):
         "error": "",
     }
 
+
 async def mock_send_intent_fail(node_id, intent, *, timeout=30.0):
     return {
         "intent_id": "test-intent-002",
@@ -38,11 +46,14 @@ async def mock_send_intent_fail(node_id, intent, *, timeout=30.0):
         "error": "permission denied",
     }
 
+
 async def mock_send_intent_not_connected(node_id, intent, *, timeout=30.0):
     raise RuntimeError(f"Node {node_id} is not connected")
 
+
 async def mock_send_intent_timeout(node_id, intent, *, timeout=30.0):
     raise TimeoutError("Worker did not respond in time")
+
 
 async def _setup_node(db, name: str = "test-logs") -> str:
     """Create a CONNECTED node for testing."""
@@ -50,6 +61,7 @@ async def _setup_node(db, name: str = "test-logs") -> str:
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
     await node_manager.transition_state(db, node_id, NodeState.CONNECTED)
     return node_id
+
 
 @pytest.mark.asyncio
 async def test_logs_success_file(db, client, auth_headers):
@@ -71,6 +83,7 @@ async def test_logs_success_file(db, client, auth_headers):
     finally:
         node_manager.send_intent = original
 
+
 @pytest.mark.asyncio
 async def test_logs_success_service(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-svc")
@@ -89,6 +102,7 @@ async def test_logs_success_service(db, client, auth_headers):
     finally:
         node_manager.send_intent = original
 
+
 @pytest.mark.asyncio
 async def test_logs_default_path(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-default")
@@ -106,6 +120,7 @@ async def test_logs_default_path(db, client, auth_headers):
     finally:
         node_manager.send_intent = original
 
+
 @pytest.mark.asyncio
 async def test_logs_node_not_found(client, auth_headers):
     resp = await client.get(
@@ -113,6 +128,7 @@ async def test_logs_node_not_found(client, auth_headers):
         headers=auth_headers("admin"),
     )
     assert resp.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_logs_node_not_connected(db, client, auth_headers):
@@ -129,6 +145,7 @@ async def test_logs_node_not_connected(db, client, auth_headers):
     finally:
         node_manager.send_intent = original
 
+
 @pytest.mark.asyncio
 async def test_logs_worker_timeout(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-timeout")
@@ -142,6 +159,7 @@ async def test_logs_worker_timeout(db, client, auth_headers):
         assert resp.status_code == 504
     finally:
         node_manager.send_intent = original
+
 
 @pytest.mark.asyncio
 async def test_logs_worker_error(db, client, auth_headers):
@@ -160,10 +178,12 @@ async def test_logs_worker_error(db, client, auth_headers):
     finally:
         node_manager.send_intent = original
 
+
 @pytest.mark.asyncio
 async def test_logs_unauthorized(client):
     resp = await client.get("/api/nodes/some-id/logs")
     assert resp.status_code == 401
+
 
 @pytest.mark.asyncio
 async def test_logs_viewer_forbidden(client, auth_headers):

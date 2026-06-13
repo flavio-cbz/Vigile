@@ -1,13 +1,13 @@
-import pytest
 import aiosqlite
-from fastapi import status, Request, HTTPException
+import pytest
+from fastapi import HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from master.main import app
 from master.api import deps
+from master.core.node_manager import NodeState, node_manager
 from master.core.security_manager import SecurityManager, get_security_instance
-from master.core.node_manager import node_manager, NodeState
+from master.main import app
 
 
 @pytest.fixture
@@ -15,6 +15,7 @@ def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
         token = security.create_access_token("test-user", "test_user", role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
 
 
@@ -52,7 +53,7 @@ async def test_lockdown_closes_active_connections():
 
     ws = MockWebSocket()
     node_id = "test-node-lockdown"
-    
+
     # Register connection in NodeManager
     await node_manager.register_connection(node_id, ws)
     assert await node_manager.is_connected(node_id)
@@ -87,7 +88,7 @@ async def test_get_current_user_lockdown_rules(security, db):
     # Create credentials
     admin_token = security.create_access_token("admin-id", "admin_user", "admin")
     viewer_token = security.create_access_token("viewer-id", "viewer_user", "viewer")
-    
+
     admin_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=admin_token)
     viewer_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=viewer_token)
 

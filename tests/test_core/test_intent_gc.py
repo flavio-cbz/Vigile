@@ -1,6 +1,8 @@
-import pytest
 import asyncio
 import time
+
+import pytest
+
 from master.core.node_manager import NodeManager
 
 

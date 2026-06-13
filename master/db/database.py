@@ -7,6 +7,7 @@ import asyncio
 import contextvars
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+
 import aiosqlite
 
 # Module-level connection reference (fallback / migrations connection)

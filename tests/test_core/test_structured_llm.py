@@ -1,7 +1,9 @@
 import json
-import pytest
 import unittest.mock as mock
+
+import pytest
 from pydantic import BaseModel
+
 from master.core.llm_client import LLMClient
 from master.core.structured_llm import StructuredLLM
 
@@ -22,9 +24,11 @@ async def test_structured_success(structured_llm):
     """StructuredLLM returns validated model on first attempt."""
     sllm, client = structured_llm
     raw = json.dumps({"name": "John", "age": 30})
-    client.complete = mock.AsyncMock(return_value={
-        "choices": [{"message": {"content": raw}}],
-    })
+    client.complete = mock.AsyncMock(
+        return_value={
+            "choices": [{"message": {"content": raw}}],
+        }
+    )
     result = await sllm.create(ResponseSchemaModel, [{"role": "user", "content": "Extract"}])
     assert isinstance(result, ResponseSchemaModel)
     assert result.name == "John"
@@ -55,11 +59,15 @@ async def test_structured_retry(structured_llm):
 async def test_structured_fail_after_retries(structured_llm):
     """StructuredLLM raises ValueError after exhausting retries."""
     sllm, client = structured_llm
-    client.complete = mock.AsyncMock(return_value={
-        "choices": [{"message": {"content": "still not json"}}],
-    })
+    client.complete = mock.AsyncMock(
+        return_value={
+            "choices": [{"message": {"content": "still not json"}}],
+        }
+    )
     with pytest.raises(ValueError) as exc_info:
-        await sllm.create(ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=2)
+        await sllm.create(
+            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=2
+        )
     assert "failed after" in str(exc_info.value)
 
 
@@ -67,11 +75,15 @@ async def test_structured_fail_after_retries(structured_llm):
 async def test_structured_empty_response(structured_llm):
     """StructuredLLM handles empty LLM response."""
     sllm, client = structured_llm
-    client.complete = mock.AsyncMock(return_value={
-        "choices": [{"message": {"content": ""}}],
-    })
+    client.complete = mock.AsyncMock(
+        return_value={
+            "choices": [{"message": {"content": ""}}],
+        }
+    )
     with pytest.raises(ValueError) as exc_info:
-        await sllm.create(ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=1)
+        await sllm.create(
+            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=1
+        )
     assert "empty" in str(exc_info.value).lower()
 
 
@@ -89,7 +101,9 @@ async def test_structured_empty_response_retry(structured_llm):
         return {"choices": [{"message": {"content": json.dumps({"name": "Jack", "age": 40})}}]}
 
     client.complete = mock_complete
-    result = await sllm.create(ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=3)
+    result = await sllm.create(
+        ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=3
+    )
     assert isinstance(result, ResponseSchemaModel)
     assert calls == 2
     assert result.name == "Jack"
@@ -100,5 +114,7 @@ async def test_structured_max_retries_zero(structured_llm):
     """StructuredLLM handles max_retries=0 and hits the loop fallthrough."""
     sllm, client = structured_llm
     with pytest.raises(ValueError) as exc_info:
-        await sllm.create(ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=0)
+        await sllm.create(
+            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=0
+        )
     assert "loop completed without return or raise" in str(exc_info.value)

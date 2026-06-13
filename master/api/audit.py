@@ -3,14 +3,16 @@ Vigile — Audit API
 """
 
 from __future__ import annotations
+
 import json
 import logging
 from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from master.api.demo_data import DEMO_AUDIT_ENTRIES, is_demo
 from master.api.deps import DB, require_role
-from master.api.demo_data import is_demo, DEMO_AUDIT_ENTRIES
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +91,11 @@ async def list_audit_entries(
         ORDER BY sequence DESC
         LIMIT ? OFFSET ?
     """
-    entries = []
+    response_entries = []
     query_params = params + [limit, offset]
     async with db.execute(sql, query_params) as cursor:
         async for r in cursor:
-            entries.append(
+            response_entries.append(
                 AuditEntryResponse(
                     id=r["id"],
                     sequence=r["sequence"],
@@ -108,7 +110,7 @@ async def list_audit_entries(
             )
 
     return AuditListResponse(
-        entries=entries,
+        entries=response_entries,
         limit=limit,
         offset=offset,
         total=total,

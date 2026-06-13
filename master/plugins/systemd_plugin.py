@@ -87,15 +87,15 @@ def get_config_schema() -> dict[str, Any]:
                 "type": "string",
                 "title": "Monitored Services",
                 "default": "ssh,docker,nginx",
-                "description": "Comma-separated list of systemd services to highlight or monitor on the dashboard."
+                "description": "Comma-separated list of systemd services to highlight or monitor on the dashboard.",
             },
             "allow_restart_all": {
                 "type": "boolean",
                 "title": "Allow Restarting All Services",
                 "default": False,
-                "description": "If enabled, allows operators to trigger restarts on any systemd service. If disabled, restarts are restricted to whitelist."
-            }
-        }
+                "description": "If enabled, allows operators to trigger restarts on any systemd service. If disabled, restarts are restricted to whitelist.",
+            },
+        },
     }
 
 

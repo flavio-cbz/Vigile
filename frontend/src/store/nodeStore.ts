@@ -55,10 +55,10 @@ export const useNodeStore = create<NodeState>((set, get) => ({
       }
     }
 
-    set({ 
-      nodes, 
-      selectedNode: finalSelectedNode, 
-      selectedNodeId: finalSelectedId 
+    set({
+      nodes,
+      selectedNode: finalSelectedNode,
+      selectedNodeId: finalSelectedId
     });
   },
   selectNode: (nodeId) => {
@@ -75,7 +75,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
     try {
       const data = await api<Node[]>('/api/nodes');
       if (!data) return;
-      
+
       const nodes: Node[] = data;
       const currentSelectedId = get().selectedNodeId;
       let newSelectedNode = null;
@@ -92,11 +92,11 @@ export const useNodeStore = create<NodeState>((set, get) => ({
         }
       }
 
-      set({ 
-        nodes, 
-        selectedNode: newSelectedNode, 
+      set({
+        nodes,
+        selectedNode: newSelectedNode,
         selectedNodeId: newSelectedId,
-        isLoading: false 
+        isLoading: false
       });
     } catch (err: any) {
       set({ error: err.message, isLoading: false });

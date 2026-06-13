@@ -66,7 +66,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   fetchSessions: async (nodeId) => {
     set({ isLoading: true });
     try {
-      const url = nodeId && nodeId !== 'all' 
+      const url = nodeId && nodeId !== 'all'
         ? `/api/chat/sessions?node_id=${nodeId}`
         : '/api/chat/sessions';
       const data = await api<ChatSession[]>(url);
@@ -110,7 +110,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (newSession) {
         set(state => {
           const exists = state.sessions.some(s => s.id === newSession.id);
-          const updatedSessions = exists 
+          const updatedSessions = exists
             ? state.sessions.map(s => s.id === newSession.id ? newSession : s)
             : [newSession, ...state.sessions];
           return {
@@ -163,7 +163,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Optimistic UI update: append user message
     const userMessage: Message = { role: 'user', content };
     const baseHistory = [...(currentSession.history || []), userMessage];
-    
+
     set(state => {
       if (!state.activeSession) return {};
       const updatedSession = { ...state.activeSession, history: baseHistory };
@@ -248,7 +248,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        
+
         // Save the last incomplete line back to the buffer
         buffer = lines.pop() || '';
 

@@ -1,6 +1,6 @@
 import pytest
-from fastapi import FastAPI, Depends
-from httpx import AsyncClient, ASGITransport
+from fastapi import Depends, FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from master.api.deps import get_current_user, require_role
 

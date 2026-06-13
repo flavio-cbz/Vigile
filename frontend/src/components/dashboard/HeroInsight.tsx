@@ -22,7 +22,7 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
       <div className="w-full relative overflow-hidden rounded-xl border border-severity-ok/20 bg-gradient-to-br from-severity-ok/5 to-bg p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg select-none">
         {/* Glow orb */}
         <div className="absolute -right-20 -bottom-20 w-60 h-60 bg-severity-ok/10 rounded-full filter blur-3xl pointer-events-none" />
-        
+
         <div className="flex items-center gap-4 z-10">
           <div className="w-12 h-12 rounded-xl bg-severity-ok/15 border border-severity-ok/25 flex items-center justify-center shadow-md">
             <ShieldCheck className="w-6 h-6 text-severity-ok" />
@@ -54,8 +54,8 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
 
       <div className="flex items-start md:items-center gap-4 z-10 flex-1 min-w-0">
         <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-md border ${
-          isCritical 
-            ? 'bg-severity-critical/15 border-severity-critical/25 text-severity-critical' 
+          isCritical
+            ? 'bg-severity-critical/15 border-severity-critical/25 text-severity-critical'
             : 'bg-severity-warning/15 border-severity-warning/25 text-severity-warning'
         }`}>
           <span className="text-xl">{insight.icon || '⚠️'}</span>
