@@ -11,7 +11,7 @@ import asyncio
 import json
 import time
 import logging
-from typing import Any, TypeVar
+from typing import Any
 
 import aiosqlite
 from pydantic import BaseModel, Field
@@ -500,7 +500,6 @@ class InsightsManager:
 
         # Identify heavy processes that are active and exceed threshold
         culprit = None
-        max_severity = "ok"
         headline = "Serveur au repos"
         detail = "Activités d'arrière-plan normales"
         icon = "💤"

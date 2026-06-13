@@ -27,9 +27,7 @@ import os
 import secrets
 import time
 import uuid
-from datetime import datetime, timezone
-from functools import wraps
-from typing import Annotated, Any
+from typing import Any
 
 import aiosqlite
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -70,10 +68,6 @@ def _pad_b64(s: str) -> str:
     remainder = len(s) % 4
     return s + "=" * (4 - remainder) if remainder else s
 
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -212,7 +206,6 @@ class SecurityManager:
         except Exception:
             raise ValueError("Invalid token payload encoding")
 
-        # TTL check
         if time.time() > payload.get("expires_at", 0):
             raise ValueError("Token expired")
 
@@ -357,17 +350,14 @@ class SecurityManager:
 
     @property
     def jwt_access_token_ttl(self) -> int:
-        """Return the configured JWT access token TTL."""
         return self._jwt_access_token_ttl
 
     @property
     def jwt_refresh_token_ttl(self) -> int:
-        """Return the configured JWT refresh token TTL."""
         return self._jwt_refresh_token_ttl
 
     @staticmethod
     def hash_refresh_token(token: str) -> str:
-        """SHA256 fingerprint of the raw refresh token (for DB storage)."""
         return hashlib.sha256(token.encode()).hexdigest()
 
     def create_refresh_token(self, user_id: str, family_id: str | None = None) -> tuple[str, str]:
@@ -443,8 +433,20 @@ class SecurityManager:
 
 def load_or_generate_master_key(key_path: str) -> Ed25519PrivateKey:
     """Load the persisted master Ed25519 private key, or generate and save it.
-    Safe to call multiple times (idempotent read/write)."""
+    Safe to call multiple times (idempotent read/write).
+    Checks file permissions on existing keys to warn if too permissive."""
     if os.path.exists(key_path):
+        # Security: verify file permissions (must be 0o600 = owner-only)
+        try:
+            st_mode = os.stat(key_path).st_mode & 0o777
+            if st_mode != 0o600:
+                logger.warning(
+                    "Master Ed25519 key has insecure permissions: %o (expected 600). "
+                    "Fix with: chmod 600 %s",
+                    st_mode, key_path,
+                )
+        except OSError:
+            logger.warning("Could not check permissions on %s", key_path)
         with open(key_path, "rb") as f:
             raw = f.read()
         private_key = Ed25519PrivateKey.from_private_bytes(raw)

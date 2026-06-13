@@ -30,6 +30,26 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_BUILTIN_PLUGIN_FILE_TO_ID = {
+    "metrics_plugin": "metrics",
+    "systemd_plugin": "systemd",
+    "docker_plugin": "docker",
+}
+
+_BUILTIN_PLUGIN_ID_TO_FILE = {
+    plugin_id: file_stem for file_stem, plugin_id in _BUILTIN_PLUGIN_FILE_TO_ID.items()
+}
+
+
+def canonical_plugin_id(plugin_name: str) -> str:
+    """Map an on-disk plugin stem to the public plugin id."""
+    return _BUILTIN_PLUGIN_FILE_TO_ID.get(plugin_name, plugin_name)
+
+
+def plugin_file_stem(plugin_id: str) -> str:
+    """Resolve the file stem for a public plugin id."""
+    return _BUILTIN_PLUGIN_ID_TO_FILE.get(plugin_id, plugin_id)
+
 
 class PluginManager:
     """
@@ -134,7 +154,6 @@ class PluginManager:
                 )
                 continue
             
-            # Skip if disabled
             if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
                 continue
 
@@ -160,7 +179,6 @@ class PluginManager:
             if inspect.iscoroutinefunction(fn):
                 continue
             
-            # Skip if disabled
             if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
                 continue
 
@@ -202,7 +220,6 @@ class PluginManager:
         tasks: list[asyncio.Future] = []
 
         for plugin_name, fn in self._hooks.get(hook_name, []):
-            # Skip if disabled
             if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
                 continue
 
@@ -258,34 +275,31 @@ class PluginManager:
                 continue
 
             plugin_name = fname[:-3]
+            plugin_id = canonical_plugin_id(plugin_name)
 
-            # Skip if explicitly disabled in database
-            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
-                logger.info("Plugin '%s' is disabled in database — skipping load.", plugin_name)
+            if self._enabled_plugins is not None and plugin_id not in self._enabled_plugins:
+                logger.info("Plugin '%s' is disabled in database — skipping load.", plugin_id)
                 continue
 
-            # Dedup: skip if already loaded
-            if plugin_name in self._loaded_plugins:
-                logger.debug("Plugin '%s' already loaded — skipped.", plugin_name)
+            if plugin_id in self._loaded_plugins:
+                logger.debug("Plugin '%s' already loaded — skipped.", plugin_id)
                 continue
 
             success = self.load_plugin(plugin_name, plugins_dir)
             if success:
-                loaded.append(plugin_name)
+                loaded.append(plugin_id)
 
         return loaded
 
     def load_plugin(self, plugin_name: str, plugins_dir: str) -> bool:
-        """
-        Load a single plugin by name from a directory.
-        """
+        plugin_id = canonical_plugin_id(plugin_name)
         plugin_path = os.path.join(plugins_dir, f"{plugin_name}.py")
         if not os.path.isfile(plugin_path):
             logger.warning("Plugin file not found: %s", plugin_path)
             return False
 
-        if plugin_name in self._loaded_plugins:
-            logger.debug("Plugin '%s' already loaded — skipped.", plugin_name)
+        if plugin_id in self._loaded_plugins:
+            logger.debug("Plugin '%s' already loaded — skipped.", plugin_id)
             return True
 
         try:
@@ -306,20 +320,20 @@ class PluginManager:
 
             if not hasattr(module, "register"):
                 logger.warning(
-                    "Plugin '%s' has no register() function — skipped.", plugin_name
+                    "Plugin '%s' has no register() function — skipped.", plugin_id
                 )
                 if module_name in sys.modules:
                     del sys.modules[module_name]
                 return False
 
             module.register(self)
-            self._loaded_plugins.append(plugin_name)
+            self._loaded_plugins.append(plugin_id)
             if self._enabled_plugins is not None:
-                self._enabled_plugins.add(plugin_name)
-            logger.info("Plugin loaded: %s", plugin_name)
+                self._enabled_plugins.add(plugin_id)
+            logger.info("Plugin loaded: %s", plugin_id)
             return True
         except Exception:
-            logger.exception("Failed to load plugin '%s'", plugin_name)
+            logger.exception("Failed to load plugin '%s'", plugin_id)
             module_name = f"vigile.plugins.{plugin_name}"
             import sys
             if module_name in sys.modules:
@@ -330,34 +344,37 @@ class PluginManager:
         """
         Safely unload a plugin by unregistering hooks and draining active calls.
         """
-        logger.info("Unloading plugin '%s'...", plugin_name)
-        self._draining_plugins.add(plugin_name)
+        plugin_id = canonical_plugin_id(plugin_name)
+        module_stem = plugin_file_stem(plugin_name)
+
+        logger.info("Unloading plugin '%s'...", plugin_id)
+        self._draining_plugins.add(plugin_id)
 
         # 1. Unregister all hooks
         for hook_name in list(self._hooks.keys()):
-            self.unregister(hook_name, plugin_name)
+            self.unregister(hook_name, plugin_id)
 
         # 2. Drain active running tasks
-        while self._active_calls.get(plugin_name, 0) > 0:
+        while self._active_calls.get(plugin_id, 0) > 0:
             logger.debug(
                 "Draining plugin '%s' (active calls: %d)",
-                plugin_name, self._active_calls[plugin_name]
+                plugin_id, self._active_calls[plugin_id]
             )
             await asyncio.sleep(0.05)
 
         # 3. Clean up loaded list and sys.modules
-        if plugin_name in self._loaded_plugins:
-            self._loaded_plugins.remove(plugin_name)
-        if self._enabled_plugins is not None and plugin_name in self._enabled_plugins:
-            self._enabled_plugins.remove(plugin_name)
+        if plugin_id in self._loaded_plugins:
+            self._loaded_plugins.remove(plugin_id)
+        if self._enabled_plugins is not None and plugin_id in self._enabled_plugins:
+            self._enabled_plugins.remove(plugin_id)
             
-        module_name = f"vigile.plugins.{plugin_name}"
+        module_name = f"vigile.plugins.{module_stem}"
         import sys
         if module_name in sys.modules:
             del sys.modules[module_name]
             
-        self._draining_plugins.discard(plugin_name)
-        logger.info("Plugin '%s' unloaded successfully.", plugin_name)
+        self._draining_plugins.discard(plugin_id)
+        logger.info("Plugin '%s' unloaded successfully.", plugin_id)
 
     # -----------------------------------------------------------------------
     # Introspection

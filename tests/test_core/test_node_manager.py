@@ -238,9 +238,10 @@ async def test_node_manager_startup_shutdown(node_manager: NodeManager):
     assert ws.close_code == 1001
     assert node_manager.connected_node_ids() == []
 
-def test_cleanup_stale_intents(node_manager: NodeManager):
+@pytest.mark.asyncio
+async def test_cleanup_stale_intents(node_manager: NodeManager):
     # Setup some futures
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     f1 = loop.create_future()
     f2 = loop.create_future()
     f2.set_result(True)
@@ -252,6 +253,7 @@ def test_cleanup_stale_intents(node_manager: NodeManager):
     assert count == 1
     assert "i1" in node_manager._pending_intents
     assert "i2" not in node_manager._pending_intents
+
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,7 @@ from fastapi import WebSocket
 
 from master.db.database import get_db_conn
 from master.core.audit import log_action
+from master.core.lock import LoopBoundLock
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +90,9 @@ class ActiveConnection:
         self.remote_address: str = ""
 
     def touch(self) -> None:
-        """Update the heartbeat timestamp."""
         self.last_heartbeat = time.time()
 
     def heartbeat_age(self) -> float:
-        """Seconds since last heartbeat."""
         return time.time() - self.last_heartbeat
 
 
@@ -108,32 +107,6 @@ _VALID_NODE_FIELDS: set[str] = {
     "public_key", "ip_prefix", "last_heartbeat",
     "enrolled_at", "name",
 }
-
-
-class LoopBoundLock:
-    """
-    A helper lock that delegates to an asyncio.Lock bound to the current event loop.
-    Prevents loop mismatch / closed loop errors in tests.
-    """
-    def __init__(self) -> None:
-        self._locks: dict[Any, asyncio.Lock] = {}
-
-    def _get_lock(self) -> asyncio.Lock:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.Lock()
-        # Prune closed event loops to prevent memory leaks
-        self._locks = {lp: lk for lp, lk in self._locks.items() if not lp.is_closed()}
-        if loop not in self._locks:
-            self._locks[loop] = asyncio.Lock()
-        return self._locks[loop]
-
-    async def __aenter__(self) -> Any:
-        return await self._get_lock().__aenter__()
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
-        return await self._get_lock().__aexit__(exc_type, exc_val, exc_tb)
 
 
 class NodeManager:
@@ -205,7 +178,6 @@ class NodeManager:
         logger.info("NodeManager stopped.")
 
     async def _cache_updater(self, interval: int) -> None:
-        """Background task that runs every `interval` seconds to update node cache."""
         logger.info("Cache updater task started. Interval: %ds", interval)
         while True:
             try:
@@ -310,11 +282,7 @@ class NodeManager:
                             fresh_conts = parse_container_list(json.loads(containers_json))
                             fresh_running = [c.get("name") for c in fresh_conts or [] if c.get("state") == "running" or "up" in c.get("status", "").lower()]
                             known_conts = [p.get("container_name") for p in profile_dict.get("known_heavy_processes", []) if p.get("container_name")]
-                            
-                            for fc in fresh_running:
-                                if fc not in known_conts:
-                                    new_apps_detected = True
-                                    break
+                            new_apps_detected = any(fc not in known_conts for fc in fresh_running)
                                     
                         if expired_time or new_apps_detected:
                             logger.info(
@@ -502,18 +470,15 @@ class NodeManager:
         logger.info("Node %s WebSocket unregistered.", node_id)
 
     async def get_connection(self, node_id: str) -> ActiveConnection | None:
-        """Return the active connection for a node, or None if not connected."""
         async with self._lock:
             return self._connections.get(node_id)
 
     async def touch_heartbeat(self, node_id: str) -> None:
-        """Update the heartbeat timestamp for a connected node."""
         async with self._lock:
             if conn := self._connections.get(node_id):
                 conn.touch()
 
     async def is_connected(self, node_id: str) -> bool:
-        """Return True if the node has an active WebSocket."""
         async with self._lock:
             return node_id in self._connections
 
@@ -710,7 +675,6 @@ class NodeManager:
     async def get_node(
         self, db: aiosqlite.Connection, node_id: str
     ) -> dict[str, Any] | None:
-        """Fetch a single node by ID. Returns None if not found."""
         async with db.execute(
             "SELECT * FROM nodes WHERE id = ?", (node_id,)
         ) as cursor:

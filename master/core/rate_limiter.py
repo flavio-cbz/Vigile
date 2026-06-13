@@ -6,41 +6,17 @@ No external dependencies — pure Python stdlib.
 """
 
 import asyncio
+import ipaddress
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
+from master.core.lock import LoopBoundLock
+
 logger = logging.getLogger(__name__)
-
-
-class LoopBoundLock:
-    """
-    A helper lock that delegates to an asyncio.Lock bound to the current event loop.
-    Prevents loop mismatch / closed loop errors in tests.
-    """
-    def __init__(self) -> None:
-        self._locks: dict[Any, asyncio.Lock] = {}
-
-    def _get_lock(self) -> asyncio.Lock:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.Lock()
-        # Prune closed event loops to prevent memory leaks
-        self._locks = {lp: lk for lp, lk in self._locks.items() if not lp.is_closed()}
-        if loop not in self._locks:
-            self._locks[loop] = asyncio.Lock()
-        return self._locks[loop]
-
-    async def __aenter__(self) -> Any:
-        return await self._get_lock().__aenter__()
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
-        return await self._get_lock().__aexit__(exc_type, exc_val, exc_tb)
 
 
 class RateLimiter:
@@ -50,11 +26,47 @@ class RateLimiter:
     Thread-safe via asyncio.Lock. Designed for single-process async apps.
     """
 
-    def __init__(self, max_requests: int = 60, window_seconds: int = 60) -> None:
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60, trusted_proxies: list[str] | None = None) -> None:
         self.max_requests = max_requests
         self.window = window_seconds
         self._buckets: dict[str, list[float]] = {}
         self._lock = LoopBoundLock()
+        self.trusted_proxies = trusted_proxies or []
+
+    def _is_trusted_proxy(self, client_ip: str) -> bool:
+        if not self.trusted_proxies:
+            return False
+        try:
+            peer = ipaddress.ip_address(client_ip)
+        except ValueError:
+            return False
+        for proxy in self.trusted_proxies:
+            try:
+                if "/" in proxy:
+                    if peer in ipaddress.ip_network(proxy, strict=False):
+                        return True
+                elif peer == ipaddress.ip_address(proxy):
+                    return True
+            except ValueError:
+                logger.warning("Ignoring invalid TRUSTED_PROXIES entry: %s", proxy)
+        return False
+
+    def client_ip(self, request: Request) -> str:
+        """Return the rate-limit client IP, honoring XFF only from trusted proxies."""
+        direct_ip = request.client.host if request.client else "unknown"
+        if not self._is_trusted_proxy(direct_ip):
+            return direct_ip
+
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        first_hop = forwarded_for.split(",", 1)[0].strip()
+        if not first_hop:
+            return direct_ip
+        try:
+            ipaddress.ip_address(first_hop)
+        except ValueError:
+            logger.warning("Ignoring invalid X-Forwarded-For value: %s", forwarded_for)
+            return direct_ip
+        return first_hop
 
     async def is_allowed(self, key: str, max_requests: int | None = None) -> bool:
         """Check if a request from `key` is allowed. Cleans stale entries."""
@@ -93,7 +105,7 @@ class RateLimiter:
             if request.url.path.startswith("/ws"):
                 return await call_next(request)
 
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = self.client_ip(request)
             key = f"{client_ip}:{request.url.path}"
 
             allowed = await self.is_allowed(key)
@@ -116,7 +128,7 @@ class RateLimiter:
         effective_max = max_requests or self.max_requests
 
         async def _dep(request: Request) -> None:
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = self.client_ip(request)
             key = f"{client_ip}:{request.url.path}"
 
             allowed = await self.is_allowed(key, max_requests=effective_max)

@@ -15,7 +15,6 @@ Design:
 The hash function is pure Python stdlib (hashlib) — no dependencies.
 """
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -25,32 +24,37 @@ from typing import Any
 
 import aiosqlite
 
+from master.core.lock import LoopBoundLock
+
 logger = logging.getLogger(__name__)
 
-class LoopBoundLock:
-    """
-    A helper lock that delegates to an asyncio.Lock bound to the current event loop.
-    Prevents loop mismatch / closed loop errors in tests.
-    """
-    def __init__(self) -> None:
-        self._locks: dict[Any, asyncio.Lock] = {}
 
-    def _get_lock(self) -> asyncio.Lock:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.Lock()
-        # Prune closed event loops to prevent memory leaks
-        self._locks = {lp: lk for lp, lk in self._locks.items() if not lp.is_closed()}
-        if loop not in self._locks:
-            self._locks[loop] = asyncio.Lock()
-        return self._locks[loop]
+from enum import StrEnum
 
-    async def __aenter__(self) -> Any:
-        return await self._get_lock().__aenter__()
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
-        return await self._get_lock().__aexit__(exc_type, exc_val, exc_tb)
+class AuditAction(StrEnum):
+    USER_LOGIN = "USER_LOGIN"
+    USER_LOGOUT = "USER_LOGOUT"
+    USER_CHANGE_PASSWORD = "USER_CHANGE_PASSWORD"
+    REFRESH_THEFT_DETECTED = "REFRESH_THEFT_DETECTED"
+    TOKEN_REFRESH = "TOKEN_REFRESH"
+    PROPOSAL_APPROVED = "PROPOSAL_APPROVED"
+    PROPOSAL_REJECTED = "PROPOSAL_REJECTED"
+    GENERATE_JOIN_TOKEN = "GENERATE_JOIN_TOKEN"
+    REVOKE_NODE = "REVOKE_NODE"
+    UPDATE_LLM_SETTINGS = "UPDATE_LLM_SETTINGS"
+    UPDATE_INTENT_CONFIG = "UPDATE_INTENT_CONFIG"
+    UPLOAD_PLUGIN = "UPLOAD_PLUGIN"
+    CONFIGURE_PLUGIN = "CONFIGURE_PLUGIN"
+    TOGGLE_PLUGIN = "TOGGLE_PLUGIN"
+    DELETE_PLUGIN = "DELETE_PLUGIN"
+    NODE_ENROLLED = "NODE_ENROLLED"
+    NODE_RECONNECTED = "NODE_RECONNECTED"
+    INTENT_RESULT = "INTENT_RESULT"
+    CACHE_REFRESH = "CACHE_REFRESH"
+    NODE_LOST = "NODE_LOST"
+    NODE_STALE = "NODE_STALE"
+    RESTART_SERVICE = "RESTART_SERVICE"
+    RESTART_CONTAINER = "RESTART_CONTAINER"
 
 
 # Serialize writes to prevent sequence collision
@@ -60,11 +64,7 @@ _audit_lock = LoopBoundLock()
 GENESIS_HASH = "0" * 64
 
 
-# ---------------------------------------------------------------------------
 # Core hash computation (shared with migrations.py for genesis entry)
-# ---------------------------------------------------------------------------
-
-
 def compute_entry_hash(
     previous_hash: str,
     sequence: int,
@@ -91,16 +91,11 @@ def compute_entry_hash(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 async def log_action(
     db: aiosqlite.Connection,
     *,
     user_id: str,
-    action: str,
+    action: AuditAction | str,
     node_id: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> str:
@@ -191,9 +186,8 @@ async def verify_chain(
         "total_entries": 0,
         "first_broken_sequence": None,
         "error": None,
-      }
+    }
 
-    # Fetch rows
     if max_entries is not None:
         sql = """
             SELECT id, sequence, timestamp, user_id, action, node_id,
@@ -219,7 +213,6 @@ async def verify_chain(
         report["total_entries"] = 0
         return report
 
-    # Initialize expected_previous_hash from the first verified row
     first_row = rows[0]
     if first_row["sequence"] == 1:
         expected_previous_hash = GENESIS_HASH
@@ -231,7 +224,6 @@ async def verify_chain(
         count += 1
         seq = row["sequence"]
 
-        # Check that previous_hash matches expected value
         if row["previous_hash"] != expected_previous_hash:
             report["valid"] = False
             report["first_broken_sequence"] = seq
@@ -242,7 +234,6 @@ async def verify_chain(
             )
             break
 
-        # Recompute entry_hash
         computed = compute_entry_hash(
             previous_hash=row["previous_hash"],
             sequence=seq,

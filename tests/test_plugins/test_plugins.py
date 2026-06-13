@@ -215,7 +215,7 @@ def test_plugin_loading_from_dir(tmp_path):
 
     pm2 = PluginManager()
     loaded = pm2.load_plugins_from_dir(str(tmp_path))
-    assert "metrics_plugin" in loaded
+    assert "metrics" in loaded
 
     actions = pm2.call_first("get_supported_actions")
     assert actions is not None

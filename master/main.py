@@ -1,5 +1,5 @@
 """
-Vigile — Master Node Entry Point
+Vigile — Master Node Entry Point (reloaded)
 
 FastAPI application with:
   - Async lifespan (DB init → plugin load → node manager start → shutdown)
@@ -13,19 +13,19 @@ Run with:
     uvicorn master.main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-import ast
-import json
+
+import asyncio
 import logging
 import os
 import sys
 import time
-from datetime import datetime
+
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Any
+from typing import AsyncGenerator
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request, Response, WebSocket, HTTPException, UploadFile, File
+from fastapi import FastAPI, Request, Response, WebSocket, HTTPException
 from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -45,6 +45,7 @@ from master.api.services import router as services_router
 from master.api.chat import router as chat_router
 from master.api.audit import router as audit_router
 from master.api.admin import router as admin_router
+from master.api.demo import router as demo_router
 from master.ws.worker_handler import worker_join_handler
 
 # ---------------------------------------------------------------------------
@@ -164,19 +165,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     rate_limiter.trusted_proxies = settings.trusted_proxies
     
     # 7. Start Rate Limiter Cleanup Task
-    import asyncio
-    async def _rate_limiter_cleanup_task():
-        try:
-            while True:
-                await asyncio.sleep(60)
-                await rate_limiter.cleanup_expired()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error("Error in rate limiter cleanup task: %s", e)
-
-    cleanup_task = asyncio.create_task(_rate_limiter_cleanup_task())
-    logger.info("Rate limiter cleanup task started.")
+    cleanup_task = rate_limiter.start_cleanup_task(app)
     
     logger.info("Master Node ready. 🚀")
 
@@ -296,6 +285,7 @@ app.include_router(services_router)
 app.include_router(chat_router)
 app.include_router(audit_router)
 app.include_router(admin_router)
+app.include_router(demo_router)
 
 # ---------------------------------------------------------------------------
 # Static Files
