@@ -63,11 +63,12 @@ func handleListContainers(intent Intent) IntentResult {
 
 	// Extract just the fields we need
 	type containerSummary struct {
-		ID    string   `json:"id"`
-		Name  string   `json:"name"`
-		Image string   `json:"image"`
-		State string   `json:"state"`
-		Ports []string `json:"ports,omitempty"`
+		ID     string   `json:"id"`
+		Name   string   `json:"name"`
+		Image  string   `json:"image"`
+		State  string   `json:"state"`
+		Status string   `json:"status"`
+		Ports  []string `json:"ports,omitempty"`
 	}
 	var summary []containerSummary
 	for _, c := range containers {
@@ -76,6 +77,7 @@ func handleListContainers(intent Intent) IntentResult {
 			id = id[:12]
 		}
 		state, _ := c["State"].(string)
+		status, _ := c["Status"].(string)
 		image, _ := c["Image"].(string)
 		names, _ := c["Names"].([]interface{})
 		name := ""
@@ -98,7 +100,7 @@ func handleListContainers(intent Intent) IntentResult {
 			}
 		}
 		summary = append(summary, containerSummary{
-			ID: id, Name: name, Image: image, State: state, Ports: ports,
+			ID: id, Name: name, Image: image, State: state, Status: status, Ports: ports,
 		})
 	}
 
