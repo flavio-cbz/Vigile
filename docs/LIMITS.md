@@ -7,14 +7,12 @@ et les décisions architecturales qui pourraient devenir problématiques en évo
 
 ## 🔴 Sécurité — À surveiller
 
-### Clé Ed25519 : permissions non vérifiées à la lecture
-`master/core/security_manager.py:113-117`
+### ~~Clé Ed25519 : permissions non vérifiées à la lecture~~ ✅ Corrigé dans Sprint 5.5
+`master/core/security_manager.py:448-456`
 
-La clé est écrite avec `0o600` si elle est générée, mais les permissions d'une clé existante
-ne sont jamais vérifiées. Une restauration de backup avec `0o644` expose la clé sans warning.
-
-**Quand ça deviendra un problème :** premier déploiement avec backup/restore.
-**Solution :** ajouter `os.stat(key_path).st_mode & 0o777` et logger un WARNING si pas `0o600`.
+La clé était écrite avec `0o600` si générée, mais les permissions d'une clé existante
+n'étaient jamais vérifiées. Maintenant, `os.stat()` est appelé au chargement et un WARNING
+est émis si les permissions ne sont pas `0o600`.
 
 ### ~~Refresh token sans invalidation~~ ✅ Corrigé dans Sprint 4.5
 `master/api/auth.py:147-171`
@@ -31,14 +29,12 @@ Le compte `admin/admin` initial est créé avec le flag `must_change_password = 
 
 La tâche en arrière-plan périodique `cleanup_expired()` est lancée lors du lifespan de l'application FastAPI pour vider régulièrement les buckets mémoire expirés.
 
-### CORS : `allow_credentials=True` incompatible avec wildcard
-`master/main.py:142-148`
+### ~~CORS : `allow_credentials=True` incompatible avec wildcard~~ ✅ Mitigé dans Sprint 5
+`master/main.py:238-256`
 
-Si `CORS_ORIGINS=*` est défini, le navigateur bloque les credentials (Authorization header)
-car `Access-Control-Allow-Origin: *` avec `Access-Control-Allow-Credentials: true` est interdit par la spec.
-
-**Quand ça deviendra un problème :** premier déploiement avec frontend.
-**Solution :** ajouter une validation dans `config.py` qui refuse le wildcard si `allow_credentials=True`.
+Solution : middleware HTTP qui echo le header `Origin` du request quand `CORS_ORIGINS=*`,
+contournant la limitation navigateur. La config émet aussi un warning de sécurité.
+**Risque résiduel :** le `CORS_ORIGINS=*` doit être explicitement changé en production.
 
 ---
 
@@ -87,7 +83,7 @@ Le code était correct avant la détection dans l'audit. La doc LIMITS.md était
 | UUID TEXT PKs = index 9x plus gros qu'un integer | db/models.py:29-32 | Compare last_heartbeat avec time.time() peut donner des off-by-one |
 | UUID TEXT PKs = index 9x plus gros qu'un integer | db/models.py:18-92 | Cache inefficace pour l'audit_log à grande échelle |
 | Clé Ed25519 auto-générée si MASTER_KEY_PATH inexistant | config.py:72-77 | Un redémarrage avec le fichier manquant = nouvelle clé = tous les Workers rejetés |
-| _pending_intents` non nettoyé après timeout | node_manager.py:370-373 | Stale entries dans le dict si le futur est déjà résolu ailleurs |
+| ~~_pending_intents non nettoyé après timeout~~ ✅ Corrigé | node_manager.py | Tracké via _intent_created_at + cleanup par âge |
 | Pas de vérification que le Worker Go reçoit le bon type d'intent | node_manager.py:363 | {**intent, "type": "INTENT"} corrige mais dépend du Worker qui parse |
 | aiosqlite.execute async peut être appelé après fermeture DB | node_manager.py:406 | Heartbeat monitor peut appeler get_db_conn() pendant un shutdown |
 | Pas de limite sur le nombre de connexions WebSocket | node_manager.py:118 | Un Worker malveillant peut ouvrir des connexions illimitées |
@@ -114,3 +110,10 @@ Le code était correct avant la détection dans l'audit. La doc LIMITS.md était
 4. **Correction des violations de Dependency Injection** de la configuration système ✅ Fait
 5. **Nettoyage automatique du rate-limiter** via tâche asyncio de lifespan ✅ Fait
 6. **Force-change du mot de passe** administrateur par défaut ✅ Fait
+---
+
+## Security Deployment Notes
+
+Vigile must be exposed in production behind an external TLS reverse proxy. The Master is prepared for that deployment model through `ENFORCE_HTTPS`, `TRUSTED_PROXIES`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, and `COOKIE_DOMAIN`; Workers should use a `wss://` master URL once the TLS proxy is in place.
+
+Never commit `.env` files. If `LLM_API_KEY`, `SERVER_SECRET_KEY`, or `JWT_SECRET_KEY` was written to a shared or exposed `.env`, treat it as compromised: revoke the provider key, generate a new value, redeploy, and verify that only `.env.example` is tracked.
