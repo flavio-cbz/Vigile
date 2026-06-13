@@ -1,5 +1,5 @@
-import pytest
 import httpx
+import pytest
 
 BASE_URL = "http://127.0.0.1:8000"
 
@@ -27,41 +27,55 @@ async def test_api_integration_flow():
         # We try to login with a new secure password first (in case it was already changed)
         secure_password = "demo_secure_password"
         username = "admin"
-        r = await client.post("/api/auth/login", json={"username": username, "password": secure_password})
-        
+        r = await client.post(
+            "/api/auth/login", json={"username": username, "password": secure_password}
+        )
+
         if r.status_code != 200:
             # Try with the default "admin" password
-            r = await client.post("/api/auth/login", json={"username": username, "password": "admin"})
+            r = await client.post(
+                "/api/auth/login", json={"username": username, "password": "admin"}
+            )
             if r.status_code != 200:
                 # If that failed, fall back to "demo" username
                 username = "demo"
-                r = await client.post("/api/auth/login", json={"username": username, "password": secure_password})
+                r = await client.post(
+                    "/api/auth/login", json={"username": username, "password": secure_password}
+                )
                 if r.status_code != 200:
-                    r = await client.post("/api/auth/login", json={"username": username, "password": "demo"})
-            
+                    r = await client.post(
+                        "/api/auth/login", json={"username": username, "password": "demo"}
+                    )
+
             assert r.status_code == 200, f"Login failed for both admin and demo: {r.status_code}"
-            
+
             tokens = r.json()
             access_token = tokens["access_token"]
             headers = {"Authorization": f"Bearer {access_token}"}
-            
+
             # Check if must_change_password is required
             r_me = await client.get("/api/auth/me", headers=headers)
             if r_me.status_code == 403:
                 assert r_me.json().get("code") == "MUST_CHANGE_PASSWORD"
-                
+
                 # Perform force change-password
                 old_password = "demo" if username == "demo" else "admin"
                 r_change = await client.post(
                     "/api/auth/change-password",
                     headers=headers,
-                    json={"old_password": old_password, "new_password": secure_password}
+                    json={"old_password": old_password, "new_password": secure_password},
                 )
-                assert r_change.status_code == 204, f"Password change failed: {r_change.status_code}"
-                
+                assert (
+                    r_change.status_code == 204
+                ), f"Password change failed: {r_change.status_code}"
+
                 # Re-authenticate with new password
-                r_login = await client.post("/api/auth/login", json={"username": username, "password": secure_password})
-                assert r_login.status_code == 200, f"Login with new password failed: {r_login.status_code}"
+                r_login = await client.post(
+                    "/api/auth/login", json={"username": username, "password": secure_password}
+                )
+                assert (
+                    r_login.status_code == 200
+                ), f"Login with new password failed: {r_login.status_code}"
                 tokens = r_login.json()
             else:
                 assert r_me.status_code == 200, f"Expected 200 or 403, got {r_me.status_code}"
@@ -87,10 +101,11 @@ async def test_api_integration_flow():
 
         # 3. Nodes Management
         # Generate Join Token
-        r = await client.post("/api/nodes/generate-join", headers=headers, json={
-            "name": "test-api-node",
-            "ip_prefix": ""
-        })
+        r = await client.post(
+            "/api/nodes/generate-join",
+            headers=headers,
+            json={"name": "test-api-node", "ip_prefix": ""},
+        )
         assert r.status_code == 201, f"Join token generation failed: {r.status_code}"
         data = r.json()
         node_id = data["node_id"]

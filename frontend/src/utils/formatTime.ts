@@ -54,4 +54,3 @@ export const formatDateTime = (timestamp: number | null | undefined): string => 
   const minutes = pad(date.getMinutes());
   return `${day}/${month} à ${hours}:${minutes}`;
 };
-

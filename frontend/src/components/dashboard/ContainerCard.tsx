@@ -114,7 +114,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
 
   // Highlight container cards according to their execution state
   let cardStatusClass = "card-success";
-  
+
   if (containerState === 'dead') {
     cardStatusClass = "card-critical card-pulse-critical";
   } else if (containerState === 'restarting' || containerState === 'paused') {

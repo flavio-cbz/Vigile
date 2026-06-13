@@ -1,10 +1,8 @@
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
 from alembic import context
+from sqlalchemy import engine_from_config, pool
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -24,6 +22,7 @@ target_metadata = None
 # Dynamically set sqlalchemy.url based on master.config.settings
 try:
     from master.config import settings
+
     # SQLite URL format: sqlite:///path/to/database
     db_path = settings.database_path
     # Make path absolute if it isn't

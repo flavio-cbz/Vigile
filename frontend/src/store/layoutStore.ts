@@ -39,4 +39,3 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setAddNodeModalOpen: (open) => set({ isAddNodeModalOpen: open }),
   setPendingCount: (count) => set({ pendingCount: count }),
 }));
-

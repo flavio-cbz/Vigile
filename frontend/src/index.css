@@ -31,15 +31,15 @@
   --color-surface-2: var(--surface-3);
   --color-border: var(--border);
   --color-border-hover: var(--border-strong);
-  
+
   --color-ink-primary: var(--text-1);
   --color-ink-secondary: var(--text-2);
   --color-ink-muted: var(--text-3);
-  
+
   --color-accent-primary: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-subtle: var(--accent-muted);
-  
+
   --color-success: var(--severity-ok);
   --color-success-subtle: rgba(34, 197, 94, 0.12);
   --color-warning: var(--severity-warning);
@@ -136,15 +136,15 @@
 
   --color-green-custom: var(--severity-ok);
   --color-green-glow: var(--severity-ok);
-  
+
   --color-amber-custom: var(--severity-warning);
   --color-amber-soft: rgba(245, 158, 11, 0.08);
   --color-amber-border: rgba(245, 158, 11, 0.15);
-  
+
   --color-red-custom: var(--severity-critical);
   --color-red-soft: rgba(239, 68, 68, 0.08);
   --color-red-border: rgba(239, 68, 68, 0.15);
-  
+
   --animate-fade-in: fade-in 0.2s var(--transition-base);
   --animate-slide-in-right: slide-in-right 0.25s var(--transition-base);
 }
@@ -249,4 +249,3 @@ html, body, #root {
   box-shadow: 0 0 20px rgba(99, 102, 241, 0.18);
   border-color: rgba(99, 102, 241, 0.4) !important;
 }
-

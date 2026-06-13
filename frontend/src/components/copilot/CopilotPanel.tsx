@@ -71,7 +71,7 @@ export const CopilotPanel: React.FC = () => {
       try {
         // Fetch sessions for the node or all
         await fetchSessions(nodeId);
-        
+
         // Find existing session or create a new one
         const { sessions: latestSessions } = useChatStore.getState();
         const nodeSessions = latestSessions.filter((s) => s.node_id === nodeId);
@@ -96,7 +96,7 @@ export const CopilotPanel: React.FC = () => {
       const triggerDiagnostic = async () => {
         if (copilotContext?.trigger === 'diagnostic' && copilotContext.insight) {
           const prompt = `Fais un diagnostic détaillé de cette anomalie : "${copilotContext.insight.headline}". Détails : "${copilotContext.insight.detail}"`;
-          
+
           // Only trigger if we don't already have messages related to this in history
           const alreadySent = activeSession.history?.some(
             (msg) => msg.role === 'user' && msg.content.includes(copilotContext.insight!.headline)
@@ -107,7 +107,7 @@ export const CopilotPanel: React.FC = () => {
           }
         } else if (copilotContext?.trigger === 'proposal' && copilotContext.proposal) {
           const prompt = `Que penses-tu de l'action proposée : "${copilotContext.proposal.action}" sur "${copilotContext.proposal.node_id}"? Raisonnement : ${copilotContext.proposal.reasoning}`;
-          
+
           const alreadySent = activeSession.history?.some(
             (msg) => msg.role === 'user' && msg.content.includes(copilotContext.proposal!.action)
           );

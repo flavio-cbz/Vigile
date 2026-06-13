@@ -1,14 +1,20 @@
 import os
-import pytest
+
 import aiosqlite
-from master.core.audit import log_action, verify_chain, get_recent_entries, compute_entry_hash
+import pytest
+
+from master.core.audit import compute_entry_hash, get_recent_entries, log_action, verify_chain
 
 
 @pytest.mark.asyncio
 async def test_audit_trail(db: aiosqlite.Connection):
     # Log several actions
-    e1 = await log_action(db, user_id="user-1", action="TEST_ACTION_A", node_id="node-1", details={"k": "v1"})
-    e2 = await log_action(db, user_id="user-2", action="TEST_ACTION_B", node_id="node-2", details={"k": "v2"})
+    e1 = await log_action(
+        db, user_id="user-1", action="TEST_ACTION_A", node_id="node-1", details={"k": "v1"}
+    )
+    e2 = await log_action(
+        db, user_id="user-2", action="TEST_ACTION_B", node_id="node-2", details={"k": "v2"}
+    )
     e3 = await log_action(db, user_id="user-1", action="TEST_ACTION_C", details={"k": "v3"})
 
     assert all(isinstance(e, str) and len(e) == 36 for e in [e1, e2, e3])
@@ -24,10 +30,14 @@ async def test_audit_trail(db: aiosqlite.Connection):
     assert report_limit["total_entries"] == 2
 
     # Tamper with an entry (change details) and verify detection
-    async with db.execute("SELECT id, entry_hash FROM audit_log ORDER BY sequence DESC LIMIT 1") as cur:
+    async with db.execute(
+        "SELECT id, entry_hash FROM audit_log ORDER BY sequence DESC LIMIT 1"
+    ) as cur:
         last = await cur.fetchone()
 
-    await db.execute("UPDATE audit_log SET details_json='{\"tampered\":true}' WHERE id=?", (last["id"],))
+    await db.execute(
+        "UPDATE audit_log SET details_json='{\"tampered\":true}' WHERE id=?", (last["id"],)
+    )
     await db.commit()
 
     tampered_report = await verify_chain(db)
@@ -74,10 +84,12 @@ async def test_audit_trail_empty_db(temp_dir):
         # 2. log_action on empty DB (Genesis case where head is None)
         e1 = await log_action(db, user_id="system", action="GENESIS_TEST")
         assert isinstance(e1, str)
-        
+
         # Verify it has sequence 1
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT sequence, previous_hash FROM audit_log WHERE id=?", (e1,)) as cur:
+        async with db.execute(
+            "SELECT sequence, previous_hash FROM audit_log WHERE id=?", (e1,)
+        ) as cur:
             row = await cur.fetchone()
             assert row["sequence"] == 1
             assert row["previous_hash"] == "0" * 64

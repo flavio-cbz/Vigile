@@ -14,8 +14,8 @@ Usage::
     # Returns env var LLM_API_KEY, or reads file from LLM_API_KEY_FILE path
 """
 
-import os
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,7 @@ def load_secret(
             return Path(file_path_str).read_text().strip()
         except (OSError, IOError) as exc:
             raise RuntimeError(
-                f"Cannot read secret file '{file_path_str}' "
-                f"(from {file_var}): {exc}"
+                f"Cannot read secret file '{file_path_str}' " f"(from {file_var}): {exc}"
             ) from exc
 
     # Not configured — return empty string (caller decides if required)

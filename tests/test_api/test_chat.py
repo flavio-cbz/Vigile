@@ -1,11 +1,13 @@
-import pytest
 import unittest.mock as mock
+
+import pytest
 from httpx import AsyncClient
-from master.main import app
+
 from master.api import deps
-from master.core.node_manager import node_manager, NodeState
-from master.core.security_manager import SecurityManager
 from master.core.action_proposal import ActionProposal
+from master.core.node_manager import NodeState, node_manager
+from master.core.security_manager import SecurityManager
+from master.main import app
 
 
 @pytest.fixture
@@ -13,12 +15,14 @@ def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
         token = security.create_access_token("test-user", "test_user", role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
 
 
 @pytest.fixture
 async def client(db):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     app.dependency_overrides[deps.get_db] = lambda: db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -40,9 +44,18 @@ async def _insert_proposal(db, proposal):
         """INSERT INTO action_proposals (id, node_id, action, params_json,
            reasoning, risk_level, status, created_by, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (data["id"], data["node_id"], data["action"], data["params_json"],
-         data["reasoning"], data["risk_level"], data["status"],
-         data["created_by"], data["created_at"], data["updated_at"]),
+        (
+            data["id"],
+            data["node_id"],
+            data["action"],
+            data["params_json"],
+            data["reasoning"],
+            data["risk_level"],
+            data["status"],
+            data["created_by"],
+            data["created_at"],
+            data["updated_at"],
+        ),
     )
     await db.commit()
 
@@ -81,9 +94,7 @@ async def test_chat_streams_sse(client, auth_headers):
     app.dependency_overrides[deps.get_llm_client] = lambda: mock_llm
     try:
         resp = await client.post(
-            "/api/chat",
-            headers=auth_headers("admin"),
-            json={"message": "Hello", "node_id": None}
+            "/api/chat", headers=auth_headers("admin"), json={"message": "Hello", "node_id": None}
         )
         assert resp.status_code == 200
         text = resp.text
@@ -107,9 +118,7 @@ async def test_chat_streams_error(client, auth_headers):
     app.dependency_overrides[deps.get_llm_client] = lambda: mock_llm
     try:
         resp = await client.post(
-            "/api/chat",
-            headers=auth_headers("admin"),
-            json={"message": "Hi", "node_id": None}
+            "/api/chat", headers=auth_headers("admin"), json={"message": "Hi", "node_id": None}
         )
         assert resp.status_code == 200
         assert '"LLM is down"' in resp.text
@@ -121,8 +130,9 @@ async def test_chat_streams_error(client, auth_headers):
 async def test_proposals_list(db, client, auth_headers):
     """GET /api/chat/proposals returns proposals."""
     node_id = await node_manager.create_node(db, name="test-proposal")
-    p = ActionProposal(node_id=node_id, action="RESTART_CONTAINER",
-                       params={"id": "web"}, reasoning="down")
+    p = ActionProposal(
+        node_id=node_id, action="RESTART_CONTAINER", params={"id": "web"}, reasoning="down"
+    )
     await _insert_proposal(db, p)
     resp = await client.get("/api/chat/proposals", headers=auth_headers("admin"))
     assert resp.status_code == 200
@@ -135,8 +145,9 @@ async def test_proposals_list(db, client, auth_headers):
 async def test_proposals_get(db, client, auth_headers):
     """GET /api/chat/proposals/{id} returns one proposal."""
     node_id = await node_manager.create_node(db, name="test-proposal-get")
-    p = ActionProposal(node_id=node_id, action="RESTART_CONTAINER",
-                       params={"id": "web"}, reasoning="down")
+    p = ActionProposal(
+        node_id=node_id, action="RESTART_CONTAINER", params={"id": "web"}, reasoning="down"
+    )
     await _insert_proposal(db, p)
     resp = await client.get(f"/api/chat/proposals/{p.id}", headers=auth_headers("admin"))
     assert resp.status_code == 200
@@ -168,8 +179,7 @@ async def test_approve_proposal(db, client, auth_headers):
     node_manager.send_intent = mock_send
     try:
         resp = await client.post(
-            f"/api/chat/proposals/{p.id}/approve",
-            headers=auth_headers("admin")
+            f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
         )
         assert resp.status_code == 200
         d = resp.json()
@@ -190,14 +200,12 @@ async def test_approve_proposal_not_pending(db, client, auth_headers):
     await _insert_proposal(db, p)
 
     # Also update the approved_by field since _insert_proposal doesn't set it
-    await db.execute("UPDATE action_proposals SET approved_by = ? WHERE id = ?",
-                    (p.approved_by, p.id))
+    await db.execute(
+        "UPDATE action_proposals SET approved_by = ? WHERE id = ?", (p.approved_by, p.id)
+    )
     await db.commit()
 
-    resp = await client.post(
-        f"/api/chat/proposals/{p.id}/approve",
-        headers=auth_headers("admin")
-    )
+    resp = await client.post(f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin"))
     assert resp.status_code == 409
 
 
@@ -211,7 +219,7 @@ async def test_reject_proposal(db, client, auth_headers):
     resp = await client.post(
         f"/api/chat/proposals/{p.id}/reject",
         headers=auth_headers("admin"),
-        json={"reason": "not needed"}
+        json={"reason": "not needed"},
     )
     assert resp.status_code == 200
     d = resp.json()

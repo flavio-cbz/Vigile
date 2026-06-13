@@ -20,7 +20,7 @@ export function usePolling(
       activeCallbacks.set(key, new Set());
     }
     const callbacks = activeCallbacks.get(key)!;
-    
+
     // Wrapper local qui pointe vers le callback à jour à chaque render
     const wrapper = () => {
       savedCallback.current();

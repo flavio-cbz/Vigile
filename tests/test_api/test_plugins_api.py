@@ -1,15 +1,16 @@
-import os
 import json
-import pytest
+import os
 import shutil
+
+import pytest
 from fastapi import status
 from httpx import AsyncClient
 
-from master.main import app
 from master.api import deps
 from master.config import settings
-from master.core.security_manager import SecurityManager
 from master.core.plugin_manager import plugin_manager
+from master.core.security_manager import SecurityManager
+from master.main import app
 
 
 @pytest.fixture
@@ -17,12 +18,14 @@ def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
         token = security.create_access_token("test-user", "test_user", role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
 
 
 @pytest.fixture
 async def client(db):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     app.dependency_overrides[deps.get_db] = lambda: db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -33,6 +36,7 @@ async def client(db):
 @pytest.fixture(autouse=True)
 def clear_rate_limiter():
     from master.core.rate_limiter import rate_limiter
+
     rate_limiter._buckets.clear()
 
 
@@ -45,26 +49,28 @@ def setup_temp_plugins_dir(tmp_path):
     settings.plugins_dir = str(temp_dir)
     try:
         import master.api.admin
+
         master.api.admin.settings.plugins_dir = str(temp_dir)
     except Exception:
         pass
-    
+
     # Copy default plugins to temp dir so they are available
     shutil.copy("master/plugins/metrics_plugin.py", temp_dir / "metrics.py")
     shutil.copy("master/plugins/systemd_plugin.py", temp_dir / "systemd.py")
     shutil.copy("master/plugins/docker_plugin.py", temp_dir / "docker.py")
-    
+
     # Reset plugin_manager in-memory lists
     plugin_manager._loaded_plugins.clear()
     plugin_manager._hooks.clear()
     plugin_manager.load_plugins_from_dir(str(temp_dir))
-    
+
     yield temp_dir
-    
+
     # Restore settings
     settings.plugins_dir = old_plugins_dir
     try:
         import master.api.admin
+
         master.api.admin.settings.plugins_dir = old_plugins_dir
     except Exception:
         pass
@@ -104,9 +110,7 @@ async def test_configure_plugin(client: AsyncClient, auth_headers):
     # Configure systemd
     new_config = {"monitored_services": "ssh,nginx", "allow_restart_all": True}
     res = await client.post(
-        "/api/admin/plugins/systemd/config",
-        headers=auth_headers("admin"),
-        json=new_config
+        "/api/admin/plugins/systemd/config", headers=auth_headers("admin"), json=new_config
     )
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["status"] == "success"
@@ -123,7 +127,7 @@ async def test_toggle_plugin_state(client: AsyncClient, auth_headers):
     # Disable systemd
     res = await client.post("/api/admin/plugins/systemd/toggle", headers=auth_headers("admin"))
     assert res.status_code == status.HTTP_200_OK
-    
+
     # Verify in list
     res = await client.get("/api/admin/plugins", headers=auth_headers("admin"))
     data = res.json()["plugins"]
@@ -134,7 +138,7 @@ async def test_toggle_plugin_state(client: AsyncClient, auth_headers):
     # Enable systemd back
     res = await client.post("/api/admin/plugins/systemd/toggle", headers=auth_headers("admin"))
     assert res.status_code == status.HTTP_200_OK
-    
+
     # Verify loaded again
     res = await client.get("/api/admin/plugins", headers=auth_headers("admin"))
     data = res.json()["plugins"]

@@ -20,6 +20,7 @@ import json
 import logging
 import time
 import uuid
+from enum import StrEnum
 from typing import Any
 
 import aiosqlite
@@ -28,8 +29,6 @@ from master.core.lock import LoopBoundLock
 
 logger = logging.getLogger(__name__)
 
-
-from enum import StrEnum
 
 class AuditAction(StrEnum):
     USER_LOGIN = "USER_LOGIN"
@@ -79,15 +78,17 @@ def compute_entry_hash(
     Fields joined with '|' — a character that cannot appear in any field value
     (UUIDs, action names, and JSON all use different separators).
     """
-    raw = "|".join([
-        previous_hash,
-        str(sequence),
-        f"{timestamp:.6f}",
-        action,
-        user_id,
-        node_id or "",
-        details_json,
-    ])
+    raw = "|".join(
+        [
+            previous_hash,
+            str(sequence),
+            f"{timestamp:.6f}",
+            action,
+            user_id,
+            node_id or "",
+            details_json,
+        ]
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -150,21 +151,33 @@ async def log_action(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                entry_id, sequence, timestamp, user_id, action,
-                node_id, details_json, previous_hash, entry_hash,
+                entry_id,
+                sequence,
+                timestamp,
+                user_id,
+                action,
+                node_id,
+                details_json,
+                previous_hash,
+                entry_hash,
             ),
         )
         await db.commit()
 
     logger.info(
         "AUDIT seq=%d action=%s user=%s node=%s",
-        sequence, action, user_id, node_id or "-",
+        sequence,
+        action,
+        user_id,
+        node_id or "-",
     )
     return entry_id
 
 
 async def verify_chain(
-    db: aiosqlite.Connection, *, max_entries: int | None = None,
+    db: aiosqlite.Connection,
+    *,
+    max_entries: int | None = None,
 ) -> dict[str, Any]:
     """
     Walk the audit log and verify the hash chain integrity.
@@ -248,8 +261,7 @@ async def verify_chain(
             report["valid"] = False
             report["first_broken_sequence"] = seq
             report["error"] = (
-                f"Sequence {seq}: entry_hash mismatch. "
-                f"Record has been tampered with."
+                f"Sequence {seq}: entry_hash mismatch. " f"Record has been tampered with."
             )
             break
 
@@ -259,8 +271,11 @@ async def verify_chain(
     if report["valid"]:
         logger.info("Audit chain verification OK — %d entries verified.", count)
     else:
-        logger.error("Audit chain BROKEN at sequence %s: %s",
-                     report["first_broken_sequence"], report["error"])
+        logger.error(
+            "Audit chain BROKEN at sequence %s: %s",
+            report["first_broken_sequence"],
+            report["error"],
+        )
 
     return report
 
@@ -301,16 +316,18 @@ async def get_recent_entries(
     rows = []
     async with db.execute(sql, params) as cursor:
         async for row in cursor:
-            rows.append({
-                "id": row["id"],
-                "sequence": row["sequence"],
-                "timestamp": row["timestamp"],
-                "user_id": row["user_id"],
-                "action": row["action"],
-                "node_id": row["node_id"],
-                "details": json.loads(row["details_json"]),
-                "previous_hash": row["previous_hash"],
-                "entry_hash": row["entry_hash"],
-            })
+            rows.append(
+                {
+                    "id": row["id"],
+                    "sequence": row["sequence"],
+                    "timestamp": row["timestamp"],
+                    "user_id": row["user_id"],
+                    "action": row["action"],
+                    "node_id": row["node_id"],
+                    "details": json.loads(row["details_json"]),
+                    "previous_hash": row["previous_hash"],
+                    "entry_hash": row["entry_hash"],
+                }
+            )
 
     return rows

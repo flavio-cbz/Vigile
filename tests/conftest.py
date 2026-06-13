@@ -1,19 +1,21 @@
 import os
+
 os.environ["LLM_BASE_URL"] = "http://test-llm:8000/v1"
 os.environ["LLM_API_KEY"] = "test-key"
 os.environ["LLM_MODEL"] = "test-model"
 os.environ["TESTING"] = "true"
 
-import pytest
-import aiosqlite
-import tempfile
 import shutil
+import tempfile
+
+import aiosqlite
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from master.core.security_manager import SecurityManager
 from master.core.node_manager import NodeManager
 from master.core.plugin_manager import PluginManager
-from master.db.database import init_db, close_db, reset_db
+from master.core.security_manager import SecurityManager
+from master.db.database import close_db, init_db, reset_db
 from master.db.migrations import run_migrations
 
 
@@ -27,6 +29,7 @@ def temp_dir():
 @pytest.fixture
 async def db(temp_dir):
     import time
+
     db_path = os.path.join(temp_dir, "test.db")
     await reset_db()
     conn = await init_db(db_path)
@@ -35,7 +38,7 @@ async def db(temp_dir):
     await conn.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
         "VALUES ('test-user', 'test_user', 'no-hash', 'admin', 1, 0, ?, ?)",
-        (time.time(), time.time())
+        (time.time(), time.time()),
     )
     await conn.commit()
     yield conn
@@ -46,6 +49,7 @@ async def db(temp_dir):
 @pytest.fixture(autouse=True)
 def security() -> SecurityManager:
     import master.core.security_manager as sm
+
     if sm._security_instance is None:
         sm.init_security(
             server_secret="test_secret",

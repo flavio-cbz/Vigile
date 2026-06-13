@@ -11,7 +11,7 @@ export const HashChip: React.FC<HashChipProps> = ({ hash, className = '' }) => {
 
   if (!hash) return null;
 
-  const displayHash = hash.length > 12 
+  const displayHash = hash.length > 12
     ? `${hash.substring(0, 6)}…${hash.substring(hash.length - 6)}`
     : hash;
 

@@ -18,20 +18,20 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
 
-from master.api.deps import DB, get_node_manager, require_role
-from master.core.audit import log_action, AuditAction
-from master.core.node_manager import NodeManager
-from master.plugins.systemd_plugin import (
-    parse_service_list,
-    parse_service_status,
-)
-from master.plugins.docker_plugin import parse_container_list
 from master.api.demo_data import (
     DEMO_CONTAINERS,
     DEMO_SERVICES,
     get_demo_node,
     get_demo_service,
     is_demo,
+)
+from master.api.deps import DB, get_node_manager, require_role
+from master.core.audit import AuditAction, log_action
+from master.core.node_manager import NodeManager
+from master.plugins.docker_plugin import parse_container_list
+from master.plugins.systemd_plugin import (
+    parse_service_list,
+    parse_service_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,9 +44,7 @@ router = APIRouter(prefix="/api/nodes/{node_id}", tags=["services"])
 # ---------------------------------------------------------------------------
 
 
-async def _get_node_or_404(
-    nm: NodeManager, db: DB, node_id: str
-) -> dict[str, Any]:
+async def _get_node_or_404(nm: NodeManager, db: DB, node_id: str) -> dict[str, Any]:
     """Fetch a node or raise 404."""
     node = await nm.get_node(db, node_id)
     if node is None:
@@ -195,7 +193,9 @@ async def get_service_status(
         if parsed is not None:
             return ServiceStatusResponse(node_id=node_id, **parsed)
     else:
-        logger.warning("Node %s: STATUS_SERVICE failed: %s", node_id, result.get("error", "unknown"))
+        logger.warning(
+            "Node %s: STATUS_SERVICE failed: %s", node_id, result.get("error", "unknown")
+        )
 
     return ServiceStatusResponse(
         node_id=node_id,
@@ -283,7 +283,9 @@ async def list_containers(
         else:
             logger.warning("Node %s: unparseable container list", node_id)
     else:
-        logger.warning("Node %s: LIST_CONTAINERS failed: %s", node_id, result.get("error", "unknown"))
+        logger.warning(
+            "Node %s: LIST_CONTAINERS failed: %s", node_id, result.get("error", "unknown")
+        )
 
     return ContainerListResponse(
         node_id=node_id,

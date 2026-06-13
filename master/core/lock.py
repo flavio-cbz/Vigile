@@ -14,6 +14,7 @@ class LoopBoundLock:
     A helper lock that delegates to an asyncio.Lock bound to the current event loop.
     Prevents loop mismatch / closed loop errors in tests.
     """
+
     def __init__(self) -> None:
         self._locks: dict[Any, asyncio.Lock] = {}
 

@@ -238,7 +238,7 @@ export const LoginPage: React.FC = () => {
       if (!meData) {
         throw new Error('Erreur de validation de la session.');
       }
-      
+
       loginStore(access_token, refresh_token, {
         username: meData.username,
         role: meData.role,
@@ -285,7 +285,7 @@ export const LoginPage: React.FC = () => {
       // Re-trigger login with new credentials
       setMustChangePassword(false);
       setTempToken(null);
-      
+
       // Auto reconnect with original username
       await handleLogin(originalUsername, newPassword);
     } catch (err: any) {

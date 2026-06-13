@@ -20,12 +20,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, sta
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from master.api.deps import DB, get_node_manager, get_security, require_role, Insights, get_locale
 from master.api.demo_data import DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
+from master.api.deps import DB, Insights, get_locale, get_node_manager, get_security, require_role
 from master.core.audit import log_action
+from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
 from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
-from master.core.insights import NodeProfile, HeavyProcessConfig, DiagnosticReport
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +318,9 @@ async def generate_join_token(
     expires_in = int(payload["expires_at"] - now)
     logger.info(
         "JOIN_TOKEN generated: node_id=%s name=%s expires_in=%ds",
-        node_id, body.name, expires_in,
+        node_id,
+        body.name,
+        expires_in,
     )
 
     return JoinTokenResponse(
@@ -382,7 +384,9 @@ async def list_nodes(
 async def verify_chain(
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
-    max_entries: int | None = Query(default=None, ge=1, le=100000, description="Max entries to verify"),
+    max_entries: int | None = Query(
+        default=None, ge=1, le=100000, description="Max entries to verify"
+    ),
 ) -> dict:
     """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
     # Demo mode: return mock data
@@ -390,6 +394,7 @@ async def verify_chain(
         return {"verified": True, "entries_checked": 5, "corrupted": False, "valid": True}
 
     from master.core.audit import verify_chain as _verify_chain
+
     report = await _verify_chain(db, max_entries=max_entries)
     return report
 
@@ -406,6 +411,7 @@ async def get_bulk_status(
 ) -> BulkStatusResponse:
     """Get the latest metrics snapshots and container counts for all nodes in bulk."""
     import json
+
     if is_demo(claims):
         demo_statuses = {}
         for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
@@ -415,9 +421,21 @@ async def get_bulk_status(
                 if snaps:
                     snap = snaps[0]
                     demo_statuses[node_id] = BulkNodeStatus(
-                        cpu=round(snap["cpu_percent"]) if snap.get("cpu_percent") is not None else None,
-                        mem=round(snap["mem_percent"]) if snap.get("mem_percent") is not None else None,
-                        disk=round(snap["disk_percent"]) if snap.get("disk_percent") is not None else None,
+                        cpu=(
+                            round(snap["cpu_percent"])
+                            if snap.get("cpu_percent") is not None
+                            else None
+                        ),
+                        mem=(
+                            round(snap["mem_percent"])
+                            if snap.get("mem_percent") is not None
+                            else None
+                        ),
+                        disk=(
+                            round(snap["disk_percent"])
+                            if snap.get("disk_percent") is not None
+                            else None
+                        ),
                         uptime=snap.get("uptime_seconds"),
                         containers_count=4 if node_id == "demo-node-01" else 0,
                     )
@@ -459,7 +477,7 @@ async def get_bulk_status(
         for row in await cursor.fetchall():
             node_id = row["id"]
             snap = snapshots_map.get(node_id, {})
-            
+
             containers_count = None
             cached_containers = row["cached_containers_json"]
             if cached_containers:
@@ -469,7 +487,7 @@ async def get_bulk_status(
                         containers_count = len(conts)
                 except Exception:
                     pass
-            
+
             statuses[node_id] = BulkNodeStatus(
                 cpu=snap.get("cpu"),
                 mem=snap.get("mem"),
@@ -555,6 +573,7 @@ async def revoke_node(
 
 class LogsResponse(BaseModel):
     """Response model for live logs fetched from a Worker."""
+
     node_id: str
     output: str
     lines: int
@@ -570,6 +589,7 @@ class LogsResponse(BaseModel):
 
 class MetricsSnapshotResponse(BaseModel):
     """Single metrics snapshot exposed via the stats endpoint."""
+
     collected_at: float
     cpu_percent: float
     cpu_load_1m: float | None = None
@@ -590,6 +610,7 @@ class MetricsSnapshotResponse(BaseModel):
 
 class NodeStatsResponse(BaseModel):
     """Node stats endpoint response."""
+
     node_id: str
     snapshots: list[MetricsSnapshotResponse]
 
@@ -659,8 +680,12 @@ async def get_node_logs(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     lines: Annotated[int, Query(ge=1, le=500, description="Number of log lines")] = 50,
-    service: Annotated[str | None, Query(description="systemd service name (uses journalctl)")] = None,
-    path: Annotated[str | None, Query(description="Log file path on the worker (/var/log/ only)")] = None,
+    service: Annotated[
+        str | None, Query(description="systemd service name (uses journalctl)")
+    ] = None,
+    path: Annotated[
+        str | None, Query(description="Log file path on the worker (/var/log/ only)")
+    ] = None,
     nm: NodeManager = Depends(get_node_manager),
 ) -> LogsResponse:
     """
@@ -779,39 +804,53 @@ async def get_node_insights(
                     "type": "disk",
                     "severity": "warning",
                     "icon": "⚠️",
-                    "headline": "Disk full in 1 week and 3 days" if locale == "en" else "Disque plein dans 1 semaine et 3j",
-                    "detail": "+2.4 GB / day growth rate" if locale == "en" else "Taux de croissance de +2.4 Go / jour",
-                    "raw": {
-                        "used_percent": 80.0,
-                        "free_gb": 24.0,
-                        "growth_gb_per_day": 2.4
-                    }
+                    "headline": (
+                        "Disk full in 1 week and 3 days"
+                        if locale == "en"
+                        else "Disque plein dans 1 semaine et 3j"
+                    ),
+                    "detail": (
+                        "+2.4 GB / day growth rate"
+                        if locale == "en"
+                        else "Taux de croissance de +2.4 Go / jour"
+                    ),
+                    "raw": {"used_percent": 80.0, "free_gb": 24.0, "growth_gb_per_day": 2.4},
                 },
                 {
                     "type": "cpu",
                     "severity": "warning",
                     "icon": "🔥",
-                    "headline": "Higher than normal load · Plex Transcoding" if locale == "en" else "Charge supérieure à la normale · Transcodage Plex",
-                    "detail": "Sustained load (60%) attributed to Plex container" if locale == "en" else "Charge soutenue (60%) imputée au conteneur Plex",
+                    "headline": (
+                        "Higher than normal load · Plex Transcoding"
+                        if locale == "en"
+                        else "Charge supérieure à la normale · Transcodage Plex"
+                    ),
+                    "detail": (
+                        "Sustained load (60%) attributed to Plex container"
+                        if locale == "en"
+                        else "Charge soutenue (60%) imputée au conteneur Plex"
+                    ),
                     "raw": {
                         "cpu_percent": 60.0,
                         "culprit_container": "plex",
-                        "culprit_service": None
-                    }
+                        "culprit_service": None,
+                    },
                 },
                 {
                     "type": "ram",
                     "severity": "ok",
                     "icon": "✅",
                     "headline": "Stable memory" if locale == "en" else "Mémoire stable",
-                    "detail": "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)",
+                    "detail": (
+                        "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)"
+                    ),
                     "raw": {
                         "used_percent": 65.0,
                         "used_gb": 10.4,
                         "total_gb": 16.0,
-                        "swap_used_mb": 0.0
-                    }
-                }
+                        "swap_used_mb": 0.0,
+                    },
+                },
             ]
         elif node_id == "demo-node-02":
             insights = [
@@ -820,8 +859,12 @@ async def get_node_insights(
                     "severity": "ok",
                     "icon": "✅",
                     "headline": "Stable disk" if locale == "en" else "Disque stable",
-                    "detail": "More than 6 months of space remaining" if locale == "en" else "Plus de 6 mois d'autonomie restants",
-                    "raw": {"used_percent": 42.0}
+                    "detail": (
+                        "More than 6 months of space remaining"
+                        if locale == "en"
+                        else "Plus de 6 mois d'autonomie restants"
+                    ),
+                    "raw": {"used_percent": 42.0},
                 },
                 {
                     "type": "cpu",
@@ -829,16 +872,18 @@ async def get_node_insights(
                     "icon": "✅",
                     "headline": "Stable CPU" if locale == "en" else "CPU stable",
                     "detail": "Low usage" if locale == "en" else "Faible utilisation",
-                    "raw": {"cpu_percent": 18.7}
+                    "raw": {"cpu_percent": 18.7},
                 },
                 {
                     "type": "ram",
                     "severity": "ok",
                     "icon": "✅",
                     "headline": "Stable memory" if locale == "en" else "Mémoire stable",
-                    "detail": "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)",
-                    "raw": {"used_percent": 57.8}
-                }
+                    "detail": (
+                        "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)"
+                    ),
+                    "raw": {"used_percent": 57.8},
+                },
             ]
         else:
             insights = [
@@ -847,8 +892,12 @@ async def get_node_insights(
                     "severity": "ok",
                     "icon": "✅",
                     "headline": "Stable disk" if locale == "en" else "Disque stable",
-                    "detail": "More than 6 months of space remaining" if locale == "en" else "Plus de 6 mois d'autonomie restants",
-                    "raw": {"used_percent": 25.0}
+                    "detail": (
+                        "More than 6 months of space remaining"
+                        if locale == "en"
+                        else "Plus de 6 mois d'autonomie restants"
+                    ),
+                    "raw": {"used_percent": 25.0},
                 },
                 {
                     "type": "cpu",
@@ -856,22 +905,24 @@ async def get_node_insights(
                     "icon": "✅",
                     "headline": "Stable CPU" if locale == "en" else "CPU stable",
                     "detail": "Low usage" if locale == "en" else "Faible utilisation",
-                    "raw": {"cpu_percent": 12.0}
+                    "raw": {"cpu_percent": 12.0},
                 },
                 {
                     "type": "ram",
                     "severity": "ok",
                     "icon": "✅",
                     "headline": "Stable memory" if locale == "en" else "Mémoire stable",
-                    "detail": "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)",
-                    "raw": {"used_percent": 30.0}
-                }
+                    "detail": (
+                        "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)"
+                    ),
+                    "raw": {"used_percent": 30.0},
+                },
             ]
         return {
             "node_id": node_id,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "insights": insights,
-            "profile_confidence": "high"
+            "profile_confidence": "high",
         }
 
     # Verify node exists
@@ -900,10 +951,14 @@ async def regenerate_node_profile(
         return NodeProfile(
             node_id=node_id,
             known_heavy_processes=[
-                HeavyProcessConfig(container_name="plex", cpu_threshold_percent=50.0, label="Plex Transcoding" if locale == "en" else "Transcodage Plex")
+                HeavyProcessConfig(
+                    container_name="plex",
+                    cpu_threshold_percent=50.0,
+                    label="Plex Transcoding" if locale == "en" else "Transcodage Plex",
+                )
             ],
             baseline_ram_percent=70.0,
-            context_label="Homelab Server" if locale == "en" else "Serveur homelab"
+            context_label="Homelab Server" if locale == "en" else "Serveur homelab",
         )
 
     # Verify node exists
@@ -937,9 +992,21 @@ async def analyze_node_anomaly(
     """Analyze current metrics and services with LLM to produce an anomaly diagnostic report."""
     if is_demo(claims):
         return DiagnosticReport(
-            headline="Plex transcoding task detected" if locale == "en" else "Tâche de transcodage Plex détectée",
-            explanation="The Plex container is currently transcoding a 4K H.265 video stream to 1080p H.264 for client 'iPad-de-Flavio'. This operation intensively uses the CPU (60%)." if locale == "en" else "Le conteneur Plex effectue actuellement le transcodage d'un flux vidéo 4K H.265 vers 1080p H.264 pour le client 'iPad-de-Flavio'. Cette opération sollicite intensément le processeur (60%).",
-            suggested_action="No action required. If this impacts other services, you can limit Plex CPU or enable hardware acceleration (GPU transcoding)." if locale == "en" else "Aucune action requise. Si cela impacte d'autres services, vous pouvez limiter le CPU de Plex ou activer l'accélération matérielle (transcodage GPU)."
+            headline=(
+                "Plex transcoding task detected"
+                if locale == "en"
+                else "Tâche de transcodage Plex détectée"
+            ),
+            explanation=(
+                "The Plex container is currently transcoding a 4K H.265 video stream to 1080p H.264 for client 'iPad-de-Flavio'. This operation intensively uses the CPU (60%)."
+                if locale == "en"
+                else "Le conteneur Plex effectue actuellement le transcodage d'un flux vidéo 4K H.265 vers 1080p H.264 pour le client 'iPad-de-Flavio'. Cette opération sollicite intensément le processeur (60%)."
+            ),
+            suggested_action=(
+                "No action required. If this impacts other services, you can limit Plex CPU or enable hardware acceleration (GPU transcoding)."
+                if locale == "en"
+                else "Aucune action requise. Si cela impacte d'autres services, vous pouvez limiter le CPU de Plex ou activer l'accélération matérielle (transcodage GPU)."
+            ),
         )
 
     # Verify node exists

@@ -31,9 +31,9 @@ from typing import Any
 import aiosqlite
 from fastapi import WebSocket
 
-from master.db.database import get_db_conn
 from master.core.audit import log_action
 from master.core.lock import LoopBoundLock
+from master.db.database import get_db_conn
 
 logger = logging.getLogger(__name__)
 
@@ -44,32 +44,32 @@ logger = logging.getLogger(__name__)
 
 
 class NodeState(str, Enum):
-    PENDING = "PENDING"           # Token generated, Worker not yet connected
-    ENROLLING = "ENROLLING"       # Handshake in progress
-    CONNECTED = "CONNECTED"       # Fully enrolled, WSS active, heartbeat OK
-    RECONNECTING = "RECONNECTING" # Connection dropped, Worker attempting reconnect
-    LOST = "LOST"                 # No heartbeat for > heartbeat_lost_threshold
-    STALE = "STALE"               # LOST for > heartbeat_stale_threshold
-    REVOKED = "REVOKED"           # Manually revoked, all connections refused
+    PENDING = "PENDING"  # Token generated, Worker not yet connected
+    ENROLLING = "ENROLLING"  # Handshake in progress
+    CONNECTED = "CONNECTED"  # Fully enrolled, WSS active, heartbeat OK
+    RECONNECTING = "RECONNECTING"  # Connection dropped, Worker attempting reconnect
+    LOST = "LOST"  # No heartbeat for > heartbeat_lost_threshold
+    STALE = "STALE"  # LOST for > heartbeat_stale_threshold
+    REVOKED = "REVOKED"  # Manually revoked, all connections refused
 
 
 # Allowed transitions: (from_state, to_state)
 VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
     (NodeState.PENDING, NodeState.ENROLLING),
     (NodeState.ENROLLING, NodeState.CONNECTED),
-    (NodeState.ENROLLING, NodeState.PENDING),       # handshake failed
+    (NodeState.ENROLLING, NodeState.PENDING),  # handshake failed
     (NodeState.CONNECTED, NodeState.LOST),
     (NodeState.CONNECTED, NodeState.REVOKED),
     (NodeState.CONNECTED, NodeState.RECONNECTING),
     (NodeState.RECONNECTING, NodeState.CONNECTED),
     (NodeState.RECONNECTING, NodeState.LOST),
-    (NodeState.LOST, NodeState.CONNECTED),          # Worker came back
+    (NodeState.LOST, NodeState.CONNECTED),  # Worker came back
     (NodeState.LOST, NodeState.STALE),
     (NodeState.LOST, NodeState.REVOKED),
-    (NodeState.LOST, NodeState.ENROLLING),          # Re-enrollment allowed
-    (NodeState.STALE, NodeState.CONNECTED),         # Worker came back
+    (NodeState.LOST, NodeState.ENROLLING),  # Re-enrollment allowed
+    (NodeState.STALE, NodeState.CONNECTED),  # Worker came back
     (NodeState.STALE, NodeState.REVOKED),
-    (NodeState.STALE, NodeState.ENROLLING),         # Re-enrollment allowed
+    (NodeState.STALE, NodeState.ENROLLING),  # Re-enrollment allowed
     (NodeState.RECONNECTING, NodeState.ENROLLING),  # Re-enrollment allowed
 }
 
@@ -103,9 +103,16 @@ class ActiveConnection:
 
 # Valid column names for safe SQL updates in transition_state
 _VALID_NODE_FIELDS: set[str] = {
-    "state", "hostname", "machine_id", "arch", "os",
-    "public_key", "ip_prefix", "last_heartbeat",
-    "enrolled_at", "name",
+    "state",
+    "hostname",
+    "machine_id",
+    "arch",
+    "os",
+    "public_key",
+    "ip_prefix",
+    "last_heartbeat",
+    "enrolled_at",
+    "name",
 }
 
 
@@ -195,8 +202,8 @@ class NodeManager:
 
     async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
         """Query and cache active services and Docker containers for online node(s)."""
-        from master.plugins.systemd_plugin import parse_service_list
         from master.plugins.docker_plugin import parse_container_list
+        from master.plugins.systemd_plugin import parse_service_list
 
         db = get_db_conn()
         connected = [node_id] if node_id else self.connected_node_ids()
@@ -220,13 +227,17 @@ class NodeManager:
                 # 2. Get containers
                 containers_json = None
                 try:
-                    result = await self.send_intent(nid, {"action": "LIST_CONTAINERS"}, timeout=10.0)
+                    result = await self.send_intent(
+                        nid, {"action": "LIST_CONTAINERS"}, timeout=10.0
+                    )
                     if result.get("success"):
                         parsed = parse_container_list(result.get("output", ""))
                         if parsed is not None:
                             containers_json = json.dumps(parsed)
                 except Exception as ex:
-                    logger.warning("Cache updater: failed to get containers for node %s: %s", nid, ex)
+                    logger.warning(
+                        "Cache updater: failed to get containers for node %s: %s", nid, ex
+                    )
 
                 # 3. Save cache to DB
                 if services_json is not None or containers_json is not None:
@@ -238,7 +249,7 @@ class NodeManager:
                     if containers_json is not None:
                         fields.append("cached_containers_json = ?")
                         params.append(containers_json)
-                    
+
                     params.append(nid)
                     query = f"UPDATE nodes SET {', '.join(fields)} WHERE id = ?"
                     await db.execute(query, params)
@@ -262,38 +273,52 @@ class NodeManager:
                 try:
                     async with db.execute(
                         "SELECT insight_profile, insight_profile_generated_at FROM nodes WHERE id = ?",
-                        (nid,)
+                        (nid,),
                     ) as cursor:
                         row = await cursor.fetchone()
-                    
+
                     if row and row["insight_profile"]:
                         profile_dict = json.loads(row["insight_profile"])
                         generated_at = row["insight_profile_generated_at"] or 0.0
                         now = time.time()
-                        
+
                         # 7-day expiration check
                         expired_time = (now - generated_at) > 7 * 86400
-                        
+
                         # New containers check (with 24h cooldown to avoid LLM spam)
                         new_apps_detected = False
                         cooldown_ok = (now - generated_at) > 86400
-                        
+
                         if cooldown_ok and not expired_time and containers_json:
                             fresh_conts = parse_container_list(json.loads(containers_json))
-                            fresh_running = [c.get("name") for c in fresh_conts or [] if c.get("state") == "running" or "up" in c.get("status", "").lower()]
-                            known_conts = [p.get("container_name") for p in profile_dict.get("known_heavy_processes", []) if p.get("container_name")]
+                            fresh_running = [
+                                c.get("name")
+                                for c in fresh_conts or []
+                                if c.get("state") == "running"
+                                or "up" in c.get("status", "").lower()
+                            ]
+                            known_conts = [
+                                p.get("container_name")
+                                for p in profile_dict.get("known_heavy_processes", [])
+                                if p.get("container_name")
+                            ]
                             new_apps_detected = any(fc not in known_conts for fc in fresh_running)
-                                    
+
                         if expired_time or new_apps_detected:
                             logger.info(
                                 "Profile expiration / new apps detected for node %s (expired=%s, new_apps=%s). Regenerating profile...",
-                                nid, expired_time, new_apps_detected
+                                nid,
+                                expired_time,
+                                new_apps_detected,
                             )
                             from master.api.deps import get_insights_manager
+
                             im = get_insights_manager()
                             asyncio.create_task(im.generate_profile(nid, db, self, force=True))
                 except Exception as ex:
-                    logger.warning("Cache updater: failed to check profile expiration for node %s: %s", nid, ex)
+                    logger.warning(
+                        "Cache updater: failed to check profile expiration for node %s: %s", nid, ex
+                    )
             except Exception as ex:
                 logger.exception("Cache updater: error updating node %s: %s", nid, ex)
 
@@ -351,9 +376,7 @@ class NodeManager:
         Raises:
             ValueError  : if the transition is not allowed or node doesn't exist
         """
-        async with db.execute(
-            "SELECT state FROM nodes WHERE id = ?", (node_id,)
-        ) as cursor:
+        async with db.execute("SELECT state FROM nodes WHERE id = ?", (node_id,)) as cursor:
             row = await cursor.fetchone()
 
         if row is None:
@@ -361,9 +384,7 @@ class NodeManager:
 
         current_state = NodeState(row["state"])
         if (current_state, new_state) not in VALID_TRANSITIONS:
-            raise ValueError(
-                f"Invalid transition {current_state} → {new_state} for node {node_id}"
-            )
+            raise ValueError(f"Invalid transition {current_state} → {new_state} for node {node_id}")
 
         now = time.time()
         fields: dict[str, Any] = {"state": new_state.value, "updated_at": now}
@@ -544,8 +565,9 @@ class NodeManager:
 
             # Send type last to prevent intent dict from overwriting the message type
             await conn.websocket.send_json({**intent, "type": "INTENT"})
-            logger.info("Intent sent to node %s: action=%s id=%s",
-                        node_id, intent.get("action"), intent_id)
+            logger.info(
+                "Intent sent to node %s: action=%s id=%s", node_id, intent.get("action"), intent_id
+            )
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
@@ -574,7 +596,9 @@ class NodeManager:
 
         logger.info(
             "Heartbeat monitor: interval=%ds lost=%ds stale=%ds",
-            interval, lost_threshold, stale_threshold,
+            interval,
+            lost_threshold,
+            stale_threshold,
         )
         intent_cleanup_counter = 0
 
@@ -605,9 +629,10 @@ class NodeManager:
             self._intent_nodes.pop(intent_id, None)
             self._intent_created_at.pop(intent_id, None)
             self._intent_max_age.pop(intent_id, None)
-            future = self._pending_intents.pop(intent_id, None)
-            if future is not None and not future.done():
-                future.cancel()
+            if intent_id in self._pending_intents:
+                future = self._pending_intents.pop(intent_id)
+                if not future.done():
+                    future.cancel()
         count = len(stale_ids)
         if count:
             logger.warning("Cleaned up %d stale pending intents.", count)
@@ -618,9 +643,7 @@ class NodeManager:
         self._default_intent_max_age = value
         logger.info("Default intent max age updated to %.1fs", value)
 
-    async def _check_heartbeats(
-        self, lost_threshold: float, stale_threshold: float
-    ) -> None:
+    async def _check_heartbeats(self, lost_threshold: float, stale_threshold: float) -> None:
         """Check all nodes in the DB and update states based on heartbeat age."""
         db = get_db_conn()
         now = time.time()
@@ -631,9 +654,7 @@ class NodeManager:
         for node_id, conn in connected:
             age = conn.heartbeat_age()
             if age > lost_threshold:
-                logger.warning(
-                    "Node %s: no heartbeat for %.0fs — marking LOST", node_id, age
-                )
+                logger.warning("Node %s: no heartbeat for %.0fs — marking LOST", node_id, age)
                 await self.unregister_connection(node_id)
                 try:
                     await self.transition_state(db, node_id, NodeState.LOST)
@@ -672,12 +693,8 @@ class NodeManager:
     # Query helpers
     # -----------------------------------------------------------------------
 
-    async def get_node(
-        self, db: aiosqlite.Connection, node_id: str
-    ) -> dict[str, Any] | None:
-        async with db.execute(
-            "SELECT * FROM nodes WHERE id = ?", (node_id,)
-        ) as cursor:
+    async def get_node(self, db: aiosqlite.Connection, node_id: str) -> dict[str, Any] | None:
+        async with db.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)) as cursor:
             row = await cursor.fetchone()
         if row is None:
             return None
@@ -686,8 +703,12 @@ class NodeManager:
         return d
 
     async def list_nodes(
-        self, db: aiosqlite.Connection, *, state: str | None = None,
-        limit: int | None = None, offset: int | None = None,
+        self,
+        db: aiosqlite.Connection,
+        *,
+        state: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         """List nodes, optionally filtered by state, with pagination."""
         if state:

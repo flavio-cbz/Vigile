@@ -1,11 +1,14 @@
 import json
-import pytest
 import unittest.mock as mock
+
+import pytest
+
 from master.core.llm_client import LLMClient, LLMError
 
 
 class _MockStreamResponse:
     """Simulates a streaming httpx response for the stream method."""
+
     def __init__(self, lines, status=200):
         self.status_code = status
         self._lines = lines
@@ -215,7 +218,8 @@ async def test_stream_various_lines_and_tool_calls():
         "not a data line",
         "data: invalid_json{",
         "data: " + json.dumps({"choices": []}),
-        "data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{"id": "tc1", "type": "function"}]}}]}),
+        "data: "
+        + json.dumps({"choices": [{"delta": {"tool_calls": [{"id": "tc1", "type": "function"}]}}]}),
     ]
     mock_resp = _MockStreamResponse(chunks, 200)
     client = _make_client()

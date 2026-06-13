@@ -1,10 +1,13 @@
-import pytest
 import asyncio
-import aiosqlite
 import time
 import unittest.mock as mock
 from unittest.mock import AsyncMock, MagicMock
-from master.core.node_manager import NodeManager, NodeState, ActiveConnection
+
+import aiosqlite
+import pytest
+
+from master.core.node_manager import ActiveConnection, NodeManager, NodeState
+
 
 class DummyWebSocket:
     def __init__(self):
@@ -20,6 +23,7 @@ class DummyWebSocket:
         self.closed = True
         self.close_code = code
         self.close_reason = reason
+
 
 @pytest.mark.asyncio
 async def test_node_manager_lifecycle(db: aiosqlite.Connection, node_manager: NodeManager):
@@ -66,7 +70,10 @@ async def test_node_manager_lifecycle(db: aiosqlite.Connection, node_manager: No
 
     # Test invalid field in extra_fields
     with pytest.raises(ValueError):
-        await node_manager.transition_state(db, node_id, NodeState.LOST, extra_fields={"invalid_field": "x"})
+        await node_manager.transition_state(
+            db, node_id, NodeState.LOST, extra_fields={"invalid_field": "x"}
+        )
+
 
 @pytest.mark.asyncio
 async def test_node_manager_connections(node_manager: NodeManager):
@@ -105,6 +112,7 @@ async def test_node_manager_connections(node_manager: NodeManager):
     assert not await node_manager.is_connected(node_id)
     assert node_manager.connected_node_ids() == []
 
+
 @pytest.mark.asyncio
 async def test_node_manager_intents(node_manager: NodeManager):
     node_id = "test-node-intents"
@@ -112,7 +120,7 @@ async def test_node_manager_intents(node_manager: NodeManager):
     await node_manager.register_connection(node_id, ws)
 
     intent = {"action": "TEST", "params": {"x": 1}}
-    
+
     # Run send_intent in background
     task = asyncio.create_task(node_manager.send_intent(node_id, intent, timeout=1.0))
     await asyncio.sleep(0.05)  # Let it send
@@ -137,6 +145,7 @@ async def test_node_manager_intents(node_manager: NodeManager):
     with pytest.raises(TimeoutError):
         await node_manager.send_intent(node_id, {"action": "TEST"}, timeout=0.01)
 
+
 @pytest.mark.asyncio
 async def test_node_manager_revocation(db: aiosqlite.Connection, node_manager: NodeManager):
     node_id = await node_manager.create_node(db, name="revoked-node")
@@ -146,7 +155,7 @@ async def test_node_manager_revocation(db: aiosqlite.Connection, node_manager: N
     # Insert a dummy worker token so we can check if it gets revoked
     await db.execute(
         "INSERT INTO worker_tokens (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, 0)",
-        ("token_id_1", node_id, "dummy_hash", time.time(), time.time() + 3600, time.time() + 7200)
+        ("token_id_1", node_id, "dummy_hash", time.time(), time.time() + 3600, time.time() + 7200),
     )
     await db.commit()
 
@@ -162,15 +171,19 @@ async def test_node_manager_revocation(db: aiosqlite.Connection, node_manager: N
     assert not await node_manager.is_connected(node_id)
 
     # Verify token revoked in DB
-    async with db.execute("SELECT revoked, revoked_by FROM worker_tokens WHERE node_id = ?", (node_id,)) as cur:
+    async with db.execute(
+        "SELECT revoked, revoked_by FROM worker_tokens WHERE node_id = ?", (node_id,)
+    ) as cur:
         row = await cur.fetchone()
         assert row["revoked"] == 1
         assert row["revoked_by"] == "admin"
+
 
 @pytest.mark.asyncio
 async def test_node_manager_heartbeat_monitor(db: aiosqlite.Connection, node_manager: NodeManager):
     # Set up global DB connection mock/hack if needed
     import master.core.node_manager as nm
+
     original_get_db = nm.get_db_conn
     nm.get_db_conn = lambda: db
 
@@ -208,8 +221,7 @@ async def test_node_manager_heartbeat_monitor(db: aiosqlite.Connection, node_man
         # Now test LOST -> STALE transition
         # We manually update database last_heartbeat for node-1
         await db.execute(
-            "UPDATE nodes SET last_heartbeat = ? WHERE id = ?",
-            (time.time() - 90000, node_id_1)
+            "UPDATE nodes SET last_heartbeat = ? WHERE id = ?", (time.time() - 90000, node_id_1)
         )
         await db.commit()
 
@@ -220,6 +232,7 @@ async def test_node_manager_heartbeat_monitor(db: aiosqlite.Connection, node_man
 
     finally:
         nm.get_db_conn = original_get_db
+
 
 @pytest.mark.asyncio
 async def test_node_manager_startup_shutdown(node_manager: NodeManager):
@@ -238,6 +251,7 @@ async def test_node_manager_startup_shutdown(node_manager: NodeManager):
     assert ws.close_code == 1001
     assert node_manager.connected_node_ids() == []
 
+
 @pytest.mark.asyncio
 async def test_cleanup_stale_intents(node_manager: NodeManager):
     # Setup some futures
@@ -255,13 +269,16 @@ async def test_cleanup_stale_intents(node_manager: NodeManager):
     assert "i2" not in node_manager._pending_intents
 
 
-
 @pytest.mark.asyncio
-async def test_node_manager_websocket_close_exceptions(db: aiosqlite.Connection, node_manager: NodeManager):
+async def test_node_manager_websocket_close_exceptions(
+    db: aiosqlite.Connection, node_manager: NodeManager
+):
     node_id = "test-node-ws-exc"
     ws = DummyWebSocket()
+
     async def bad_close(*args, **kwargs):
         raise RuntimeError("Websocket close failed")
+
     ws.close = bad_close
 
     # Register first connection
@@ -276,7 +293,7 @@ async def test_node_manager_websocket_close_exceptions(db: aiosqlite.Connection,
     await node_manager.register_connection(node_id, ws)
     await db.execute(
         "INSERT INTO nodes (id, name, state, created_at, updated_at) VALUES (?, 'name', 'CONNECTED', ?, ?)",
-        (node_id, time.time(), time.time())
+        (node_id, time.time(), time.time()),
     )
     await db.commit()
     await node_manager.revoke_node(db, node_id, revoked_by="admin")
@@ -289,7 +306,9 @@ async def test_node_manager_websocket_close_exceptions(db: aiosqlite.Connection,
 
 
 @pytest.mark.asyncio
-async def test_node_manager_transition_nonexistent_node(db: aiosqlite.Connection, node_manager: NodeManager):
+async def test_node_manager_transition_nonexistent_node(
+    db: aiosqlite.Connection, node_manager: NodeManager
+):
     with pytest.raises(ValueError) as excinfo:
         await node_manager.transition_state(db, "nonexistent-node-id", NodeState.LOST)
     assert "node not found" in str(excinfo.value).lower()
@@ -312,8 +331,11 @@ async def test_node_manager_unregister_cancels_pending_intents(node_manager: Nod
 
 
 @pytest.mark.asyncio
-async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection, node_manager: NodeManager):
+async def test_node_manager_monitor_loop_and_exceptions(
+    db: aiosqlite.Connection, node_manager: NodeManager
+):
     import master.core.node_manager as nm
+
     original_get_db = nm.get_db_conn
     nm.get_db_conn = lambda: db
 
@@ -321,6 +343,7 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
         # Mock _check_heartbeats to raise an exception once to cover exception branch in monitor loop
         calls = 0
         original_check_hb = node_manager._check_heartbeats
+
         async def mock_check_heartbeats(*args, **kwargs):
             nonlocal calls
             calls += 1
@@ -339,6 +362,7 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
         # Mock asyncio.sleep to run virtualized tiny sleep durations instantly
         sleep_count = 0
         original_sleep = asyncio.sleep
+
         async def mock_sleep(delay):
             nonlocal sleep_count
             if delay < 0.01:
@@ -349,14 +373,16 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
 
         with mock.patch("asyncio.sleep", mock_sleep):
             # Start the monitor with extremely small interval to quickly complete 10+ cycles
-            await node_manager.start(heartbeat_interval=0.0001, lost_threshold=5, stale_threshold=10)
-            
+            await node_manager.start(
+                heartbeat_interval=0.0001, lost_threshold=5, stale_threshold=10
+            )
+
             # Wait deterministically until calls reaches at least 12
             for _ in range(50):
                 if calls >= 12:
                     break
                 await original_sleep(0.01)
-                
+
             await node_manager.stop()
 
         # The future should be cleaned up by the loop's stale intents cleanup
@@ -375,7 +401,7 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
         # Mock transition_state to raise exception during transition to LOST
         async def bad_transition(*args, **kwargs):
             raise RuntimeError("Database constraint failed")
-        
+
         node_manager.transition_state = bad_transition
         # Executing check heartbeats should not crash, it will log the exception
         await original_check_hb(lost_threshold=300, stale_threshold=86400)
@@ -385,7 +411,7 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
         node_id_2 = "node-err-2"
         await db.execute(
             "INSERT INTO nodes (id, name, state, created_at, updated_at, last_heartbeat) VALUES (?, 'node-err-2', 'LOST', ?, ?, ?)",
-            (node_id_2, time.time(), time.time(), time.time() - 90000)
+            (node_id_2, time.time(), time.time(), time.time() - 90000),
         )
         await db.commit()
 
@@ -399,22 +425,22 @@ async def test_node_manager_monitor_loop_and_exceptions(db: aiosqlite.Connection
 @pytest.mark.asyncio
 async def test_re_enrollment_transitions(db: aiosqlite.Connection, node_manager: NodeManager):
     node_id = await node_manager.create_node(db, name="reenroll-node")
-    
+
     # 1. PENDING -> ENROLLING -> CONNECTED
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
     await node_manager.transition_state(db, node_id, NodeState.CONNECTED)
-    
+
     # 2. CONNECTED -> LOST -> ENROLLING (Re-enrollment)
     await node_manager.transition_state(db, node_id, NodeState.LOST)
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
     await node_manager.transition_state(db, node_id, NodeState.CONNECTED)
-    
+
     # 3. CONNECTED -> LOST -> STALE -> ENROLLING (Re-enrollment)
     await node_manager.transition_state(db, node_id, NodeState.LOST)
     await node_manager.transition_state(db, node_id, NodeState.STALE)
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
     await node_manager.transition_state(db, node_id, NodeState.CONNECTED)
-    
+
     # 4. CONNECTED -> RECONNECTING -> ENROLLING (Re-enrollment)
     await node_manager.transition_state(db, node_id, NodeState.RECONNECTING)
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
@@ -425,21 +451,21 @@ async def test_send_intent_finally_cleanup_on_cancel(node_manager: NodeManager):
     node_id = "test-node-finally-cancel"
     ws = DummyWebSocket()
     await node_manager.register_connection(node_id, ws)
-    
+
     intent = {"action": "TEST"}
     task = asyncio.create_task(node_manager.send_intent(node_id, intent, timeout=10.0))
     await asyncio.sleep(0.01)
-    
+
     # Assert intent is registered
     intent_id = list(node_manager._pending_intents.keys())[0]
     assert intent_id in node_manager._pending_intents
     assert intent_id in node_manager._intent_nodes
-    
+
     # Cancel the task
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-        
+
     # Assert dictionary is cleaned up after cancellation due to finally block
     assert intent_id not in node_manager._pending_intents
     assert intent_id not in node_manager._intent_nodes

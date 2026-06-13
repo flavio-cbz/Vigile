@@ -30,6 +30,7 @@ import uuid
 from typing import Any
 
 import aiosqlite
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -40,21 +41,27 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     PublicFormat,
 )
-from cryptography.exceptions import InvalidSignature
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
+
 class SecurityError(Exception):
     """Base exception for all security issues."""
+
     pass
+
 
 class InvalidTokenError(SecurityError):
     """Raised when a token signature is invalid, format is incorrect, or token type mismatch."""
+
     pass
+
 
 class ExpiredTokenError(SecurityError):
     """Raised when a token has expired."""
+
     pass
+
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +126,15 @@ class SecurityManager:
 
         # Derive isolated JWT secrets for each token class (B7)
         jwt_secret_bytes = jwt_secret.encode()
-        self._jwt_access_secret: str = hmac.new(jwt_secret_bytes, b"user_access_token", hashlib.sha256).hexdigest()
-        self._jwt_refresh_secret: str = hmac.new(jwt_secret_bytes, b"user_refresh_token", hashlib.sha256).hexdigest()
-        self._jwt_worker_secret: str = hmac.new(jwt_secret_bytes, b"worker_token", hashlib.sha256).hexdigest()
+        self._jwt_access_secret: str = hmac.new(
+            jwt_secret_bytes, b"user_access_token", hashlib.sha256
+        ).hexdigest()
+        self._jwt_refresh_secret: str = hmac.new(
+            jwt_secret_bytes, b"user_refresh_token", hashlib.sha256
+        ).hexdigest()
+        self._jwt_worker_secret: str = hmac.new(
+            jwt_secret_bytes, b"worker_token", hashlib.sha256
+        ).hexdigest()
 
         # Keypair: caller provides a pre-loaded Ed25519PrivateKey
         # If None, a fresh keypair is generated (dev mode, NOT for production)
@@ -131,9 +144,7 @@ class SecurityManager:
         self._master_private_key: Ed25519PrivateKey = master_private_key
         self._master_public_key: Ed25519PublicKey = self._master_private_key.public_key()
 
-        raw = self._master_public_key.public_bytes(
-            encoding=Encoding.Raw, format=PublicFormat.Raw
-        )
+        raw = self._master_public_key.public_bytes(encoding=Encoding.Raw, format=PublicFormat.Raw)
         self._master_public_key_b64: str = base64.urlsafe_b64encode(raw).decode()
         self.audit_compromised: bool = False
         logger.info("SecurityManager initialized.")
@@ -443,7 +454,8 @@ def load_or_generate_master_key(key_path: str) -> Ed25519PrivateKey:
                 logger.warning(
                     "Master Ed25519 key has insecure permissions: %o (expected 600). "
                     "Fix with: chmod 600 %s",
-                    st_mode, key_path,
+                    st_mode,
+                    key_path,
                 )
         except OSError:
             logger.warning("Could not check permissions on %s", key_path)
@@ -505,7 +517,5 @@ def init_security(
 def get_security_instance() -> SecurityManager:
     """Return the initialized SecurityManager or raise."""
     if _security_instance is None:
-        raise RuntimeError(
-            "SecurityManager not initialized. Call init_security() first."
-        )
+        raise RuntimeError("SecurityManager not initialized. Call init_security() first.")
     return _security_instance

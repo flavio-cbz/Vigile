@@ -1,7 +1,9 @@
-import pytest
 import asyncio
+from unittest.mock import AsyncMock, patch
+
 import aiosqlite
-from unittest.mock import patch, AsyncMock
+import pytest
+
 from master.core.node_manager import NodeManager
 
 
@@ -24,9 +26,15 @@ async def test_cache_update_creates_audit_entry(db: aiosqlite.Connection):
 
     async def mock_send_intent(node_id, intent, *, timeout=30.0, intent_max_age=None):
         if intent["action"] == "LIST_SERVICES":
-            return {"success": True, "output": '[{"name": "nginx.service", "state": "active", "status": "running"}]'}
+            return {
+                "success": True,
+                "output": '[{"name": "nginx.service", "state": "active", "status": "running"}]',
+            }
         elif intent["action"] == "LIST_CONTAINERS":
-            return {"success": True, "output": '[{"id": "abc123", "name": "web", "image": "nginx", "state": "running"}]'}
+            return {
+                "success": True,
+                "output": '[{"id": "abc123", "name": "web", "image": "nginx", "state": "running"}]',
+            }
         return {"success": False}
 
     with (
@@ -59,7 +67,10 @@ async def test_cache_update_audit_details(db: aiosqlite.Connection):
         call_count += 1
         if call_count == 1:
             # Services request returns valid data
-            return {"success": True, "output": '[{"name": "nginx.service", "state": "active", "status": "running"}]'}
+            return {
+                "success": True,
+                "output": '[{"name": "nginx.service", "state": "active", "status": "running"}]',
+            }
         # Container request fails
         return {"success": False}
 
@@ -78,6 +89,7 @@ async def test_cache_update_audit_details(db: aiosqlite.Connection):
             rows = await cursor.fetchall()
             assert len(rows) >= 1
             import json
+
             details = json.loads(rows[0]["details_json"])
             assert details["services_updated"] is True
             assert details["containers_updated"] is False
@@ -105,6 +117,4 @@ async def test_cache_update_no_write_no_audit(db: aiosqlite.Connection):
             ("CACHE_REFRESH", "test-node-no-cache"),
         ) as cursor:
             row = await cursor.fetchone()
-            assert row["cnt"] == 0, (
-                "No audit entry expected when no cache data was written"
-            )
+            assert row["cnt"] == 0, "No audit entry expected when no cache data was written"

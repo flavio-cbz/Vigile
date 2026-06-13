@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # Data model for a metrics snapshot from a Worker
 # ---------------------------------------------------------------------------
 
+
 class MetricsSnapshot(BaseModel):
     """
     Validated schema for a STATUS_REPORT from a Worker node.
@@ -41,71 +42,89 @@ class MetricsSnapshot(BaseModel):
 
     # CPU
     cpu_percent: float = Field(
-        default=0.0, ge=0.0, le=100.0,
+        default=0.0,
+        ge=0.0,
+        le=100.0,
         description="CPU usage as percentage (0-100)",
     )
     cpu_load_1m: float | None = Field(
-        default=None, ge=0.0,
+        default=None,
+        ge=0.0,
         description="CPU load average over 1 minute",
     )
     cpu_load_5m: float | None = Field(
-        default=None, ge=0.0,
+        default=None,
+        ge=0.0,
         description="CPU load average over 5 minutes",
     )
     cpu_load_15m: float | None = Field(
-        default=None, ge=0.0,
+        default=None,
+        ge=0.0,
         description="CPU load average over 15 minutes",
     )
     cpu_cores: int | None = Field(
-        default=None, ge=1,
+        default=None,
+        ge=1,
         description="Number of CPU cores detected",
     )
 
     # Memory
     mem_total_bytes: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Total physical RAM in bytes",
     )
     mem_used_bytes: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Used physical RAM in bytes",
     )
     mem_percent: float = Field(
-        default=0.0, ge=0.0, le=100.0,
+        default=0.0,
+        ge=0.0,
+        le=100.0,
         description="Memory usage as percentage (0-100)",
     )
 
     # Swap
     swap_total_bytes: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Total swap space in bytes",
     )
     swap_used_bytes: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Used swap space in bytes",
     )
 
     # Disk
     disk_total_bytes: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Total disk space in bytes (root partition)",
     )
     disk_used_bytes: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Used disk space in bytes (root partition)",
     )
     disk_percent: float = Field(
-        default=0.0, ge=0.0, le=100.0,
+        default=0.0,
+        ge=0.0,
+        le=100.0,
         description="Disk usage as percentage (0-100)",
     )
 
     # System
     uptime_seconds: float = Field(
-        default=0.0, ge=0.0,
+        default=0.0,
+        ge=0.0,
         description="System uptime in seconds",
     )
     processes: int | None = Field(
-        default=None, ge=0,
+        default=None,
+        ge=0,
         description="Number of running processes",
     )
 
@@ -149,6 +168,7 @@ class MetricsSnapshot(BaseModel):
 # Plugin registration
 # ---------------------------------------------------------------------------
 
+
 def register(pm) -> None:
     """
     Register metrics plugin hooks.
@@ -181,6 +201,7 @@ def register(pm) -> None:
 # Hook implementations
 # ---------------------------------------------------------------------------
 
+
 def get_config_schema() -> dict[str, Any]:
     """Return plugin info and configuration schema."""
     return {
@@ -192,15 +213,15 @@ def get_config_schema() -> dict[str, Any]:
                 "type": "integer",
                 "title": "Polling Interval (seconds)",
                 "default": 60,
-                "description": "Frequency of metrics collection reports sent from the worker."
+                "description": "Frequency of metrics collection reports sent from the worker.",
             },
             "retention_days": {
                 "type": "integer",
                 "title": "Metrics Retention (days)",
                 "default": 30,
-                "description": "Number of days to keep historical metrics snapshots in the database."
-            }
-        }
+                "description": "Number of days to keep historical metrics snapshots in the database.",
+            },
+        },
     }
 
 
@@ -228,8 +249,12 @@ def _normalize_status_report(raw_report: dict) -> dict | None:
 
     try:
         snapshot = MetricsSnapshot(**data)
-        logger.debug("Status report normalized: CPU=%.1f%% MEM=%.1f%% DISK=%.1f%%",
-                     snapshot.cpu_percent, snapshot.mem_percent, snapshot.disk_percent)
+        logger.debug(
+            "Status report normalized: CPU=%.1f%% MEM=%.1f%% DISK=%.1f%%",
+            snapshot.cpu_percent,
+            snapshot.mem_percent,
+            snapshot.disk_percent,
+        )
         return snapshot.model_dump_flat()
     except Exception as exc:
         logger.warning("Invalid status report: %s", exc)
@@ -248,15 +273,14 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
     cpu = snapshot.get("cpu_percent", 0)
     mem = snapshot.get("mem_percent", 0)
     disk = snapshot.get("disk_percent", 0)
-    logger.info("Metrics [%s]: CPU=%.1f%% MEM=%.1f%% DISK=%.1f%%",
-                node_id, cpu, mem, disk)
+    logger.info("Metrics [%s]: CPU=%.1f%% MEM=%.1f%% DISK=%.1f%%", node_id, cpu, mem, disk)
 
     if db is None:
         logger.debug("on_status_report: no DB handle — skipping persistence")
         return
 
-    import uuid
     import time
+    import uuid
 
     now = time.time()
     row_id = str(uuid.uuid4())
@@ -273,7 +297,10 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            row_id, node_id, snapshot.get("collected_at", now), now,
+            row_id,
+            node_id,
+            snapshot.get("collected_at", now),
+            now,
             snapshot.get("cpu_percent", 0),
             snapshot.get("cpu_load_1m"),
             snapshot.get("cpu_load_5m"),

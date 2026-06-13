@@ -50,7 +50,7 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
   };
 
   // Safe parameters extraction
-  const parsedParams = typeof proposal.params === 'object' ? proposal.params : 
+  const parsedParams = typeof proposal.params === 'object' ? proposal.params :
                        (proposal as any).params_json ? (() => {
                          try {
                            return JSON.parse((proposal as any).params_json);
@@ -59,10 +59,10 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
                          }
                        })() : {};
 
-  const displayTarget = proposal.target || 
-                        parsedParams?.service || 
-                        parsedParams?.container_id || 
-                        parsedParams?.container || 
+  const displayTarget = proposal.target ||
+                        parsedParams?.service ||
+                        parsedParams?.container_id ||
+                        parsedParams?.container ||
                         'Système';
 
   // Highlight pending actions based on risk level for enhanced operator awareness

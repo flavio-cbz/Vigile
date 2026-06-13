@@ -7,7 +7,7 @@ import { TimeAgo } from '../primitives/TimeAgo';
 export const NotifBell: React.FC = () => {
   const { nodes } = useNodeStore();
   const { openCopilot } = useUiStore();
-  
+
   const [isOpen, setIsOpen] = useState(false);
   const [proposals, setProposals] = useState<any[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);

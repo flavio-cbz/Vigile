@@ -1,13 +1,15 @@
 import time
-import pytest
 import unittest.mock as mock
+
+import pytest
 from fastapi import status
 from httpx import AsyncClient
-from master.main import app
+
 from master.api import deps
-from master.core.security_manager import SecurityManager
+from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
 from master.core.node_manager import node_manager
-from master.core.insights import NodeProfile, HeavyProcessConfig, DiagnosticReport
+from master.core.security_manager import SecurityManager
+from master.main import app
 
 
 @pytest.fixture
@@ -18,12 +20,14 @@ def auth_headers(security: SecurityManager):
         username = "guest" if demo else "test_user"
         token = security.create_access_token(sub, username, role)
         return {"Authorization": f"Bearer {token}"}
+
     return _make
 
 
 @pytest.fixture
 async def client(db):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     app.dependency_overrides[deps.get_db] = lambda: db
     app.state.master_url = "http://test"
     transport = ASGITransport(app=app)
@@ -35,6 +39,7 @@ async def client(db):
 @pytest.fixture(autouse=True)
 def clear_rate_limiter():
     from master.core.rate_limiter import rate_limiter
+
     rate_limiter._buckets.clear()
 
 
@@ -42,15 +47,13 @@ def clear_rate_limiter():
 async def test_get_node_insights_demo(client: AsyncClient, auth_headers):
     # Viewer cannot access insights, Operator or Admin is required
     response = await client.get(
-        "/api/nodes/demo-node-99/insights",
-        headers=auth_headers("viewer", demo=True)
+        "/api/nodes/demo-node-99/insights", headers=auth_headers("viewer", demo=True)
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
     # Operator role can access
     response = await client.get(
-        "/api/nodes/demo-node-99/insights",
-        headers=auth_headers("operator", demo=True)
+        "/api/nodes/demo-node-99/insights", headers=auth_headers("operator", demo=True)
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -79,7 +82,7 @@ async def test_get_node_insights_real(client: AsyncClient, db, auth_headers):
             now,
             now,
             now,
-        )
+        ),
     )
     # Insert a metrics snapshot
     await db.execute(
@@ -87,14 +90,11 @@ async def test_get_node_insights_real(client: AsyncClient, db, auth_headers):
         INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds)
         VALUES ('snap-1', ?, ?, ?, 15.0, 8589934592, 4294967296, 50.0, 0, 0, 107374182400, 21474836480, 20.0, 1000)
         """,
-        (node_id, now, now)
+        (node_id, now, now),
     )
     await db.commit()
 
-    response = await client.get(
-        f"/api/nodes/{node_id}/insights",
-        headers=auth_headers("operator")
-    )
+    response = await client.get(f"/api/nodes/{node_id}/insights", headers=auth_headers("operator"))
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["node_id"] == node_id
@@ -106,8 +106,7 @@ async def test_get_node_insights_real(client: AsyncClient, db, auth_headers):
 @pytest.mark.asyncio
 async def test_regenerate_profile_demo(client: AsyncClient, auth_headers):
     response = await client.post(
-        "/api/nodes/demo-node-99/profile/regenerate",
-        headers=auth_headers("operator", demo=True)
+        "/api/nodes/demo-node-99/profile/regenerate", headers=auth_headers("operator", demo=True)
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -122,13 +121,12 @@ async def test_regenerate_profile_real(client: AsyncClient, db, auth_headers):
     await db.execute(
         "INSERT INTO nodes (id, name, hostname, state, created_at, updated_at) "
         "VALUES (?, 'Test Node 2', 'test-host-2', 'CONNECTED', ?, ?)",
-        (node_id, now, now)
+        (node_id, now, now),
     )
     await db.commit()
 
     response = await client.post(
-        f"/api/nodes/{node_id}/profile/regenerate",
-        headers=auth_headers("operator")
+        f"/api/nodes/{node_id}/profile/regenerate", headers=auth_headers("operator")
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -145,8 +143,7 @@ async def test_regenerate_profile_real(client: AsyncClient, db, auth_headers):
 @pytest.mark.asyncio
 async def test_analyze_anomaly_demo(client: AsyncClient, auth_headers):
     response = await client.post(
-        "/api/nodes/demo-node-99/insights/analyze",
-        headers=auth_headers("operator", demo=True)
+        "/api/nodes/demo-node-99/insights/analyze", headers=auth_headers("operator", demo=True)
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -161,21 +158,20 @@ async def test_analyze_anomaly_real(client: AsyncClient, db, auth_headers):
     await db.execute(
         "INSERT INTO nodes (id, name, hostname, state, created_at, updated_at) "
         "VALUES (?, 'Test Node 3', 'test-host-3', 'CONNECTED', ?, ?)",
-        (node_id, now, now)
+        (node_id, now, now),
     )
     await db.execute(
         """
         INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds)
         VALUES ('snap-3', ?, ?, ?, 95.0, 8589934592, 8000000000, 93.0, 0, 0, 107374182400, 21474836480, 20.0, 1000)
         """,
-        (node_id, now, now)
+        (node_id, now, now),
     )
     await db.commit()
 
     # Stub the structured LLM or let it fall back
     response = await client.post(
-        f"/api/nodes/{node_id}/insights/analyze",
-        headers=auth_headers("operator")
+        f"/api/nodes/{node_id}/insights/analyze", headers=auth_headers("operator")
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()

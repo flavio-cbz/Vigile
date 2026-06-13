@@ -26,7 +26,12 @@ class RateLimiter:
     Thread-safe via asyncio.Lock. Designed for single-process async apps.
     """
 
-    def __init__(self, max_requests: int = 60, window_seconds: int = 60, trusted_proxies: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        max_requests: int = 60,
+        window_seconds: int = 60,
+        trusted_proxies: list[str] | None = None,
+    ) -> None:
         self.max_requests = max_requests
         self.window = window_seconds
         self._buckets: dict[str, list[float]] = {}
@@ -89,8 +94,7 @@ class RateLimiter:
         now = time.time()
         async with self._lock:
             expired_keys = [
-                k for k, v in self._buckets.items()
-                if not v or now - v[-1] >= self.window
+                k for k, v in self._buckets.items() if not v or now - v[-1] >= self.window
             ]
             for k in expired_keys:
                 del self._buckets[k]
@@ -100,6 +104,7 @@ class RateLimiter:
         FastAPI middleware that rate-limits all requests by client IP.
         Skips WebSocket and static routes.
         """
+
         @app.middleware("http")
         async def _rate_limit_middleware(request: Request, call_next: Callable) -> Response:
             if request.url.path.startswith("/ws"):
@@ -140,9 +145,9 @@ class RateLimiter:
 
         return _dep
 
-
     def start_cleanup_task(self, app: FastAPI, interval: int = 300) -> asyncio.Task:
         """Start a background task that periodically cleans up expired buckets."""
+
         async def _cleanup_loop() -> None:
             while True:
                 try:
@@ -153,6 +158,7 @@ class RateLimiter:
                     break
                 except Exception:
                     logger.exception("Rate limiter cleanup error (will retry)")
+
         task = asyncio.create_task(_cleanup_loop(), name="rate_limiter_cleanup")
         logger.info("Rate limiter cleanup task started (interval=%ds).", interval)
         return task

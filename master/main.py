@@ -13,39 +13,36 @@ Run with:
     uvicorn master.main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-
 import asyncio
 import logging
 import os
 import sys
 import time
-
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 from pathlib import Path
+from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request, Response, WebSocket, HTTPException
-from fastapi import status
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from master.api.admin import router as admin_router
+from master.api.audit import router as audit_router
+from master.api.auth import router as auth_router
+from master.api.chat import router as chat_router
+from master.api.demo import router as demo_router
+from master.api.nodes import router as nodes_router
+from master.api.services import router as services_router
 from master.config import settings
-from master.db.database import close_db, init_db
-from master.db.migrations import run_migrations
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import plugin_manager
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import init_security, load_or_generate_master_key
-from master.api.auth import router as auth_router
-from master.api.nodes import router as nodes_router
-from master.api.services import router as services_router
-from master.api.chat import router as chat_router
-from master.api.audit import router as audit_router
-from master.api.admin import router as admin_router
-from master.api.demo import router as demo_router
+from master.db.database import close_db, init_db
+from master.db.migrations import run_migrations
 from master.ws.worker_handler import worker_join_handler
 
 # ---------------------------------------------------------------------------
@@ -95,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if override_path.exists():
         try:
             import json
+
             with override_path.open("r", encoding="utf-8") as f:
                 overrides = json.load(f)
             settings.apply_overrides(
@@ -163,10 +161,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.master_url = settings.master_url
     app.state.trusted_proxies = settings.trusted_proxies
     rate_limiter.trusted_proxies = settings.trusted_proxies
-    
+
     # 7. Start Rate Limiter Cleanup Task
     cleanup_task = rate_limiter.start_cleanup_task(app)
-    
+
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
@@ -191,8 +189,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Vigile — Master Node",
     description=(
-        "Fleet Manager for servers and homelabs. "
-        "Zero-Trust. Zero SSH. Human-in-the-Loop AI."
+        "Fleet Manager for servers and homelabs. " "Zero-Trust. Zero SSH. Human-in-the-Loop AI."
     ),
     version="0.5.0",
     docs_url="/api/docs",
@@ -206,16 +203,11 @@ app = FastAPI(
 async def custom_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     headers = getattr(exc, "headers", None)
     if isinstance(exc.detail, dict):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=exc.detail,
-            headers=headers
-        )
+        return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
     return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers=headers
+        status_code=exc.status_code, content={"detail": exc.detail}, headers=headers
     )
+
 
 # ---------------------------------------------------------------------------
 # Middleware
@@ -249,10 +241,14 @@ if "*" in settings.cors_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
         return response
 
+
 # Rate limiter (global middleware — excludes WebSocket)
 rate_limiter.middleware(app)
-logger.info("Rate limiter active: %d req/%ds per IP per route",
-            rate_limiter.max_requests, rate_limiter.window)
+logger.info(
+    "Rate limiter active: %d req/%ds per IP per route",
+    rate_limiter.max_requests,
+    rate_limiter.window,
+)
 
 # Session middleware (for flash messages, CSRF, etc.)
 app.add_middleware(SessionMiddleware, secret_key=settings.server_secret_key)
@@ -323,31 +319,33 @@ async def health_check() -> JSONResponse:
     Returns uptime, connected node count, and version.
     """
     uptime = time.time() - getattr(app.state, "startup_time", time.time())
-    return JSONResponse({
-        "status": "ok",
-        "version": "0.5.0",
-        "uptime_seconds": round(uptime, 1),
-        "connected_nodes": len(node_manager.connected_node_ids()),
-    })
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": "0.5.0",
+            "uptime_seconds": round(uptime, 1),
+            "connected_nodes": len(node_manager.connected_node_ids()),
+        }
+    )
 
 
 @app.exception_handler(404)
 async def spa_fallback_exception_handler(request: Request, exc: HTTPException) -> Response:
     """Serve static assets if they exist, otherwise fall back to SPA index.html."""
     path = request.url.path.lstrip("/")
-    
+
     # 1. Exclude API and WebSocket endpoints
     if path.startswith("api/") or path.startswith("ws/"):
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-        
+
     # 2. Check if requested file exists in the SPA dist folder
     file_path = Path("frontend/dist") / path
     if file_path.is_file():
         return FileResponse(file_path)
-        
+
     # 3. Fallback to index.html for client-side routing
     index_path = Path("frontend/dist/index.html")
     if index_path.exists():
         return FileResponse(index_path)
-        
+
     return JSONResponse(status_code=404, content={"detail": "Not Found"})

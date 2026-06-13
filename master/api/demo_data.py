@@ -128,6 +128,7 @@ def get_demo_node(node_id: str) -> dict[str, Any] | None:
 # Metrics snapshots (dynamic — generated at call time)
 # ---------------------------------------------------------------------------
 
+
 def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
     """Generate simulated time-series metrics for a demo node.
 
@@ -137,12 +138,78 @@ def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
 
     # Node profiles — different workloads
     profiles = {
-        "demo-node-01": {"cpu_base": 18, "mem_base": 0.35, "mem_scale": 0.30, "disk_base": 0.38, "disk_scale": 0.12, "cores": 8, "mem_gb": 16, "disk_gb": 500, "swap_gb": 2, "processes": 287},
-        "demo-node-02": {"cpu_base": 12, "mem_base": 0.55, "mem_scale": 0.15, "disk_base": 0.42, "disk_scale": 0.08, "cores": 4, "mem_gb": 32, "disk_gb": 2000, "swap_gb": 4, "processes": 198},
-        "demo-node-03": {"cpu_base": 8, "mem_base": 0.22, "mem_scale": 0.18, "disk_base": 0.15, "disk_scale": 0.10, "cores": 4, "mem_gb": 8, "disk_gb": 250, "swap_gb": 2, "processes": 145},
-        "demo-node-04": {"cpu_base": 35, "mem_base": 0.45, "mem_scale": 0.35, "disk_base": 0.55, "disk_scale": 0.20, "cores": 16, "mem_gb": 64, "disk_gb": 1000, "swap_gb": 8, "processes": 412},
-        "demo-node-05": {"cpu_base": 5, "mem_base": 0.10, "mem_scale": 0.05, "disk_base": 0.60, "disk_scale": 0.05, "cores": 2, "mem_gb": 4, "disk_gb": 120, "swap_gb": 1, "processes": 89},
-        "demo-node-06": {"cpu_base": 3, "mem_base": 0.08, "mem_scale": 0.04, "disk_base": 0.30, "disk_scale": 0.05, "cores": 2, "mem_gb": 4, "disk_gb": 60, "swap_gb": 1, "processes": 67},
+        "demo-node-01": {
+            "cpu_base": 18,
+            "mem_base": 0.35,
+            "mem_scale": 0.30,
+            "disk_base": 0.38,
+            "disk_scale": 0.12,
+            "cores": 8,
+            "mem_gb": 16,
+            "disk_gb": 500,
+            "swap_gb": 2,
+            "processes": 287,
+        },
+        "demo-node-02": {
+            "cpu_base": 12,
+            "mem_base": 0.55,
+            "mem_scale": 0.15,
+            "disk_base": 0.42,
+            "disk_scale": 0.08,
+            "cores": 4,
+            "mem_gb": 32,
+            "disk_gb": 2000,
+            "swap_gb": 4,
+            "processes": 198,
+        },
+        "demo-node-03": {
+            "cpu_base": 8,
+            "mem_base": 0.22,
+            "mem_scale": 0.18,
+            "disk_base": 0.15,
+            "disk_scale": 0.10,
+            "cores": 4,
+            "mem_gb": 8,
+            "disk_gb": 250,
+            "swap_gb": 2,
+            "processes": 145,
+        },
+        "demo-node-04": {
+            "cpu_base": 35,
+            "mem_base": 0.45,
+            "mem_scale": 0.35,
+            "disk_base": 0.55,
+            "disk_scale": 0.20,
+            "cores": 16,
+            "mem_gb": 64,
+            "disk_gb": 1000,
+            "swap_gb": 8,
+            "processes": 412,
+        },
+        "demo-node-05": {
+            "cpu_base": 5,
+            "mem_base": 0.10,
+            "mem_scale": 0.05,
+            "disk_base": 0.60,
+            "disk_scale": 0.05,
+            "cores": 2,
+            "mem_gb": 4,
+            "disk_gb": 120,
+            "swap_gb": 1,
+            "processes": 89,
+        },
+        "demo-node-06": {
+            "cpu_base": 3,
+            "mem_base": 0.08,
+            "mem_scale": 0.04,
+            "disk_base": 0.30,
+            "disk_scale": 0.05,
+            "cores": 2,
+            "mem_gb": 4,
+            "disk_gb": 60,
+            "swap_gb": 1,
+            "processes": 67,
+        },
     }
     profile = profiles.get(node_id, profiles["demo-node-01"])
 
@@ -154,29 +221,33 @@ def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
         spike = 40 if i % 7 == 3 and node_id in ("demo-node-01", "demo-node-04") else 0
         cpu = profile["cpu_base"] + (cycle * 0.5) % 30 + spike
         mem_gb = profile["mem_gb"]
-        mem_total = mem_gb * 1024 ** 3
+        mem_total = mem_gb * 1024**3
         mem_used = int(mem_total * (profile["mem_base"] + (cycle * 0.008) % profile["mem_scale"]))
         disk_gb = profile["disk_gb"]
-        disk_total = disk_gb * 1024 ** 3
-        disk_used = int(disk_total * (profile["disk_base"] + (cycle * 0.004) % profile["disk_scale"]))
-        snapshots.append({
-            "collected_at": t,
-            "cpu_percent": round(cpu, 1),
-            "cpu_load_1m": round(cpu * 0.8, 2),
-            "cpu_load_5m": round(cpu * 0.6, 2),
-            "cpu_load_15m": round(cpu * 0.4, 2),
-            "cpu_cores": profile["cores"],
-            "mem_total_bytes": mem_total,
-            "mem_used_bytes": mem_used,
-            "mem_percent": round(mem_used / mem_total * 100, 1),
-            "swap_total_bytes": profile["swap_gb"] * 1024 ** 3,
-            "swap_used_bytes": int(0.1 * profile["swap_gb"] * 1024 ** 3),
-            "disk_total_bytes": disk_total,
-            "disk_used_bytes": disk_used,
-            "disk_percent": round(disk_used / disk_total * 100, 1),
-            "uptime_seconds": 3600 * 24 * 14 + i * 60,
-            "processes": profile["processes"] + i % 10,
-        })
+        disk_total = disk_gb * 1024**3
+        disk_used = int(
+            disk_total * (profile["disk_base"] + (cycle * 0.004) % profile["disk_scale"])
+        )
+        snapshots.append(
+            {
+                "collected_at": t,
+                "cpu_percent": round(cpu, 1),
+                "cpu_load_1m": round(cpu * 0.8, 2),
+                "cpu_load_5m": round(cpu * 0.6, 2),
+                "cpu_load_15m": round(cpu * 0.4, 2),
+                "cpu_cores": profile["cores"],
+                "mem_total_bytes": mem_total,
+                "mem_used_bytes": mem_used,
+                "mem_percent": round(mem_used / mem_total * 100, 1),
+                "swap_total_bytes": profile["swap_gb"] * 1024**3,
+                "swap_used_bytes": int(0.1 * profile["swap_gb"] * 1024**3),
+                "disk_total_bytes": disk_total,
+                "disk_used_bytes": disk_used,
+                "disk_percent": round(disk_used / disk_total * 100, 1),
+                "uptime_seconds": 3600 * 24 * 14 + i * 60,
+                "processes": profile["processes"] + i % 10,
+            }
+        )
     return snapshots
 
 
@@ -342,7 +413,7 @@ _SYSLOG = [
     "May 23 10:14:30 web-01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=... SRC=45.33.32.156 DST=... PROTO=TCP DPT=22",
     "May 23 10:13:00 web-01 cron[9876]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
     "May 23 10:12:00 web-01 systemd[1]: Starting system activity accounting tool...",
-    "May 23 10:11:30 web-01 rsyslogd[789]: [origin software=\"rsyslogd\" swVersion=\"8.2312.0\" x-pid=\"789\"] start",
+    'May 23 10:11:30 web-01 rsyslogd[789]: [origin software="rsyslogd" swVersion="8.2312.0" x-pid="789"] start',
     "May 23 10:10:00 web-01 kernel: eth0: link up, 1000 Mbps full-duplex",
     "May 23 10:09:00 web-01 sshd[12345]: Failed password for root from 203.0.113.42 port 22 ssh2",
     "May 23 10:08:00 web-01 systemd[1]: Stopped Session 481 of user admin.",
@@ -370,6 +441,7 @@ def get_demo_logs(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ts(offset_seconds: float) -> float:
     """Return a timestamp offset from now."""
     return _NOW - offset_seconds
@@ -385,21 +457,24 @@ def _compute_audit_hash(
     details_json: str,
 ) -> str:
     """Compute a SHA256 entry hash matching the real audit chain formula."""
-    raw = "|".join([
-        previous_hash,
-        str(sequence),
-        f"{timestamp:.6f}",
-        action,
-        user_id,
-        node_id or "",
-        details_json,
-    ])
+    raw = "|".join(
+        [
+            previous_hash,
+            str(sequence),
+            f"{timestamp:.6f}",
+            action,
+            user_id,
+            node_id or "",
+            details_json,
+        ]
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
 # Action Proposals (mutable — in-memory)
 # ---------------------------------------------------------------------------
+
 
 def _initial_proposals() -> list[dict[str, Any]]:
     """Factory returning default proposal set."""
@@ -612,6 +687,7 @@ def update_demo_proposal(proposal_id: str, updates: dict[str, Any]) -> dict[str,
 # Chat Sessions (mutable — in-memory)
 # ---------------------------------------------------------------------------
 
+
 def _initial_chat_sessions() -> dict[str, dict[str, Any]]:
     """Factory returning default pre-seeded chat sessions."""
     return {
@@ -621,10 +697,22 @@ def _initial_chat_sessions() -> dict[str, dict[str, Any]]:
             "node_id": "demo-node-01",
             "title": "Analyse de performance",
             "history": [
-                {"role": "user", "content": "Peux-tu analyser les performances du processeur (CPU) sur prod-web-01 ?"},
-                {"role": "assistant", "content": "Voici mon analyse de **prod-web-01** (web-01.vigile.local) :\n\n**Processeur (CPU)** : Moyenne de 42.3% sur la dernière heure, avec un pic à 78% il y a 30 minutes. Ce pic est corrélé à une tâche de transcodage Plex.\n\n**Mémoire** : 7,2 Go / 16 Go utilisés (45%). Stable, aucune pression sur le swap.\n\n**Disque** : 210 Go / 500 Go utilisés (42%). Taux de croissance : +1,2 Go/jour — estimé à 242 jours avant saturation.\n\n**Conteneurs clés** sur ce nœud :\n- web-app (nginx) — actif, charge normale\n- reverse-proxy (traefik) — actif, certificats TLS OK\n- pg-replica — actif, délai de réplication 240ms\n- redis-cache — actif, taux de hit 94%\n\n**Recommandation** : Le pic de CPU est temporaire et reste dans les limites normales pour du transcodage Plex. Aucune action n'est requise."},
-                {"role": "user", "content": "Et pour la croissance du disque, devrais-je m'inquiéter ?"},
-                {"role": "assistant", "content": "Au rythme de croissance actuel de +1,2 Go/jour, vous disposez d'environ **242 jours** avant que le disque ne soit saturé.\n\nJe vous recommande de configurer une alerte de surveillance à 85% d'utilisation pour vous donner une marge de sécurité de 30 jours. La cause principale semble être les journaux applicatifs (logs) — vous devriez vérifier les paramètres de rotation des logs dans `/etc/logrotate.d/`.\n\nSouhaitez-vous que je propose une action de nettoyage de la rotation des logs ?"},
+                {
+                    "role": "user",
+                    "content": "Peux-tu analyser les performances du processeur (CPU) sur prod-web-01 ?",
+                },
+                {
+                    "role": "assistant",
+                    "content": "Voici mon analyse de **prod-web-01** (web-01.vigile.local) :\n\n**Processeur (CPU)** : Moyenne de 42.3% sur la dernière heure, avec un pic à 78% il y a 30 minutes. Ce pic est corrélé à une tâche de transcodage Plex.\n\n**Mémoire** : 7,2 Go / 16 Go utilisés (45%). Stable, aucune pression sur le swap.\n\n**Disque** : 210 Go / 500 Go utilisés (42%). Taux de croissance : +1,2 Go/jour — estimé à 242 jours avant saturation.\n\n**Conteneurs clés** sur ce nœud :\n- web-app (nginx) — actif, charge normale\n- reverse-proxy (traefik) — actif, certificats TLS OK\n- pg-replica — actif, délai de réplication 240ms\n- redis-cache — actif, taux de hit 94%\n\n**Recommandation** : Le pic de CPU est temporaire et reste dans les limites normales pour du transcodage Plex. Aucune action n'est requise.",
+                },
+                {
+                    "role": "user",
+                    "content": "Et pour la croissance du disque, devrais-je m'inquiéter ?",
+                },
+                {
+                    "role": "assistant",
+                    "content": "Au rythme de croissance actuel de +1,2 Go/jour, vous disposez d'environ **242 jours** avant que le disque ne soit saturé.\n\nJe vous recommande de configurer une alerte de surveillance à 85% d'utilisation pour vous donner une marge de sécurité de 30 jours. La cause principale semble être les journaux applicatifs (logs) — vous devriez vérifier les paramètres de rotation des logs dans `/etc/logrotate.d/`.\n\nSouhaitez-vous que je propose une action de nettoyage de la rotation des logs ?",
+                },
             ],
             "created_at": _ts(18000),
             "updated_at": _ts(1200),
@@ -636,11 +724,20 @@ def _initial_chat_sessions() -> dict[str, dict[str, Any]]:
             "title": "Vérification de l'état de la flotte",
             "history": [
                 {"role": "user", "content": "Quel est l'état actuel de mes nœuds ?"},
-                {"role": "assistant", "content": "Voici l'état actuel de votre flotte :\n\n• **prod-web-01** — ✅ Connecté | CPU: 42.3% | RAM: 7.2/16 Go\n• **prod-db-01** — ✅ Connecté | CPU: 18.7% | RAM: 18.5/32 Go\n• **stg-api-01** — ✅ Connecté | CPU: 12.1% | RAM: 2.1/8 Go\n• **dev-box-01** — ✅ Connecté | CPU: 68.4% | RAM: 31.2/64 Go\n• **lost-monitoring-01** — ⚠️ Perdu (dernier contact: il y a 3h)\n• **stale-cache-01** — ⚠️ Stale (heartbeat en retard)\n\n4 nœuds opérationnels sur 6. Les services critiques sont stables."},
+                {
+                    "role": "assistant",
+                    "content": "Voici l'état actuel de votre flotte :\n\n• **prod-web-01** — ✅ Connecté | CPU: 42.3% | RAM: 7.2/16 Go\n• **prod-db-01** — ✅ Connecté | CPU: 18.7% | RAM: 18.5/32 Go\n• **stg-api-01** — ✅ Connecté | CPU: 12.1% | RAM: 2.1/8 Go\n• **dev-box-01** — ✅ Connecté | CPU: 68.4% | RAM: 31.2/64 Go\n• **lost-monitoring-01** — ⚠️ Perdu (dernier contact: il y a 3h)\n• **stale-cache-01** — ⚠️ Stale (heartbeat en retard)\n\n4 nœuds opérationnels sur 6. Les services critiques sont stables.",
+                },
                 {"role": "user", "content": "Que s'est-il passé sur le nœud perdu ?"},
-                {"role": "assistant", "content": "Le nœud **lost-monitoring-01** (mon-01.cluster.internal) n'a pas envoyé de heartbeat depuis environ 3 heures. Cela peut indiquer :\n\n1. **Panne réseau** — le lien entre le Worker et le Master est coupé\n2. **Crash OS** — le serveur a planté et n'a pas redémarré\n3. **Surcharge** — le processus Worker a été tué par OOM Killer\n\nJe vous suggère de vérifier le dernier heartbeat et d'envisager une action de diagnostic si le nœud redevient joignable."},
+                {
+                    "role": "assistant",
+                    "content": "Le nœud **lost-monitoring-01** (mon-01.cluster.internal) n'a pas envoyé de heartbeat depuis environ 3 heures. Cela peut indiquer :\n\n1. **Panne réseau** — le lien entre le Worker et le Master est coupé\n2. **Crash OS** — le serveur a planté et n'a pas redémarré\n3. **Surcharge** — le processus Worker a été tué par OOM Killer\n\nJe vous suggère de vérifier le dernier heartbeat et d'envisager une action de diagnostic si le nœud redevient joignable.",
+                },
                 {"role": "user", "content": "Garde un œil là-dessus et préviens-moi si ça change."},
-                {"role": "assistant", "content": "Bien compris. Je surveille le nœud **lost-monitoring-01** et vous notifierai dès qu'un heartbeat est reçu ou qu'une action peut être prise. Vous pouvez aussi consulter la page d'audit pour voir l'historique complet des événements."},
+                {
+                    "role": "assistant",
+                    "content": "Bien compris. Je surveille le nœud **lost-monitoring-01** et vous notifierai dès qu'un heartbeat est reçu ou qu'une action peut être prise. Vous pouvez aussi consulter la page d'audit pour voir l'historique complet des événements.",
+                },
             ],
             "created_at": _ts(86400),
             "updated_at": _ts(3600),
@@ -651,10 +748,19 @@ def _initial_chat_sessions() -> dict[str, dict[str, Any]]:
             "node_id": "demo-node-01",
             "title": "Demande de redémarrage nginx",
             "history": [
-                {"role": "user", "content": "Le serveur web semble lent, peux-tu redémarrer nginx ?"},
-                {"role": "assistant", "content": "Je détecte effectivement une latence anormale sur nginx (temps de réponse moyen: 3.2s).\n\nAvant de redémarrer, je dois créer une proposition d'action pour validation humaine.\n\nVoici ce que je propose :\n\n**Action**: RESTART_SERVICE\n**Service**: nginx.service\n**Raison**: Latence élevée détectée, redémarrage pour réinitialiser les workers.\n**Risque**: MEDIUM\n\nVous pouvez approuver ou rejeter cette proposition depuis l'interface."},
+                {
+                    "role": "user",
+                    "content": "Le serveur web semble lent, peux-tu redémarrer nginx ?",
+                },
+                {
+                    "role": "assistant",
+                    "content": "Je détecte effectivement une latence anormale sur nginx (temps de réponse moyen: 3.2s).\n\nAvant de redémarrer, je dois créer une proposition d'action pour validation humaine.\n\nVoici ce que je propose :\n\n**Action**: RESTART_SERVICE\n**Service**: nginx.service\n**Raison**: Latence élevée détectée, redémarrage pour réinitialiser les workers.\n**Risque**: MEDIUM\n\nVous pouvez approuver ou rejeter cette proposition depuis l'interface.",
+                },
                 {"role": "user", "content": "D'accord, approuve-la."},
-                {"role": "assistant", "content": "✅ Proposition créée et soumise pour approbation. Rendez-vous dans l'onglet **Propositions** pour valider l'action.\n\nUne fois approuvée, l'exécution prendra environ 2-3 secondes et nginx sera opérationnel immédiatement après."},
+                {
+                    "role": "assistant",
+                    "content": "✅ Proposition créée et soumise pour approbation. Rendez-vous dans l'onglet **Propositions** pour valider l'action.\n\nUne fois approuvée, l'exécution prendra environ 2-3 secondes et nginx sera opérationnel immédiatement après.",
+                },
             ],
             "created_at": _ts(7200),
             "updated_at": _ts(3800),
@@ -666,9 +772,15 @@ def _initial_chat_sessions() -> dict[str, dict[str, Any]]:
             "title": "Rapport de sécurité",
             "history": [
                 {"role": "user", "content": "Donne-moi un rapport de sécurité complet."},
-                {"role": "assistant", "content": "## Rapport de sécurité — Vigile Demo\n\n### 🔒 Pare-feu\n• **UFW** — Actif | 3 règles actuellement chargées\n• Ports ouverts: 22, 80, 443, 8080\n\n### 🚨 Tentatives d'intrusion\n• **Dernière 24h**: 12 tentatives SSH bloquées (IP source: 203.0.113.42)\n• **fail2ban**: 3 IP bannies cette semaine\n\n### 🔑 Accès\n• Sessions actives: 2 (admin via web, guest en démo)\n• Clés SSH: Aucune clé compromise détectée\n\n### 📋 Recommandations\n1. Mettre à jour le noyau du nœud **stale-cache-01** (Debian 6.1.0-22)\n2. Activer le module de sécurité pour les conteneurs Docker\n3. Vérifier les logs d'authentification sur **lost-monitoring-01**"},
+                {
+                    "role": "assistant",
+                    "content": "## Rapport de sécurité — Vigile Demo\n\n### 🔒 Pare-feu\n• **UFW** — Actif | 3 règles actuellement chargées\n• Ports ouverts: 22, 80, 443, 8080\n\n### 🚨 Tentatives d'intrusion\n• **Dernière 24h**: 12 tentatives SSH bloquées (IP source: 203.0.113.42)\n• **fail2ban**: 3 IP bannies cette semaine\n\n### 🔑 Accès\n• Sessions actives: 2 (admin via web, guest en démo)\n• Clés SSH: Aucune clé compromise détectée\n\n### 📋 Recommandations\n1. Mettre à jour le noyau du nœud **stale-cache-01** (Debian 6.1.0-22)\n2. Activer le module de sécurité pour les conteneurs Docker\n3. Vérifier les logs d'authentification sur **lost-monitoring-01**",
+                },
                 {"role": "user", "content": "Y a-t-il des menaces actives ?"},
-                {"role": "assistant", "content": "Aucune menace active détectée sur les nœuds connectés. Les tentatives SSH bloquées par fail2ban sont routinières (moyenne de 15-20 tentatives/jour, typique pour un serveur exposé).\n\nJe vous recommande néanmoins de vérifier l'état du nœud **lost-monitoring-01** dès qu'il refait surface — une absence prolongée peut indiquer un compromis silencieux."},
+                {
+                    "role": "assistant",
+                    "content": "Aucune menace active détectée sur les nœuds connectés. Les tentatives SSH bloquées par fail2ban sont routinières (moyenne de 15-20 tentatives/jour, typique pour un serveur exposé).\n\nJe vous recommande néanmoins de vérifier l'état du nœud **lost-monitoring-01** dès qu'il refait surface — une absence prolongée peut indiquer un compromis silencieux.",
+                },
             ],
             "created_at": _ts(14400),
             "updated_at": _ts(4000),
@@ -743,8 +855,16 @@ _DEMO_AUDIT_RAW: list[tuple[str, str | None, dict[str, Any]]] = [
     ("LIST_NODES", None, {"filter": None}),
     ("GET_NODE_STATS", "demo-node-01", {"node_id": "demo-node-01"}),
     ("CHAT_MESSAGE", "demo-node-01", {"message_length": 42, "session_id": "demo-session-status"}),
-    ("PROPOSAL_CREATED", "demo-node-01", {"action": "RESTART_CONTAINER", "target": "web-app", "risk": "LOW"}),
-    ("PROPOSAL_APPROVED", "demo-node-01", {"proposal_id": None, "action": "RESTART_CONTAINER", "target": "web-app"}),
+    (
+        "PROPOSAL_CREATED",
+        "demo-node-01",
+        {"action": "RESTART_CONTAINER", "target": "web-app", "risk": "LOW"},
+    ),
+    (
+        "PROPOSAL_APPROVED",
+        "demo-node-01",
+        {"proposal_id": None, "action": "RESTART_CONTAINER", "target": "web-app"},
+    ),
     ("GENERATE_JOIN_TOKEN", "demo-node-04", {"node_name": "cache-01"}),
     ("NODE_ENROLLED", "demo-node-04", {"hostname": "cache-01.vigile.local", "arch": "x86_64"}),
     ("LIST_SERVICES", "demo-node-01", {"node_id": "demo-node-01"}),
@@ -754,24 +874,74 @@ _DEMO_AUDIT_RAW: list[tuple[str, str | None, dict[str, Any]]] = [
     ("USER_LOGIN", None, {"username": "guest"}),
     ("LIST_NODES", None, {"filter": "prod"}),
     ("GET_NODE_STATS", "demo-node-02", {"node_id": "demo-node-02"}),
-    ("PROPOSAL_CREATED", "demo-node-02", {"action": "RESTART_SERVICE", "target": "postgresql.service", "risk": "MEDIUM"}),
-    ("PROPOSAL_APPROVED", "demo-node-02", {"proposal_id": None, "action": "RESTART_SERVICE", "target": "postgresql.service"}),
+    (
+        "PROPOSAL_CREATED",
+        "demo-node-02",
+        {"action": "RESTART_SERVICE", "target": "postgresql.service", "risk": "MEDIUM"},
+    ),
+    (
+        "PROPOSAL_APPROVED",
+        "demo-node-02",
+        {"proposal_id": None, "action": "RESTART_SERVICE", "target": "postgresql.service"},
+    ),
     ("RESTART_SERVICE", "demo-node-02", {"service": "postgresql.service", "result": "success"}),
     ("LIST_NODES", None, {"filter": None}),
-    ("PROPOSAL_CREATED", "demo-node-05", {"action": "RESTART_SERVICE", "target": "ssh.service", "risk": "HIGH"}),
-    ("PROPOSAL_REJECTED", "demo-node-05", {"proposal_id": None, "action": "RESTART_SERVICE", "target": "ssh.service", "reason": "Node is unreachable, cannot execute"}),
+    (
+        "PROPOSAL_CREATED",
+        "demo-node-05",
+        {"action": "RESTART_SERVICE", "target": "ssh.service", "risk": "HIGH"},
+    ),
+    (
+        "PROPOSAL_REJECTED",
+        "demo-node-05",
+        {
+            "proposal_id": None,
+            "action": "RESTART_SERVICE",
+            "target": "ssh.service",
+            "reason": "Node is unreachable, cannot execute",
+        },
+    ),
     ("CHAT_MESSAGE", None, {"message_length": 156, "session_id": "demo-session-security"}),
     ("READ_LOGS", "demo-node-01", {"service": "nginx", "lines": 50}),
     ("USER_LOGOUT", None, {"username": "guest"}),
     ("USER_LOGIN", None, {"username": "guest"}),
-    ("PROPOSAL_CREATED", "demo-node-06", {"action": "RESTART_CONTAINER", "target": "home-assistant", "risk": "CRITICAL"}),
+    (
+        "PROPOSAL_CREATED",
+        "demo-node-06",
+        {"action": "RESTART_CONTAINER", "target": "home-assistant", "risk": "CRITICAL"},
+    ),
     ("LIST_SERVICES", "demo-node-04", {"node_id": "demo-node-04"}),
     ("CONTAINER_RESTART", "demo-node-04", {"container": "home-assistant", "result": "success"}),
-    ("PROPOSAL_REJECTED", "demo-node-04", {"proposal_id": None, "action": "RESTART_SERVICE", "target": "nginx.service", "reason": "Within tolerance"}),
-    ("SYSTEM_INIT", None, {"message": "Demo data initialized with 6 nodes, 15 services, 8 containers"}),
-    ("STOP_CONTAINER", "demo-node-03", {"container": "plex-media", "reason": "Scheduled maintenance"}),
-    ("UPDATE_CONFIG", "demo-node-04", {"setting": "nginx.workers", "old_value": "4", "new_value": "8"}),
-    ("NODE_REVOKE", "demo-node-05", {"reason": "Node unreachable for 24+ hours", "previous_state": "LOST"}),
+    (
+        "PROPOSAL_REJECTED",
+        "demo-node-04",
+        {
+            "proposal_id": None,
+            "action": "RESTART_SERVICE",
+            "target": "nginx.service",
+            "reason": "Within tolerance",
+        },
+    ),
+    (
+        "SYSTEM_INIT",
+        None,
+        {"message": "Demo data initialized with 6 nodes, 15 services, 8 containers"},
+    ),
+    (
+        "STOP_CONTAINER",
+        "demo-node-03",
+        {"container": "plex-media", "reason": "Scheduled maintenance"},
+    ),
+    (
+        "UPDATE_CONFIG",
+        "demo-node-04",
+        {"setting": "nginx.workers", "old_value": "4", "new_value": "8"},
+    ),
+    (
+        "NODE_REVOKE",
+        "demo-node-05",
+        {"reason": "Node unreachable for 24+ hours", "previous_state": "LOST"},
+    ),
 ]
 
 DEMO_AUDIT_ENTRIES: list[dict[str, Any]] = []
@@ -789,18 +959,20 @@ for i, (action, node_id, details) in enumerate(_DEMO_AUDIT_RAW):
         node_id=node_id,
         details_json=details_json,
     )
-    DEMO_AUDIT_ENTRIES.append({
-        "id": str(uuid.uuid4()),
-        "sequence": _seq,
-        "timestamp": ts,
-        "user_id": DEMO_USER_ID,
-        "actor": DEMO_USERNAME,
-        "action": action,
-        "node_id": node_id,
-        "details": details,
-        "previous_hash": _prev,
-        "entry_hash": entry_hash,
-    })
+    DEMO_AUDIT_ENTRIES.append(
+        {
+            "id": str(uuid.uuid4()),
+            "sequence": _seq,
+            "timestamp": ts,
+            "user_id": DEMO_USER_ID,
+            "actor": DEMO_USERNAME,
+            "action": action,
+            "node_id": node_id,
+            "details": details,
+            "previous_hash": _prev,
+            "entry_hash": entry_hash,
+        }
+    )
     _prev = entry_hash
     _seq += 1
 
@@ -808,6 +980,7 @@ for i, (action, node_id, details) in enumerate(_DEMO_AUDIT_RAW):
 # ---------------------------------------------------------------------------
 # Helper: is_demo_user
 # ---------------------------------------------------------------------------
+
 
 def is_demo(claims: dict[str, Any]) -> bool:
     return claims.get("username") in {"guest", "demo"}
@@ -918,6 +1091,7 @@ def get_demo_proposal_from_text(message: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # State reset
 # ---------------------------------------------------------------------------
+
 
 def reset_demo_state() -> None:
     """Reset all mutable demo state to defaults."""

@@ -80,7 +80,7 @@ export const InsightCard: React.FC<InsightCardProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between gap-2 z-10 shrink-0">
         <SeverityTag severity={insight.severity} className="whitespace-nowrap" />
-        <span 
+        <span
           className="text-[10px] font-extrabold font-interface tracking-wider text-text-3 uppercase bg-surface-2 px-1.5 py-0.5 rounded border border-border whitespace-nowrap truncate max-w-[140px]"
           title={nodeName}
         >

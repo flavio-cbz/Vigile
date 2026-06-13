@@ -2,21 +2,21 @@ import React from 'react';
 import { TimeAgo } from '../primitives/TimeAgo';
 import { useLocale } from '../../i18n';
 import { formatAuditText } from '../../utils/formatAudit';
-import { 
-  Terminal, 
-  Settings, 
-  LogIn, 
-  LogOut, 
-  Server, 
-  HelpCircle, 
-  Wifi, 
-  WifiOff, 
-  AlertTriangle, 
-  ShieldCheck, 
-  CheckCircle2, 
-  XCircle, 
-  KeyRound, 
-  FileCode 
+import {
+  Terminal,
+  Settings,
+  LogIn,
+  LogOut,
+  Server,
+  HelpCircle,
+  Wifi,
+  WifiOff,
+  AlertTriangle,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  KeyRound,
+  FileCode
 } from 'lucide-react';
 
 interface ActivityItemProps {
@@ -162,7 +162,7 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
               par {actor || 'système'}
             </span>
             {nodeId && (
-              <span 
+              <span
                 className="inline-block text-[8.5px] font-bold tracking-wide uppercase bg-surface-3 px-1.5 py-0.5 rounded border border-border text-text-3 font-interface"
                 title={nodeId}
               >
@@ -181,4 +181,3 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
     </div>
   );
 };
-

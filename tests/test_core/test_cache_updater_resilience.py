@@ -1,7 +1,9 @@
-import pytest
 import asyncio
-import aiosqlite
 from unittest.mock import patch
+
+import aiosqlite
+import pytest
+
 from master.core.node_manager import NodeManager
 
 

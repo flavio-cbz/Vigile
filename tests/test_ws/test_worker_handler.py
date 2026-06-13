@@ -1,18 +1,20 @@
-import pytest
 import asyncio
 import base64
 import json
-import uuid
 import time
 import types
+import uuid
+
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import WebSocketDisconnect
 
-from master.core.security_manager import SecurityManager
 from master.core.node_manager import NodeManager, NodeState, node_manager
+from master.core.security_manager import SecurityManager
 from master.ws import worker_handler as ws_handler
-from master.ws.worker_handler import worker_join_handler, _run_operational, _send
+from master.ws.worker_handler import _run_operational, _send, worker_join_handler
+
 
 # Autouse fixture to setup node_manager settings for testing
 @pytest.fixture(autouse=True)
@@ -21,6 +23,7 @@ def setup_node_manager():
     yield
     # Cleanup pending intents after each test
     node_manager._pending_intents.clear()
+
 
 # Reuse MockWebSocket definition
 class MockWebSocket:
@@ -83,7 +86,9 @@ def make_fingerprint(hostname: str = "test-host") -> dict:
     }
 
 
-async def setup_token(db, security: SecurityManager, name: str = "test-node") -> tuple[str, str, str]:
+async def setup_token(
+    db, security: SecurityManager, name: str = "test-node"
+) -> tuple[str, str, str]:
     """Create a PENDING node and return (node_id, join_token, token_hash)."""
     node_id = await node_manager.create_node(db, name=name)
     token, payload = security.generate_join_token(node_id)
@@ -122,19 +127,31 @@ async def test_enrollment_success(db, security, worker_keys):
             if msg.get("type") == "ENROLLMENT_CHALLENGE":
                 challenge = msg["challenge"]
                 sig = worker_priv.sign(base64.urlsafe_b64decode(challenge + "=="))
-                self._to_receive.append(json.dumps({
-                    "type": "ENROLLMENT_RESPONSE",
-                    "signature": base64.urlsafe_b64encode(sig).decode(),
-                }))
+                self._to_receive.append(
+                    json.dumps(
+                        {
+                            "type": "ENROLLMENT_RESPONSE",
+                            "signature": base64.urlsafe_b64encode(sig).decode(),
+                        }
+                    )
+                )
 
-    ws = EnrollWS([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = EnrollWS(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
     assert any(m.get("type") == "ENROLLMENT_SUCCESS" for m in sent_msgs)
-    assert any(m.get("node_id") == node_id for m in sent_msgs if m.get("type") == "ENROLLMENT_SUCCESS")
+    assert any(
+        m.get("node_id") == node_id for m in sent_msgs if m.get("type") == "ENROLLMENT_SUCCESS"
+    )
     assert any(m.get("worker_token") for m in sent_msgs if m.get("type") == "ENROLLMENT_SUCCESS")
 
     async with db.execute("SELECT state FROM nodes WHERE id = ?", (node_id,)) as cur:
@@ -151,10 +168,16 @@ async def test_enrollment_invalid_token(db, security, worker_keys):
     _, join_token, _ = await setup_token(db, security, "ws-invalid")
 
     tampered = join_token[:-5] + "XXXXX"
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST", "join_token": tampered,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": tampered,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_INVALID_TOKEN
 
@@ -165,14 +188,21 @@ async def test_enrollment_expired_token(db, security, worker_keys):
     _, worker_pub_b64 = worker_keys
     node_id, join_token, _ = await setup_token(db, security, "ws-expired")
 
-    await db.execute("UPDATE join_tokens SET expires_at = ? WHERE node_id = ?",
-                     (time.time() - 10, node_id))
+    await db.execute(
+        "UPDATE join_tokens SET expires_at = ? WHERE node_id = ?", (time.time() - 10, node_id)
+    )
     await db.commit()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_TOKEN_EXPIRED
 
@@ -186,10 +216,16 @@ async def test_enrollment_consumed_token(db, security, worker_keys):
     await db.execute("UPDATE join_tokens SET consumed = 1 WHERE token_hash = ?", (token_hash,))
     await db.commit()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_TOKEN_CONSUMED
 
@@ -200,14 +236,19 @@ async def test_enrollment_revoked_node(db, security, worker_keys):
     _, worker_pub_b64 = worker_keys
     node_id, join_token, _ = await setup_token(db, security, "ws-revoked")
 
-    await db.execute("UPDATE nodes SET state = ? WHERE id = ?",
-                     (NodeState.REVOKED.value, node_id))
+    await db.execute("UPDATE nodes SET state = ? WHERE id = ?", (NodeState.REVOKED.value, node_id))
     await db.commit()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_REVOKED
 
@@ -218,10 +259,16 @@ async def test_enrollment_bad_message_type(db, security, worker_keys):
     _, worker_pub_b64 = worker_keys
     _, join_token, _ = await setup_token(db, security, "ws-badtype")
 
-    ws = MockWebSocket([
-        {"type": "WRONG_TYPE", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "WRONG_TYPE",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_PROTOCOL_ERROR
 
@@ -236,15 +283,25 @@ async def test_enrollment_bad_signature(db, security, worker_keys):
         async def send_text(self, data: str):
             msg = json.loads(data)
             if msg.get("type") == "ENROLLMENT_CHALLENGE":
-                self._to_receive.append(json.dumps({
-                    "type": "ENROLLMENT_RESPONSE",
-                    "signature": base64.urlsafe_b64encode(b"x" * 64).decode(),
-                }))
+                self._to_receive.append(
+                    json.dumps(
+                        {
+                            "type": "ENROLLMENT_RESPONSE",
+                            "signature": base64.urlsafe_b64encode(b"x" * 64).decode(),
+                        }
+                    )
+                )
 
-    ws = BadSigWS([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = BadSigWS(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_SIGNATURE_INVALID
 
@@ -288,17 +345,27 @@ async def test_operational_heartbeat(db, security, worker_keys):
             sent.append(msg)
             if msg.get("type") == "ENROLLMENT_CHALLENGE":
                 sig = worker_priv.sign(base64.urlsafe_b64decode(msg["challenge"] + "=="))
-                self._to_receive.append(json.dumps({
-                    "type": "ENROLLMENT_RESPONSE",
-                    "signature": base64.urlsafe_b64encode(sig).decode(),
-                }))
+                self._to_receive.append(
+                    json.dumps(
+                        {
+                            "type": "ENROLLMENT_RESPONSE",
+                            "signature": base64.urlsafe_b64encode(sig).decode(),
+                        }
+                    )
+                )
             if msg.get("type") == "ENROLLMENT_SUCCESS":
                 self._to_receive.append(json.dumps({"type": "HEARTBEAT"}))
 
-    ws = HBWS([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = HBWS(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
 
@@ -321,22 +388,36 @@ async def test_operational_intent_result(db, security, worker_keys):
             msg = json.loads(data)
             if msg.get("type") == "ENROLLMENT_CHALLENGE":
                 sig = worker_priv.sign(base64.urlsafe_b64decode(msg["challenge"] + "=="))
-                self._to_receive.append(json.dumps({
-                    "type": "ENROLLMENT_RESPONSE",
-                    "signature": base64.urlsafe_b64encode(sig).decode(),
-                }))
+                self._to_receive.append(
+                    json.dumps(
+                        {
+                            "type": "ENROLLMENT_RESPONSE",
+                            "signature": base64.urlsafe_b64encode(sig).decode(),
+                        }
+                    )
+                )
             if msg.get("type") == "ENROLLMENT_SUCCESS":
-                self._to_receive.append(json.dumps({
-                    "type": "INTENT_RESULT",
-                    "intent_id": intent_id,
-                    "success": True,
-                    "output": "ok",
-                }))
+                self._to_receive.append(
+                    json.dumps(
+                        {
+                            "type": "INTENT_RESULT",
+                            "intent_id": intent_id,
+                            "success": True,
+                            "output": "ok",
+                        }
+                    )
+                )
 
-    ws = IntentWS([
-        {"type": "ENROLLMENT_REQUEST", "join_token": join_token,
-         "public_key": worker_pub_b64, "fingerprint": make_fingerprint()},
-    ])
+    ws = IntentWS(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
 
@@ -368,8 +449,9 @@ async def test_send_disconnect_cleanup():
     await _send(ws, {"type": "TEST"}, node_id=node_id)
 
     # Verify the pending intent was cleaned up (cancelled)
-    assert intent_id not in node_manager._pending_intents, \
-        "pending intent must be removed on disconnect"
+    assert (
+        intent_id not in node_manager._pending_intents
+    ), "pending intent must be removed on disconnect"
     assert future.done(), "future must be resolved (cancelled) on disconnect"
 
     # Cleanup test artifacts
@@ -380,6 +462,7 @@ async def test_send_disconnect_cleanup():
 @pytest.mark.asyncio
 async def test_send_disconnect_no_node_id():
     """H1: _send() handles WebSocketDisconnect gracefully without node_id."""
+
     class DisconnectWS(MockWebSocket):
         async def send_text(self, data: str):
             raise WebSocketDisconnect(code=1000)
@@ -399,7 +482,14 @@ async def _setup_enrolled_node(db, security, name: str, worker_pub_b64: str) -> 
     await db.execute(
         """INSERT INTO join_tokens (id, node_id, token_hash, payload_b64, consumed, expires_at, created_at)
            VALUES (?, ?, ?, ?, 0, ?, ?)""",
-        (str(uuid.uuid4()), node_id, token_hash, token.split(".", 1)[1], payload["expires_at"], now),
+        (
+            str(uuid.uuid4()),
+            node_id,
+            token_hash,
+            token.split(".", 1)[1],
+            payload["expires_at"],
+            now,
+        ),
     )
     # Pre-set public_key and put node in LOST state (simulating previous enrollment)
     await db.execute(
@@ -413,8 +503,14 @@ async def _setup_enrolled_node(db, security, name: str, worker_pub_b64: str) -> 
     await db.execute(
         """INSERT INTO worker_tokens (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked)
            VALUES (?, ?, ?, ?, ?, ?, 0)""",
-        (str(uuid.uuid4()), node_id, wt_hash, lifecycle["issued_at"],
-         lifecycle["rotation_due"], lifecycle["expires_at"]),
+        (
+            str(uuid.uuid4()),
+            node_id,
+            wt_hash,
+            lifecycle["issued_at"],
+            lifecycle["rotation_due"],
+            lifecycle["expires_at"],
+        ),
     )
     await db.commit()
     return node_id, worker_token
@@ -453,7 +549,9 @@ async def test_enrollment_reconnect_success(db, security, worker_keys):
 
     # Verify old worker token is revoked
     old_hash = security.worker_token_hash(worker_token)
-    async with db.execute("SELECT revoked FROM worker_tokens WHERE token_hash = ?", (old_hash,)) as cur:
+    async with db.execute(
+        "SELECT revoked FROM worker_tokens WHERE token_hash = ?", (old_hash,)
+    ) as cur:
         row = await cur.fetchone()
     assert row is not None
     assert row["revoked"] == 1
@@ -474,46 +572,58 @@ async def test_enrollment_reconnect_success(db, security, worker_keys):
 async def test_enrollment_reconnect_public_key_mismatch(db, security, worker_keys):
     """Reconnect with wrong public_key → anti-theft protection, close with error."""
     _, worker_pub_b64 = worker_keys
-    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-pk", worker_pub_b64)
+    node_id, worker_token = await _setup_enrolled_node(
+        db, security, "ws-reconnect-pk", worker_pub_b64
+    )
 
     # Use a DIFFERENT public key for the reconnect request (simulating token theft)
     wrong_key = base64.urlsafe_b64encode(b"x" * 32).decode()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST",
-         "join_token": "",
-         "worker_token": worker_token,
-         "reconnect": True,
-         "public_key": wrong_key,
-         "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": "",
+                "worker_token": worker_token,
+                "reconnect": True,
+                "public_key": wrong_key,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
 
     # Should close with signature invalid (anti-theft code)
-    assert ws.close_code == ws_handler.WS_CLOSE_SIGNATURE_INVALID, \
-        "Should reject reconnect with wrong public key"
+    assert (
+        ws.close_code == ws_handler.WS_CLOSE_SIGNATURE_INVALID
+    ), "Should reject reconnect with wrong public key"
 
 
 @pytest.mark.asyncio
 async def test_enrollment_reconnect_revoked_node(db, security, worker_keys):
     """Reconnect with revoked node → close with WS_CLOSE_REVOKED."""
     _, worker_pub_b64 = worker_keys
-    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-rev", worker_pub_b64)
+    node_id, worker_token = await _setup_enrolled_node(
+        db, security, "ws-reconnect-rev", worker_pub_b64
+    )
 
     # Set node to REVOKED state
-    await db.execute("UPDATE nodes SET state = ? WHERE id = ?",
-                     (NodeState.REVOKED.value, node_id))
+    await db.execute("UPDATE nodes SET state = ? WHERE id = ?", (NodeState.REVOKED.value, node_id))
     await db.commit()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST",
-         "join_token": "",
-         "worker_token": worker_token,
-         "reconnect": True,
-         "public_key": worker_pub_b64,
-         "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": "",
+                "worker_token": worker_token,
+                "reconnect": True,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_REVOKED
@@ -523,21 +633,27 @@ async def test_enrollment_reconnect_revoked_node(db, security, worker_keys):
 async def test_enrollment_reconnect_revoked_token(db, security, worker_keys):
     """Reconnect with revoked worker_token → close with WS_CLOSE_INVALID_TOKEN."""
     _, worker_pub_b64 = worker_keys
-    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-wtrev", worker_pub_b64)
+    node_id, worker_token = await _setup_enrolled_node(
+        db, security, "ws-reconnect-wtrev", worker_pub_b64
+    )
 
     # Revoke the worker token
     wt_hash = security.worker_token_hash(worker_token)
     await db.execute("UPDATE worker_tokens SET revoked = 1 WHERE token_hash = ?", (wt_hash,))
     await db.commit()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST",
-         "join_token": "",
-         "worker_token": worker_token,
-         "reconnect": True,
-         "public_key": worker_pub_b64,
-         "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": "",
+                "worker_token": worker_token,
+                "reconnect": True,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_INVALID_TOKEN
@@ -547,21 +663,27 @@ async def test_enrollment_reconnect_revoked_token(db, security, worker_keys):
 async def test_enrollment_reconnect_expired_token(db, security, worker_keys):
     """Reconnect with expired worker_token → close with WS_CLOSE_INVALID_TOKEN."""
     _, worker_pub_b64 = worker_keys
-    node_id, worker_token = await _setup_enrolled_node(db, security, "ws-reconnect-exp", worker_pub_b64)
+    node_id, worker_token = await _setup_enrolled_node(
+        db, security, "ws-reconnect-exp", worker_pub_b64
+    )
 
     # Revoke the token to simulate expired/unusable token
     wt_hash = security.worker_token_hash(worker_token)
     await db.execute("UPDATE worker_tokens SET revoked = 1 WHERE token_hash = ?", (wt_hash,))
     await db.commit()
 
-    ws = MockWebSocket([
-        {"type": "ENROLLMENT_REQUEST",
-         "join_token": "",
-         "worker_token": worker_token,
-         "reconnect": True,
-         "public_key": worker_pub_b64,
-         "fingerprint": make_fingerprint()},
-    ])
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": "",
+                "worker_token": worker_token,
+                "reconnect": True,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
 
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_INVALID_TOKEN

@@ -85,25 +85,23 @@ class StructuredLLM:
                 **{k: v for k, v in kwargs.items() if k != "stream"},
             )
 
-            raw = (
-                response.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
+            raw = response.get("choices", [{}])[0].get("message", {}).get("content", "")
 
             if not raw:
                 if attempt == max_retries - 1:
-                    raise ValueError(
-                        f"LLM returned empty content after {max_retries} attempts"
-                    )
-                full_messages.append({
-                    "role": "assistant",
-                    "content": "(empty response)",
-                })
-                full_messages.append({
-                    "role": "user",
-                    "content": "You returned empty content. Output valid JSON only.",
-                })
+                    raise ValueError(f"LLM returned empty content after {max_retries} attempts")
+                full_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "(empty response)",
+                    }
+                )
+                full_messages.append(
+                    {
+                        "role": "user",
+                        "content": "You returned empty content. Output valid JSON only.",
+                    }
+                )
                 continue
 
             try:
@@ -111,7 +109,9 @@ class StructuredLLM:
             except Exception as exc:
                 logger.warning(
                     "StructuredLLM attempt %d/%d failed: %s",
-                    attempt + 1, max_retries, exc,
+                    attempt + 1,
+                    max_retries,
+                    exc,
                 )
                 if attempt == max_retries - 1:
                     raise ValueError(
@@ -119,9 +119,11 @@ class StructuredLLM:
                         f"Last error: {exc}"
                     ) from exc
                 full_messages.append({"role": "assistant", "content": raw})
-                full_messages.append({
-                    "role": "user",
-                    "content": f"Validation error: {exc}. Fix the JSON to match the schema exactly.",
-                })
+                full_messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Validation error: {exc}. Fix the JSON to match the schema exactly.",
+                    }
+                )
 
         raise ValueError("Unexpected: loop completed without return or raise")

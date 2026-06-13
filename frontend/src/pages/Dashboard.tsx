@@ -37,7 +37,7 @@ interface ContainerItem {
 const getTopInsight = (insights?: InsightItem[] | null): InsightItem | null => {
   if (!insights || insights.length === 0) return null;
   const severityOrder: Record<string, number> = { critical: 3, warning: 2, info: 1 };
-  
+
   // Filter for insights that deserve attention (critical, warning, info)
   const activeInsights = insights.filter(ins => ins.severity in severityOrder);
   if (activeInsights.length === 0) return null;
@@ -143,7 +143,7 @@ export const Dashboard: React.FC = () => {
 
       const results = await Promise.all(containerPromises);
       const flattened = results.flat();
-      
+
       // Sort exited/stopped first, then running
       const sorted = flattened.sort((a, b) => {
         const aState = (a.state ?? '').toLowerCase();
@@ -467,7 +467,7 @@ export const Dashboard: React.FC = () => {
                 Veuillez justifier le rejet de cette proposition d'action.
               </p>
             </div>
-            
+
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
@@ -475,7 +475,7 @@ export const Dashboard: React.FC = () => {
               className="w-full h-24 bg-surface-2 border border-border focus:border-accent/40 rounded-lg p-3 text-xs text-text-1 placeholder:text-text-3 focus:outline-none resize-none font-sans"
               autoFocus
             />
-            
+
             <div className="flex justify-end gap-2.5 font-interface text-[10px] font-bold">
               <button
                 type="button"

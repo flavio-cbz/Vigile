@@ -69,9 +69,9 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
       gradient: 'var(--gradient-hero-warn)',
       border: 'border-warning/20',
       icon: <AlertTriangle className="w-8 h-8 text-warning animate-pulse-subtle" />,
-      title: t('dash.servers_offline_banner', { 
-        count: offlineCount, 
-        names: offlineNodes.map((n) => n.name).join(', ') 
+      title: t('dash.servers_offline_banner', {
+        count: offlineCount,
+        names: offlineNodes.map((n) => n.name).join(', ')
       }),
       desc: t('dash.servers_online', { online, total }),
     },
@@ -88,7 +88,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
   const isStale = secondsAgo > 60;
 
   return (
-    <div 
+    <div
       className={`p-6 rounded-xl border ${current.border} flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 animate-fade-in`}
       style={{ background: current.gradient }}
     >

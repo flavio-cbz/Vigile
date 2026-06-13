@@ -16,12 +16,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from master.api.deps import CurrentUser, DB, get_security
-from master.api.demo_data import DEMO_USERNAME, DEMO_PASSWORD, DEMO_USER_ID, is_demo
-from master.core.security_manager import SecurityManager, SecurityError
-from master.core.rate_limiter import rate_limiter
-from master.core.audit import log_action
+from master.api.demo_data import DEMO_PASSWORD, DEMO_USER_ID, DEMO_USERNAME, is_demo
+from master.api.deps import DB, CurrentUser, get_security
 from master.config import settings
+from master.core.audit import log_action
+from master.core.rate_limiter import rate_limiter
+from master.core.security_manager import SecurityError, SecurityManager
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,9 @@ def _cookie_domain() -> str | None:
     return settings.cookie_domain or None
 
 
-def _set_auth_cookies(response: Response, access_token: str, refresh_token: str, sec: SecurityManager) -> None:
+def _set_auth_cookies(
+    response: Response, access_token: str, refresh_token: str, sec: SecurityManager
+) -> None:
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
         access_token,
@@ -354,7 +356,9 @@ async def refresh_token(
         username=user["username"],
         role=user["role"],
     )
-    new_refresh_token, _ = sec.create_refresh_token(user_id=user["id"], family_id=db_token["family_id"])
+    new_refresh_token, _ = sec.create_refresh_token(
+        user_id=user["id"], family_id=db_token["family_id"]
+    )
 
     # Store new refresh token in DB
     new_token_id = str(uuid.uuid4())

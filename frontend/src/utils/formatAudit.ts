@@ -34,8 +34,8 @@ export function formatAuditText(
       const translatedAction = propAction
         ? t(`audit.action.${propAction}`)
         : '';
-      const actionDesc = propTarget 
-        ? `${translatedAction} ${propTarget}` 
+      const actionDesc = propTarget
+        ? `${translatedAction} ${propTarget}`
         : (translatedAction || t('audit.event.generic_action'));
       return t('audit.event.proposal_approved', {
         action: actionDesc,
@@ -48,8 +48,8 @@ export function formatAuditText(
       const translatedAction = propAction
         ? t(`audit.action.${propAction}`)
         : '';
-      const actionDesc = propTarget 
-        ? `${translatedAction} ${propTarget}` 
+      const actionDesc = propTarget
+        ? `${translatedAction} ${propTarget}`
         : (translatedAction || t('audit.event.generic_action'));
       const reason = details.reason;
 

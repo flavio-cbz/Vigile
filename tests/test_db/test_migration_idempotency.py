@@ -1,11 +1,11 @@
 import os
-import tempfile
 import shutil
+import tempfile
 
-import pytest
 import aiosqlite
+import pytest
 
-from master.db.database import init_db, close_db, reset_db
+from master.db.database import close_db, init_db, reset_db
 from master.db.migrations import run_migrations
 
 
@@ -47,9 +47,7 @@ class TestMigrationIdempotency:
 
             await run_migrations(conn)
 
-            async with conn.execute(
-                "SELECT COUNT(*) FROM alembic_version"
-            ) as cursor:
+            async with conn.execute("SELECT COUNT(*) FROM alembic_version") as cursor:
                 row = await cursor.fetchone()
                 assert row is not None
                 assert row[0] == 1, "Expected exactly 1 alembic_version row after first run"
@@ -61,9 +59,7 @@ class TestMigrationIdempotency:
             conn2 = await init_db(db_path)
             await run_migrations(conn2)
 
-            async with conn2.execute(
-                "SELECT COUNT(*) FROM alembic_version"
-            ) as cursor:
+            async with conn2.execute("SELECT COUNT(*) FROM alembic_version") as cursor:
                 row = await cursor.fetchone()
                 assert row is not None
                 assert row[0] == 1, "Expected exactly 1 alembic_version row after second run"
@@ -83,9 +79,7 @@ class TestMigrationIdempotency:
             conn = await init_db(db_path)
             await run_migrations(conn)
 
-            async with conn.execute(
-                "SELECT version_num FROM alembic_version LIMIT 1"
-            ) as cursor:
+            async with conn.execute("SELECT version_num FROM alembic_version LIMIT 1") as cursor:
                 row = await cursor.fetchone()
                 assert row is not None
                 assert row[0] == "004", f"Expected version 004, got {row[0]}"

@@ -1,8 +1,10 @@
-import os
-import tempfile
-import pytest
 import asyncio
 import logging
+import os
+import tempfile
+
+import pytest
+
 from master.core.plugin_manager import PluginManager
 
 
@@ -40,7 +42,7 @@ def register(pm):
         loaded = pm.load_plugins_from_dir(plugin_dir)
         assert "test_plugin" in loaded
         assert pm.call("file_hook") == ["from_file"]
-        
+
         # Test dedup (already loaded)
         loaded_again = pm.load_plugins_from_dir(plugin_dir)
         assert "test_plugin" not in loaded_again
@@ -63,10 +65,12 @@ def test_unregister(plugin_manager: PluginManager):
 
 def test_sync_call_skips_async_hook(caplog):
     pm = PluginManager()
+
     async def dummy_async():
         pass
+
     pm.register("mixed_hook", dummy_async, plugin_name="async_plugin")
-    
+
     with caplog.at_level(logging.WARNING):
         res = pm.call("mixed_hook")
         assert res == []
@@ -79,10 +83,12 @@ def test_sync_call_skips_async_hook(caplog):
 
 def test_call_exceptions_handled(caplog):
     pm = PluginManager()
+
     def raise_err():
         raise ValueError("Oops")
+
     pm.register("err_hook", raise_err, plugin_name="broken")
-    
+
     with caplog.at_level(logging.ERROR):
         res = pm.call("err_hook")
         assert res == []
@@ -96,13 +102,15 @@ def test_call_exceptions_handled(caplog):
 @pytest.mark.asyncio
 async def test_async_call_first(plugin_manager: PluginManager):
     pm = PluginManager()
+
     async def async_one():
         return 42
+
     pm.register("async_first_hook", async_one, plugin_name="one")
-    
+
     res = await pm.async_call_first("async_first_hook")
     assert res == 42
-    
+
     res_empty = await pm.async_call_first("nonexistent_async_first")
     assert res_empty is None
 
@@ -112,11 +120,13 @@ async def test_async_call_exceptions_and_sync_runs_in_executor(caplog):
     pm = PluginManager()
     # 1. Sync hook in async_call (runs in executor)
     pm.register("async_mix", lambda: "sync_val", plugin_name="sync_p")
+
     # 2. Async hook raising error
     async def async_raise():
         raise RuntimeError("Async error")
+
     pm.register("async_mix", async_raise, plugin_name="async_fail")
-    
+
     with caplog.at_level(logging.ERROR):
         res = await pm.async_call("async_mix")
         assert "sync_val" in res

@@ -117,7 +117,7 @@ export const NodeDetail: React.FC = () => {
   usePageTitle('Détail du nœud');
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  
+
   const { isAdmin, can } = usePermission();
   const isAdminOrOperator = can('approve-action');
 
@@ -375,7 +375,7 @@ export const NodeDetail: React.FC = () => {
               </h1>
               <Badge severity={node.online ? 'ok' : 'offline'} className="text-[8px] px-1 py-0" />
             </div>
-            
+
             <div className="flex items-center gap-3 text-text-3 text-[10px] font-mono mt-1">
               <span className="flex items-center gap-1">
                 <Calendar className="w-3 h-3 opacity-60" /> Enregistré : <TimeAgo timestamp={node.enrolled_at} />
@@ -661,7 +661,7 @@ export const NodeDetail: React.FC = () => {
                         </td>
                         <td className="px-5 py-3.5">
                           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider font-interface ${
-                            srv.state === 'running' 
+                            srv.state === 'running'
                               ? 'bg-severity-ok/10 text-severity-ok border-severity-ok/20'
                               : srv.state === 'failed'
                               ? 'bg-severity-critical/10 text-severity-critical border-severity-critical/20 animate-pulse'
