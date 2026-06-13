@@ -1,5 +1,252 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
-@import "./styles/base.css";
 @import "./styles/components.css";
 @import "./styles/animations.css";
+
+:root {
+  /* Obsidian Command Theme Variables */
+  --bg:           #0a0a0f;
+  --surface:      #12121a;
+  --surface-2:    #1a1a26;
+  --surface-3:    #232335;
+  --border:       rgba(255, 255, 255, 0.015);
+  --border-strong:rgba(255, 255, 255, 0.04);
+  --accent:       #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-muted: rgba(99, 102, 241, 0.15);
+  --text-1:       #e8e4f0;
+  --text-2:       #9a97b0;
+  --text-3:       #52506b;
+
+  /* Severities - independent of the active theme */
+  --severity-critical: #EF4444;
+  --severity-warning:  #F59E0B;
+  --severity-info:     #60A5FA;
+  --severity-ok:       #22C55E;
+
+  /* Map old token variables to new theme variables so that old CSS files work seamlessly! */
+  --color-background: var(--bg);
+  --color-surface-0: var(--surface);
+  --color-surface-1: var(--surface-2);
+  --color-surface-2: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-strong);
+  
+  --color-ink-primary: var(--text-1);
+  --color-ink-secondary: var(--text-2);
+  --color-ink-muted: var(--text-3);
+  
+  --color-accent-primary: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-muted);
+  
+  --color-success: var(--severity-ok);
+  --color-success-subtle: rgba(34, 197, 94, 0.12);
+  --color-warning: var(--severity-warning);
+  --color-warning-subtle: rgba(245, 158, 11, 0.12);
+  --color-danger: var(--severity-critical);
+  --color-danger-subtle: rgba(239, 68, 68, 0.12);
+
+  /* Border Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-base: 220ms ease;
+  --transition-slow: 380ms ease;
+
+  /* Layout Dimensions */
+  --topbar-height: 56px;
+  --sidebar-width: 260px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --topbar-height: 64px;
+    --sidebar-width: 260px;
+  }
+  .sidebar-collapsed {
+    --sidebar-width: 70px !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --sidebar-width: 280px;
+  }
+  .sidebar-collapsed {
+    --sidebar-width: 76px !important;
+  }
+}
+
+@theme {
+  --font-serif: 'DM Serif Display', serif;
+  --font-interface: 'Syne', sans-serif;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-muted: var(--accent-muted);
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+
+  --color-severity-critical: var(--severity-critical);
+  --color-severity-warning: var(--severity-warning);
+  --color-severity-info: var(--severity-info);
+  --color-severity-ok: var(--severity-ok);
+
+  /* Legacy ink colors compatibility */
+  --color-ink-primary: var(--text-1);
+  --color-ink-secondary: var(--text-2);
+  --color-ink-muted: var(--text-3);
+  --color-ink-dim: var(--text-3);
+  --color-ink: var(--text-1);
+
+  /* Legacy custom accent colors compatibility */
+  --color-accent-custom: var(--accent);
+  --color-accent-primary: var(--accent);
+  --color-accent-soft: var(--accent-muted);
+  --color-accent-border: var(--border-strong);
+  --color-accent-glow: var(--accent);
+
+  /* Legacy surface & border custom colors compatibility */
+  --color-surface-alt: var(--surface-2);
+  --color-surface-1: var(--surface-2);
+  --color-surface-2: var(--surface-3);
+  --color-border-custom: var(--border);
+
+  /* Legacy severity and status colors compatibility */
+  --color-success: var(--severity-ok);
+  --color-success-subtle: rgba(34, 197, 94, 0.12);
+  --color-warning: var(--severity-warning);
+  --color-warning-subtle: rgba(245, 158, 11, 0.12);
+  --color-danger: var(--severity-critical);
+  --color-danger-subtle: rgba(239, 68, 68, 0.12);
+
+  --color-green-custom: var(--severity-ok);
+  --color-green-glow: var(--severity-ok);
+  
+  --color-amber-custom: var(--severity-warning);
+  --color-amber-soft: rgba(245, 158, 11, 0.08);
+  --color-amber-border: rgba(245, 158, 11, 0.15);
+  
+  --color-red-custom: var(--severity-critical);
+  --color-red-soft: rgba(239, 68, 68, 0.08);
+  --color-red-border: rgba(239, 68, 68, 0.15);
+  
+  --animate-fade-in: fade-in 0.2s var(--transition-base);
+  --animate-slide-in-right: slide-in-right 0.25s var(--transition-base);
+}
+
+/* Scroll snap & custom scroll utilities */
+.snap-inline {
+  scroll-snap-type: x mandatory;
+}
+.snap-start {
+  scroll-snap-align: start;
+}
+
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+/* Base Body Styles */
+html, body, #root {
+  background-color: var(--bg);
+  color: var(--text-1);
+  font-family: 'DM Sans', sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  width: 100vw;
+  overflow-x: hidden;
+  transition: background-color var(--transition-base), color var(--transition-base);
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* Hide scrollbars for specific horizontal lists */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* Custom status card states & glows */
+.card-glow-success {
+  box-shadow: 0 0 15px rgba(34, 197, 94, 0.05);
+}
+.card-glow-success:hover {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4) !important;
+}
+
+.card-glow-warning {
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.06);
+}
+.card-glow-warning:hover {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.4) !important;
+}
+
+.card-glow-danger {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.06);
+}
+.card-glow-danger:hover {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.4) !important;
+}
+
+.card-glow-offline {
+  box-shadow: 0 0 15px rgba(92, 87, 112, 0.02);
+}
+.card-glow-offline:hover {
+  box-shadow: 0 0 20px rgba(92, 87, 112, 0.12);
+  border-color: rgba(92, 87, 112, 0.3) !important;
+}
+
+.card-glow-accent {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.05);
+}
+.card-glow-accent:hover {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.4) !important;
+}
+

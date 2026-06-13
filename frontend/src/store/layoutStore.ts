@@ -7,6 +7,8 @@ interface LayoutState {
   isSidebarCollapsed: boolean;
   isAddNodeModalOpen: boolean;
   pendingCount: number;
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
   setCopilotOpen: (open: boolean) => void;
   toggleCopilot: () => void;
   setSidebarOpen: (open: boolean) => void;
@@ -22,6 +24,8 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   isSidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
   isAddNodeModalOpen: false,
   pendingCount: 0,
+  paletteOpen: false,
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
   setCopilotOpen: (open) => set({ isCopilotOpen: open }),
   toggleCopilot: () => set((state) => ({ isCopilotOpen: !state.isCopilotOpen })),
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),

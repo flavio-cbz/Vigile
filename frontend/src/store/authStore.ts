@@ -14,20 +14,21 @@ interface AuthState {
   login: (accessToken: string, refreshToken: string, user: User) => void;
   logout: () => void;
   setAccessToken: (token: string | null) => void;
+  setTokens: (accessToken: string | null, refreshToken: string | null) => void;
 }
 
 // Helper to get initial state from localStorage
 const getStoredAuth = () => {
   try {
-    const accessToken = localStorage.getItem('vigile_access_token');
-    const refreshToken = localStorage.getItem('vigile_refresh_token');
     const userStr = localStorage.getItem('vigile_user');
     const user = userStr ? JSON.parse(userStr) : null;
+    const accessToken = localStorage.getItem('vigile_access_token');
+    const refreshToken = localStorage.getItem('vigile_refresh_token');
     return {
       accessToken,
       refreshToken,
       user,
-      isAuthenticated: !!accessToken,
+      isAuthenticated: !!user,
     };
   } catch (e) {
     console.error('Failed to parse stored auth', e);
@@ -43,9 +44,9 @@ const getStoredAuth = () => {
 export const useAuthStore = create<AuthState>((set) => ({
   ...getStoredAuth(),
   login: (accessToken, refreshToken, user) => {
-    localStorage.setItem('vigile_access_token', accessToken);
-    localStorage.setItem('vigile_refresh_token', refreshToken);
     localStorage.setItem('vigile_user', JSON.stringify(user));
+    if (accessToken) localStorage.setItem('vigile_access_token', accessToken);
+    if (refreshToken) localStorage.setItem('vigile_refresh_token', refreshToken);
     set({ accessToken, refreshToken, user, isAuthenticated: true });
   },
   logout: () => {
@@ -61,5 +62,22 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.removeItem('vigile_access_token');
     }
     set({ accessToken, isAuthenticated: !!accessToken });
+  },
+  setTokens: (accessToken, refreshToken) => {
+    if (accessToken) {
+      localStorage.setItem('vigile_access_token', accessToken);
+    } else {
+      localStorage.removeItem('vigile_access_token');
+    }
+    if (refreshToken) {
+      localStorage.setItem('vigile_refresh_token', refreshToken);
+    } else {
+      localStorage.removeItem('vigile_refresh_token');
+    }
+    set((state) => ({
+      accessToken,
+      refreshToken,
+      isAuthenticated: !!accessToken || !!state.user,
+    }));
   },
 }));

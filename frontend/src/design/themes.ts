@@ -1,0 +1,60 @@
+export const themes = {
+  'warm-dark': {         // DEFAULT - Rebranded/re-styled to Obsidian Command
+    '--bg':           '#0a0a0f',
+    '--surface':      '#12121a',
+    '--surface-2':    '#1a1a26',
+    '--surface-3':    '#232335',
+    '--border':       'rgba(232, 228, 240, 0.05)',
+    '--border-strong':'rgba(232, 228, 240, 0.12)',
+    '--accent':       '#6366f1',
+    '--accent-hover': '#4f46e5',
+    '--accent-muted': 'rgba(99,102,241,0.15)',
+    '--text-1':       '#e8e4f0',   // Lavande primary
+    '--text-2':       '#9a97b0',   // Lavande secondary
+    '--text-3':       '#52506b',   // Lavande muted
+  },
+  'cool-dark': {
+    '--bg':           '#090B0E',
+    '--surface':      '#101418',
+    '--surface-2':    '#161B22',
+    '--surface-3':    '#1C2330',
+    '--border':       'rgba(255,255,255,0.06)',
+    '--border-strong':'rgba(255,255,255,0.12)',
+    '--accent':       '#2DD4BF',
+    '--accent-hover': '#20B9A6',
+    '--accent-muted': 'rgba(45,212,191,0.12)',
+    '--text-1':       '#E8F0F5',
+    '--text-2':       '#7A9AB0',
+    '--text-3':       '#3A5060',
+  },
+  'gray-dark': {
+    '--bg':           '#0A0A0C',
+    '--surface':      '#111114',
+    '--surface-2':    '#18181C',
+    '--surface-3':    '#1E1E24',
+    '--border':       'rgba(255,255,255,0.06)',
+    '--border-strong':'rgba(255,255,255,0.12)',
+    '--accent':       '#E8650A',
+    '--accent-hover': '#D4560A',
+    '--accent-muted': 'rgba(232,101,10,0.12)',
+    '--text-1':       '#F0F0F5',
+    '--text-2':       '#8080A0',
+    '--text-3':       '#404060',
+  },
+  'light': {
+    '--bg':           '#F5F0EB',
+    '--surface':      '#FFFFFF',
+    '--surface-2':    '#F0EBE5',
+    '--surface-3':    '#E8E0D8',
+    '--border':       'rgba(0,0,0,0.08)',
+    '--border-strong':'rgba(0,0,0,0.15)',
+    '--accent':       '#E8650A',
+    '--accent-hover': '#D4560A',
+    '--accent-muted': 'rgba(232,101,10,0.12)',
+    '--text-1':       '#1A1210',
+    '--text-2':       '#6A5C50',
+    '--text-3':       '#A09080',
+  },
+} as const;
+
+export type ThemeKey = keyof typeof themes;

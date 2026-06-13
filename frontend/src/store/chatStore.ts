@@ -121,7 +121,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         return newSession;
       }
-    } catch (err) {
+    } catch {
       useToastStore.getState().addToast('error', 'Erreur', 'Impossible de créer la session de chat.');
     }
     return null;
@@ -145,7 +145,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         useToastStore.getState().addToast('success', 'Succès', 'Conversation supprimée.');
       }
-    } catch (err) {
+    } catch {
       useToastStore.getState().addToast('error', 'Erreur', 'Impossible de supprimer la conversation.');
     }
   },
@@ -278,7 +278,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             } else if (data.type === 'error') {
               useToastStore.getState().addToast('error', 'Erreur IA', data.detail || 'Erreur inconnue');
             }
-          } catch (e) {
+          } catch {
             // Ignore parse errors on incomplete lines
           }
         }
@@ -323,7 +323,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           };
         });
       }
-    } catch (err) {
+    } catch {
       useToastStore.getState().addToast('error', 'Erreur', 'Impossible de mettre à jour la conversation.');
     }
   },
