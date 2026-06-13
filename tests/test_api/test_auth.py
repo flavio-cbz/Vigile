@@ -36,6 +36,8 @@ async def test_login_success(client: AsyncClient, db):
     assert "refresh_token" in data
     assert data["token_type"] == "bearer"
     assert data["expires_in"] > 0
+    assert "vigile_access_token" in response.cookies
+    assert "vigile_refresh_token" in response.cookies
 
     # Verify last_login updated
     async with db.execute("SELECT last_login FROM users WHERE username = 'admin'") as cursor:
@@ -103,6 +105,31 @@ async def test_refresh_token_success(client: AsyncClient, db):
     assert "access_token" in data
     assert "refresh_token" in data
     assert data["refresh_token"] != refresh_token
+    assert "vigile_access_token" in response.cookies
+    assert "vigile_refresh_token" in response.cookies
+
+    async with db.execute(
+        "SELECT action FROM audit_log WHERE action = 'TOKEN_REFRESH'"
+    ) as cursor:
+        row = await cursor.fetchone()
+        assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_from_httponly_cookie(client: AsyncClient):
+    login_resp = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "admin"}
+    )
+
+    response = await client.post(
+        "/api/auth/refresh",
+        json={},
+        cookies={"vigile_refresh_token": login_resp.cookies["vigile_refresh_token"]},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert "vigile_access_token" in response.cookies
+    assert "vigile_refresh_token" in response.cookies
 
 
 @pytest.mark.asyncio
@@ -271,6 +298,12 @@ async def test_get_me(client: AsyncClient, db):
     assert data["username"] == "admin"
     assert data["role"] == "admin"
 
+    cookie_response = await client.get(
+        "/api/auth/me",
+        cookies={"vigile_access_token": login_resp.cookies["vigile_access_token"]},
+    )
+    assert cookie_response.status_code == status.HTTP_200_OK
+
 
 @pytest.mark.asyncio
 async def test_login_password_verify_exception(client: AsyncClient, security: SecurityManager):
@@ -400,5 +433,5 @@ async def test_change_password_user_not_found(client: AsyncClient, security: Sec
         headers=headers,
         json={"old_password": "any", "new_password": "newadminpassword"}
     )
-    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "user not found" in response.json()["detail"].lower()

@@ -16,13 +16,12 @@ import time
 import uuid
 from typing import Annotated
 
-import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Header, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from master.api.deps import CurrentUser, DB, get_node_manager, get_security, require_role, Insights, get_insights_manager, get_locale
-from master.api.demo_data import DEMO_NODES, DEMO_USER_ID, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
+from master.api.deps import DB, get_node_manager, get_security, require_role, Insights, get_locale
+from master.api.demo_data import DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
 from master.core.audit import log_action
 from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
@@ -773,10 +772,9 @@ async def get_node_insights(
 ) -> dict:
     """Fetch real-time natural language insights for CPU, memory, and disk usage."""
     if is_demo(claims):
-        return {
-            "node_id": node_id,
-            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "insights": [
+        insights = []
+        if node_id in ("demo-node-01", "demo-node-99"):
+            insights = [
                 {
                     "type": "disk",
                     "severity": "warning",
@@ -814,7 +812,65 @@ async def get_node_insights(
                         "swap_used_mb": 0.0
                     }
                 }
-            ],
+            ]
+        elif node_id == "demo-node-02":
+            insights = [
+                {
+                    "type": "disk",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable disk" if locale == "en" else "Disque stable",
+                    "detail": "More than 6 months of space remaining" if locale == "en" else "Plus de 6 mois d'autonomie restants",
+                    "raw": {"used_percent": 42.0}
+                },
+                {
+                    "type": "cpu",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable CPU" if locale == "en" else "CPU stable",
+                    "detail": "Low usage" if locale == "en" else "Faible utilisation",
+                    "raw": {"cpu_percent": 18.7}
+                },
+                {
+                    "type": "ram",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable memory" if locale == "en" else "Mémoire stable",
+                    "detail": "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)",
+                    "raw": {"used_percent": 57.8}
+                }
+            ]
+        else:
+            insights = [
+                {
+                    "type": "disk",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable disk" if locale == "en" else "Disque stable",
+                    "detail": "More than 6 months of space remaining" if locale == "en" else "Plus de 6 mois d'autonomie restants",
+                    "raw": {"used_percent": 25.0}
+                },
+                {
+                    "type": "cpu",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable CPU" if locale == "en" else "CPU stable",
+                    "detail": "Low usage" if locale == "en" else "Faible utilisation",
+                    "raw": {"cpu_percent": 12.0}
+                },
+                {
+                    "type": "ram",
+                    "severity": "ok",
+                    "icon": "✅",
+                    "headline": "Stable memory" if locale == "en" else "Mémoire stable",
+                    "detail": "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)",
+                    "raw": {"used_percent": 30.0}
+                }
+            ]
+        return {
+            "node_id": node_id,
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "insights": insights,
             "profile_confidence": "high"
         }
 

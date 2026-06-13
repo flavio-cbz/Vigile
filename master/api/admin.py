@@ -18,25 +18,30 @@ import json
 import logging
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import JSONResponse
 
 from master.db.database import get_db_conn
 from master.core.node_manager import node_manager
-from master.core.plugin_manager import plugin_manager
+from master.core.plugin_manager import canonical_plugin_id, plugin_file_stem, plugin_manager
 from master.core.audit import verify_chain, log_action
-from master.core.security_manager import SecurityManager
-from master.api.deps import require_role, get_db, get_security, reset_llm_clients, get_settings
+from master.api.deps import require_role, get_db, reset_llm_clients, get_settings
 from master.api.schemas.admin import LLMSettingsUpdate, IntentConfigUpdate
 from master.api.demo_data import is_demo
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+def _resolve_plugin_stem(plugin_id: str, plugins_dir: str) -> str:
+    for candidate in (plugin_file_stem(plugin_id), plugin_id):
+        if os.path.isfile(os.path.join(plugins_dir, f"{candidate}.py")):
+            return candidate
+    return plugin_file_stem(plugin_id)
 
 
 @router.get("/audit-verify", summary="Verify audit log integrity")
@@ -67,10 +72,10 @@ async def list_active_connections(
 
 @router.get("/settings", summary="Get system settings")
 async def get_system_settings(
-    claims=Depends(require_role("admin")),
+    claims=Depends(require_role("admin", "operator")),
     settings=Depends(get_settings),
 ) -> JSONResponse:
-    """Return system settings with sensitive keys masked. Admin only."""
+    """Return system settings with sensitive keys masked. Admin or operator only."""
     masked_server_secret = "••••••••" if settings.server_secret_key else ""
     masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
     masked_llm_key = "••••••••" if settings.llm_api_key else ""
@@ -122,7 +127,6 @@ async def update_llm_settings(
     if api_key_to_save == "••••••••":
         api_key_to_save = settings.llm_api_key
 
-    # Save to disk
     override_path = Path(settings.database_path).parent / "settings_override.json"
     override_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -140,7 +144,6 @@ async def update_llm_settings(
             detail="Impossible d'enregistrer la configuration sur le disque."
         )
 
-    # Mutate settings in memory
     settings.apply_overrides(
         base_url=body.llm_base_url,
         api_key=api_key_to_save,
@@ -150,7 +153,6 @@ async def update_llm_settings(
     # Reset lazy singletons in deps
     reset_llm_clients()
 
-    # Log to Audit Trail
     await log_action(
         db,
         user_id=claims["sub"],
@@ -158,11 +160,10 @@ async def update_llm_settings(
         details={
             "llm_base_url": body.llm_base_url,
             "llm_model": body.llm_model,
-            "api_key_updated": body.llm_api_key != "••••••••"
-        }
+            "api_key_updated": body.llm_api_key != "••••••••",
+        },
     )
 
-    # Return full settings masked
     masked_server_secret = "••••••••" if settings.server_secret_key else ""
     masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
     masked_llm_key = "••••••••" if settings.llm_api_key else ""
@@ -256,7 +257,7 @@ async def update_intent_config(
 
 @router.get("/plugins", summary="List loaded plugins and hooks")
 async def list_plugins(
-    claims=Depends(require_role("admin")),
+    claims=Depends(require_role("admin", "operator")),
     settings=Depends(get_settings),
 ) -> JSONResponse:
     """Get status, configuration, schema, and hooks of all plugins in the directory."""
@@ -286,8 +287,9 @@ async def list_plugins(
     # 3. Build response for each plugin
     result = []
     for name in plugin_files:
-        is_loaded = name in plugin_manager.loaded_plugins
-        db_state = plugin_db_states.get(name, {"enabled": True, "config": {}})
+        plugin_id = canonical_plugin_id(name)
+        is_loaded = plugin_id in plugin_manager.loaded_plugins
+        db_state = plugin_db_states.get(plugin_id, {"enabled": True, "config": {}})
         
         # Dynamically inspect metadata and schema if loaded
         meta = {
@@ -310,11 +312,11 @@ async def list_plugins(
         plugin_hooks = []
         hooks_registry = plugin_manager.get_hooks()
         for hook_name, plugins in hooks_registry.items():
-            if name in plugins:
+            if plugin_id in plugins:
                 plugin_hooks.append(hook_name)
                 
         result.append({
-            "id": name,
+            "id": plugin_id,
             "name": meta["name"],
             "description": meta["description"],
             "category": meta["category"],
@@ -350,7 +352,6 @@ async def upload_plugin(
     content = await file.read()
     source = content.decode("utf-8")
     
-    # 1. Syntax check
     try:
         compile(source, file.filename, 'exec')
     except Exception as e:
@@ -381,7 +382,6 @@ async def upload_plugin(
             detail=f"Validation AST échouée: {str(e)}"
         )
         
-    # 3. Save file safely
     plugin_name = file.filename[:-3]
     if "/" in plugin_name or "\\" in plugin_name or ".." in plugin_name:
         raise HTTPException(status_code=400, detail="Nom de fichier invalide.")
@@ -395,7 +395,6 @@ async def upload_plugin(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Échec de l'écriture du fichier: {str(e)}")
         
-    # 4. Save default DB config
     db = get_db_conn()
     await db.execute(
         "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, '{}')",
@@ -403,7 +402,6 @@ async def upload_plugin(
     )
     await db.commit()
     
-    # 5. Load plugin dynamically
     success = plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
     if not success:
         if os.path.exists(plugin_path):
@@ -416,7 +414,6 @@ async def upload_plugin(
             detail="Impossible de charger le plugin dans PluginManager."
         )
         
-    # 6. Audit logging
     await log_action(
         db,
         user_id=claims["sub"],
@@ -443,7 +440,8 @@ async def configure_plugin(
     db = get_db_conn()
     
     # Validate plugin exists
-    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_id}.py")
+    plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
+    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
     if not os.path.isfile(plugin_path):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
         
@@ -481,7 +479,8 @@ async def toggle_plugin(
     db = get_db_conn()
     
     # Validate plugin exists
-    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_id}.py")
+    plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
+    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
     if not os.path.isfile(plugin_path):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
         
@@ -502,9 +501,9 @@ async def toggle_plugin(
     
     # Reload or Unload dynamically
     if new_state:
-        plugin_manager.load_plugin(plugin_id, settings.plugins_dir)
+        plugin_manager.load_plugin(plugin_stem, settings.plugins_dir)
     else:
-        await plugin_manager.unload_plugin(plugin_id)
+        await plugin_manager.unload_plugin(plugin_stem)
         
     # Log audit
     await log_action(
@@ -538,12 +537,13 @@ async def delete_plugin(
     db = get_db_conn()
     
     # Validate plugin exists
-    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_id}.py")
+    plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
+    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
     if not os.path.isfile(plugin_path):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
         
     # 1. Unload hooks dynamically
-    await plugin_manager.unload_plugin(plugin_id)
+    await plugin_manager.unload_plugin(plugin_stem)
     
     # 2. Remove file from disk
     try:

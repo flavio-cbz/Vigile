@@ -11,7 +11,7 @@ from master.core.security_manager import SecurityManager
 @pytest.fixture
 def auth_headers(security: SecurityManager):
     def _make(role: str = "admin"):
-        token = security.create_access_token("demo-user", "demo", role)
+        token = security.create_access_token("demo-user", "guest", role)
         return {"Authorization": f"Bearer {token}"}
     return _make
 
@@ -39,7 +39,7 @@ def clear_rate_limiter():
 async def test_demo_login_success(client: AsyncClient):
     response = await client.post(
         "/api/auth/login",
-        json={"username": "demo", "password": "demo"},
+        json={"username": "guest", "password": "guest"},
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -53,7 +53,7 @@ async def test_demo_login_success(client: AsyncClient):
 async def test_demo_login_wrong_password(client: AsyncClient):
     response = await client.post(
         "/api/auth/login",
-        json={"username": "demo", "password": "wrong"},
+        json={"username": "guest", "password": "wrong"},
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -62,7 +62,7 @@ async def test_demo_login_wrong_password(client: AsyncClient):
 async def test_demo_refresh_token(client: AsyncClient):
     login_resp = await client.post(
         "/api/auth/login",
-        json={"username": "demo", "password": "demo"},
+        json={"username": "guest", "password": "guest"},
     )
     refresh_token = login_resp.json()["refresh_token"]
 
@@ -80,7 +80,7 @@ async def test_demo_refresh_token(client: AsyncClient):
 async def test_demo_change_password_blocked(client: AsyncClient):
     login_resp = await client.post(
         "/api/auth/login",
-        json={"username": "demo", "password": "demo"},
+        json={"username": "guest", "password": "guest"},
     )
     access_token = login_resp.json()["access_token"]
 
@@ -88,7 +88,7 @@ async def test_demo_change_password_blocked(client: AsyncClient):
     response = await client.post(
         "/api/auth/change-password",
         headers=headers,
-        json={"old_password": "demo", "new_password": "newpass123"},
+        json={"old_password": "guest", "new_password": "newpass123"},
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -97,7 +97,7 @@ async def test_demo_change_password_blocked(client: AsyncClient):
 async def test_demo_me(client: AsyncClient):
     login_resp = await client.post(
         "/api/auth/login",
-        json={"username": "demo", "password": "demo"},
+        json={"username": "guest", "password": "guest"},
     )
     access_token = login_resp.json()["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -105,7 +105,7 @@ async def test_demo_me(client: AsyncClient):
     response = await client.get("/api/auth/me", headers=headers)
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert data["username"] == "demo"
+    assert data["username"] == "guest"
     assert data["role"] == "admin"
 
 
@@ -117,11 +117,17 @@ async def test_demo_list_nodes(client: AsyncClient, auth_headers):
     response = await client.get("/api/nodes", headers=auth_headers("admin"))
     assert response.status_code == status.HTTP_200_OK
     nodes = response.json()
-    assert len(nodes) == 3
+    assert len(nodes) >= 6
     node_ids = {n["id"] for n in nodes}
     assert "demo-node-01" in node_ids
     assert "demo-node-02" in node_ids
     assert "demo-node-03" in node_ids
+    assert "demo-node-04" in node_ids
+    assert "demo-node-05" in node_ids
+    assert "demo-node-06" in node_ids
+    assert "demo-node-04" in node_ids
+    assert "demo-node-05" in node_ids
+    assert "demo-node-06" in node_ids
 
 
 @pytest.mark.asyncio
@@ -247,7 +253,10 @@ async def test_demo_containers(client: AsyncClient, auth_headers):
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert len(data["containers"]) == 4
+    assert len(data["containers"]) == 2
+    names = [c["name"] for c in data["containers"]]
+    assert "web-app" in names
+    assert "reverse-proxy" in names
 
 
 @pytest.mark.asyncio
@@ -316,8 +325,12 @@ async def test_demo_proposals(client: AsyncClient, auth_headers):
     )
     assert response.status_code == status.HTTP_200_OK
     proposals = response.json()
-    assert len(proposals) == 3
-    assert all(p["status"] == "PENDING" for p in proposals)
+    assert len(proposals) >= 8
+    assert any(p["status"] == "PENDING" for p in proposals)
+    assert any(p["status"] == "APPROVED" for p in proposals)
+    assert any(p["status"] == "EXECUTED" for p in proposals)
+    assert any(p["status"] == "REJECTED" for p in proposals)
+    assert any(p["status"] == "FAILED" for p in proposals)
 
 
 @pytest.mark.asyncio
@@ -456,4 +469,54 @@ async def test_demo_audit(client: AsyncClient, auth_headers):
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert len(data["entries"]) > 0
-    assert data["entries"][0]["action"] == "USER_LOGIN"
+    # First entry should be the most recent (ORDER BY sequence DESC)
+    assert isinstance(data["entries"][0]["action"], str)
+
+
+# ─── Regression: demo seeder user must also serve mock data ──────────────────
+
+
+def test_is_demo_recognizes_both_guest_and_demo_usernames():
+    from master.api.demo_data import is_demo
+
+    assert is_demo({"username": "guest", "sub": "demo-user"}) is True
+    assert is_demo({"username": "demo", "sub": "real-user-id"}) is True
+    assert is_demo({"username": "operator", "sub": "other-id"}) is False
+    assert is_demo({}) is False
+    assert is_demo({"username": "Demo"}) is False
+
+
+@pytest.mark.asyncio
+async def test_demo_user_via_jwt_sees_mock_nodes(
+    client: AsyncClient, security: SecurityManager
+):
+    token = security.create_access_token(
+        user_id="demo-user", username="demo", role="admin"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = await client.get("/api/nodes", headers=headers)
+    assert response.status_code == status.HTTP_200_OK
+    nodes = response.json()
+    assert len(nodes) == 6
+    node_ids = {n["id"] for n in nodes}
+    assert "demo-node-01" in node_ids
+    assert "demo-node-06" in node_ids
+
+
+@pytest.mark.asyncio
+async def test_demo_user_via_jwt_sees_mock_audit(
+    client: AsyncClient, security: SecurityManager
+):
+    token = security.create_access_token(
+        user_id="demo-user", username="demo", role="admin"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = await client.get("/api/audit", headers=headers)
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["total"] >= 30
+    # First entry should be the most recent (ORDER BY sequence DESC)
+    assert isinstance(data["entries"][0]["action"], str)
+    assert len(data["entries"][0]["action"]) > 0

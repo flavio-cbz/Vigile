@@ -5,7 +5,6 @@ Loads all settings from environment variables with sensible defaults.
 
 import os
 import secrets
-from pathlib import Path
 from pydantic import BaseModel, field_validator, ConfigDict
 
 from master.core.secret_loader import load_secret

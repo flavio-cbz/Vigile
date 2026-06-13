@@ -7,7 +7,7 @@ import json
 import urllib.request
 import time
 
-BASE = "http://localhost:8002"
+BASE = "http://localhost:8000"
 PASS = 0
 FAIL = 0
 

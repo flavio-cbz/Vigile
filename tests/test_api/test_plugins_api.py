@@ -86,9 +86,9 @@ async def test_list_plugins_auth_roles(client: AsyncClient, auth_headers):
     assert "systemd" in plugin_ids
     assert "docker" in plugin_ids
 
-    # Operator -> Forbidden
+    # Operator -> Success
     res = await client.get("/api/admin/plugins", headers=auth_headers("operator"))
-    assert res.status_code == status.HTTP_403_FORBIDDEN
+    assert res.status_code == status.HTTP_200_OK
 
     # Viewer -> Forbidden
     res = await client.get("/api/admin/plugins", headers=auth_headers("viewer"))

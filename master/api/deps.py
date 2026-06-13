@@ -15,18 +15,18 @@ import aiosqlite
 from fastapi import Depends, Request, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from master.db.database import get_db_conn, database_session
+from master.db.database import database_session
 from master.core.security_manager import (
     SecurityManager,
     get_security_instance,
     SecurityError,
-    InvalidTokenError,
     ExpiredTokenError,
     ROLES_HIERARCHY,
 )
 from master.core.node_manager import NodeManager, node_manager
 
 bearer_scheme = HTTPBearer(auto_error=False)
+ACCESS_TOKEN_COOKIE = "vigile_access_token"
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,6 @@ def get_security() -> SecurityManager:
 
 
 def get_node_manager() -> NodeManager:
-    """Return the module-level NodeManager singleton."""
     return node_manager
 
 
@@ -83,15 +82,15 @@ async def get_current_user(
     Returns the full claims dict. Raises HTTP 401 on authentication failure,
     HTTP 403 (MUST_CHANGE_PASSWORD) if password change is required.
     """
-    from fastapi import HTTPException, status
-    if credentials is None:
+    token = credentials.credentials if credentials is not None else request.cookies.get(ACCESS_TOKEN_COOKIE)
+    if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        claims = sec.verify_access_token(credentials.credentials)
+        claims = sec.verify_access_token(token)
     except ExpiredTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -106,7 +105,6 @@ async def get_current_user(
         ) from exc
 
     if sec.audit_compromised:
-        from fastapi import HTTPException, status
         user_role = claims.get("role", "viewer")
         is_operator = user_role in ("operator", "admin")
         is_write = request.method in ("POST", "PUT", "DELETE", "PATCH")
@@ -118,14 +116,24 @@ async def get_current_user(
 
     user_id = claims["sub"]
 
-    # Check must_change_password in DB
-    async with db.execute(
-        "SELECT must_change_password FROM users WHERE id = ?",
-        (user_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
+    # Bypass DB check for volatile demo user
+    if user_id == "demo-user" or claims.get("username") == "guest":
+        row = {"is_active": 1, "must_change_password": 0}
+    else:
+        # Check active state and must_change_password in DB
+        async with db.execute(
+            "SELECT is_active, must_change_password FROM users WHERE id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
 
-    if row is not None and row["must_change_password"]:
+    if row is None or not row["is_active"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or deactivated",
+        )
+
+    if row["must_change_password"]:
         path = request.url.path.rstrip("/")
         if path not in ["/api/auth/change-password", "/api/auth/logout", "/api/auth/login"]:
             raise HTTPException(
@@ -149,39 +157,10 @@ def require_role(*roles: str) -> Any:
         async def admin_endpoint(claims=Depends(require_role("admin"))):
             ...
     """
-    def _dependency(
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
-        ],
+    async def _dependency(
+        current_user: Annotated[dict[str, Any], Depends(get_current_user)],
     ) -> dict[str, Any]:
-        sec = get_security_instance()
-        if sec.audit_compromised:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="System Locked: Security Compromised",
-            )
-        if credentials is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        try:
-            claims = sec.verify_access_token(credentials.credentials)
-        except ExpiredTokenError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has expired",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from exc
-        except SecurityError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from exc
-
-        user_role = claims.get("role", "viewer")
+        user_role = current_user.get("role", "viewer")
 
         # Check if the user's role satisfies ANY of the required roles
         user_level = ROLES_HIERARCHY.get(user_role, 0)
@@ -193,11 +172,9 @@ def require_role(*roles: str) -> Any:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions. Required: {roles}",
             )
-        return claims
+        return current_user
     return _dependency
 
-
-import asyncio
 
 _init_lock = threading.RLock()
 _llm_client: "LLMClient | None" = None  # noqa: F821
@@ -206,7 +183,6 @@ _insights_manager: Any = None
 
 
 def get_llm_client() -> "LLMClient":  # noqa: F821
-    """Return the LLMClient singleton, initializing it on first call."""
     global _llm_client
     with _init_lock:
         if _llm_client is None:
@@ -225,7 +201,6 @@ def get_llm_client() -> "LLMClient":  # noqa: F821
 
 
 def get_structured_llm() -> "StructuredLLM":  # noqa: F821
-    """Return the StructuredLLM singleton, initializing it on first call."""
     global _structured_llm
     with _init_lock:
         if _structured_llm is None:
@@ -235,7 +210,6 @@ def get_structured_llm() -> "StructuredLLM":  # noqa: F821
 
 
 def get_insights_manager() -> Any:
-    """Return the InsightsManager singleton, initializing it on first call."""
     global _insights_manager
     with _init_lock:
         if _insights_manager is None:
@@ -262,15 +236,7 @@ from fastapi import Header
 
 def get_locale(accept_language: Annotated[str | None, Header()] = None) -> str:
     """Parse Accept-Language header to determine the client's locale ('fr' or 'en')."""
-    if not accept_language:
-        return "fr"
-    # Parse locales by priority
-    for part in accept_language.split(","):
-        clean_lang = part.split(";")[0].strip().lower()
-        if clean_lang.startswith("en"):
-            return "en"
-        if clean_lang.startswith("fr"):
-            return "fr"
+    # Always return French to keep console locale homogeneous
     return "fr"
 
 
@@ -281,4 +247,3 @@ def get_locale(accept_language: Annotated[str | None, Header()] = None) -> str:
 CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
 DB = Annotated[aiosqlite.Connection, Depends(get_db)]
 Insights = Annotated[Any, Depends(get_insights_manager)]
-

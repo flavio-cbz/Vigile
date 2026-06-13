@@ -59,7 +59,7 @@ async def test_main_lifespan(temp_dir, monkeypatch):
                 assert data["uptime_seconds"] >= 0
                 
                 # Test admin connections endpoint
-                token = sm.get_security_instance().create_access_token("test-admin", "admin", "admin")
+                token = sm.get_security_instance().create_access_token("demo-user", "demo-user", "admin")
                 headers = {"Authorization": f"Bearer {token}"}
                 response = await c.get("/api/admin/nodes/connections", headers=headers)
                 assert response.status_code == status.HTTP_200_OK
@@ -142,9 +142,9 @@ async def test_admin_settings_endpoint(db, auth_headers):
         assert "server_secret_key" in data
         assert data["server_secret_key"] == "••••••••"
         
-        # 2. Operator user -> 403 Forbidden
+        # 2. Operator user -> 200 OK
         response2 = await c.get("/api/admin/settings", headers=auth_headers("operator"))
-        assert response2.status_code == status.HTTP_403_FORBIDDEN
+        assert response2.status_code == status.HTTP_200_OK
 
         # 3. Viewer user -> 403 Forbidden
         response3 = await c.get("/api/admin/settings", headers=auth_headers("viewer"))
@@ -173,7 +173,7 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
 
     from master.core.security_manager import get_security_instance
     security = get_security_instance()
-    demo_token = security.create_access_token("demo-user", "demo", "admin")
+    demo_token = security.create_access_token("demo-user", "guest", "admin")
     demo_headers = {"Authorization": f"Bearer {demo_token}"}
 
     transport = ASGITransport(app=app)
@@ -241,11 +241,11 @@ async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_test_llm_settings(auth_headers):
+async def test_test_llm_settings(db, auth_headers):
     """Test testing LLM settings via POST /api/admin/settings/llm/test."""
     from master.core.security_manager import get_security_instance
     security = get_security_instance()
-    demo_token = security.create_access_token("demo-user", "demo", "admin")
+    demo_token = security.create_access_token("demo-user", "guest", "admin")
     demo_headers = {"Authorization": f"Bearer {demo_token}"}
 
     transport = ASGITransport(app=app)

@@ -12,22 +12,20 @@ Endpoints:
   POST   /api/nodes/{node_id}/containers/{container_id}/restart  Admin: restart container
 """
 
-import json
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
 
-from master.api.deps import DB, CurrentUser, get_node_manager, require_role
+from master.api.deps import DB, get_node_manager, require_role
+from master.core.audit import log_action, AuditAction
 from master.core.node_manager import NodeManager
 from master.plugins.systemd_plugin import (
-    ServiceInfo,
-    ServiceStatus,
     parse_service_list,
     parse_service_status,
 )
-from master.plugins.docker_plugin import ContainerSummary, parse_container_list
+from master.plugins.docker_plugin import parse_container_list
 from master.api.demo_data import (
     DEMO_CONTAINERS,
     DEMO_SERVICES,
@@ -234,6 +232,15 @@ async def restart_service(
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "RESTART_SERVICE", {"service": service_name})
 
+    if result.get("success"):
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.RESTART_SERVICE,
+            node_id=node_id,
+            details={"service_name": service_name},
+        )
+
     return ServiceActionResponse(
         node_id=node_id,
         service=service_name,
@@ -262,7 +269,8 @@ async def list_containers(
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
-        return ContainerListResponse(node_id=node_id, containers=DEMO_CONTAINERS)
+        node_containers = [c for c in DEMO_CONTAINERS if c.get("node_id") == node_id]
+        return ContainerListResponse(node_id=node_id, containers=node_containers)
 
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "LIST_CONTAINERS", {})
@@ -309,6 +317,15 @@ async def restart_container(
 
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "RESTART_CONTAINER", {"container_id": container_id})
+
+    if result.get("success"):
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.RESTART_CONTAINER,
+            node_id=node_id,
+            details={"container_id": container_id},
+        )
 
     return ContainerActionResponse(
         node_id=node_id,

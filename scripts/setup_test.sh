@@ -66,7 +66,7 @@ echo ""
 echo "=== Authenticating as admin ==="
 ADMIN_LOGIN=$(curl -sk -X POST https://localhost:443/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"demo","password":"demo"}')
+  -d '{"username":"admin","password":"admin"}')
 
 ACCESS_TOKEN=$(echo "$ADMIN_LOGIN" | jq -r '.access_token')
 if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
@@ -121,7 +121,7 @@ echo ""
 echo "  # List nodes with enrollment status:"
 echo "  TOKEN=\$(curl -sk https://localhost:443/api/auth/login \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"username\":\"demo\",\"password\":\"demo\"}' | jq -r '.access_token')"
+echo "    -d '{\"username\":\"admin\",\"password\":\"admin\"}' | jq -r '.access_token')"
 echo "  curl -sk https://localhost:443/api/nodes \\"
 echo "    -H \"Authorization: Bearer \$TOKEN\" | jq '.[] | {id, name, state, hostname}'"
 echo ""
