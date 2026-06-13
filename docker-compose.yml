@@ -13,22 +13,7 @@
 
 services:
 
-  # ── Reverse Proxy (HTTPS termination) ───────────────────────────────
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "443:443"
-      - "80:80"    # HTTP→HTTPS redirect
-    volumes:
-      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      master:
-        condition: service_healthy
-    networks:
-      - default
+
 
   # ── Master Node ──────────────────────────────────────────────────────
   master:
@@ -36,10 +21,8 @@ services:
       context: .
       dockerfile: Dockerfile.master
     restart: unless-stopped
-    # Master listens HTTP only on internal network (port 8000).
-    # External HTTPS access is handled by Caddy reverse proxy.
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     volumes:
       - vigile_data:/app/data
     environment:
@@ -70,10 +53,8 @@ services:
       - /proc:/host/proc:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # Connect via Caddy (HTTPS) — Caddy terminates TLS.
-      # ALLOW_INSECURE=true for dev self-signed certs.
-      # In prod with real certs, remove ALLOW_INSECURE.
-      - MASTER_URL=https://caddy:443
+      # Connect directly to Master (HTTP)
+      - MASTER_URL=http://master:8000
       - ALLOW_INSECURE=true
     healthcheck:
       test: ["CMD-SHELL", "pgrep vigile-worker || exit 1"]
@@ -85,5 +66,3 @@ services:
 
 volumes:
   vigile_data:
-  caddy_data:
-  caddy_config:

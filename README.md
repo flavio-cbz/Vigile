@@ -91,27 +91,22 @@ Le Master va initialiser la base de données SQLite `./data/vigile.db` et créer
 
 > **Mode démo** : pour explorer Vigile sans aucune configuration, utilisez les identifiants `guest` / `guest` depuis l'écran de connexion. Toutes les données (nœuds, métriques, propositions, audit) sont simulées en mémoire et réinitialisées au redémarrage du serveur.
 
-### Stack Docker (avec TLS)
+### Stack Docker
 
-Pour déployer la stack complète avec le reverse proxy TLS (recommandé) :
+Pour déployer la stack Master + Worker en local via Docker :
 
 ```bash
-# Lancer Caddy (proxy TLS) + Master
-docker compose up -d caddy master
+# Lancer le serveur Master
+docker compose up -d master
 
-# Vérifier que le Master répond en HTTPS
-curl -sk https://localhost:443/health
+# Vérifier que le Master répond
+curl -sk http://localhost:8000/health
 
 # Enrôler des Workers
 ./scripts/setup_test.sh --workers 2
 ```
 
-Le trafic est chiffré de bout en bout :
-- **Caddy** termine le TLS sur le port 443 (certificats auto-signés en dev, Let's Encrypt en prod)
-- **Master** écoute en HTTP uniquement sur le réseau Docker interne (port 8000)
-- **Worker** se connecte en `wss://` à Caddy
-
-Voir [docs/TLS.md](docs/TLS.md) pour la configuration détaillée.
+Le Worker se connecte directement en `ws://` au Master sur le port 8000.
 
 ### 2. Enrôler un Worker
 
