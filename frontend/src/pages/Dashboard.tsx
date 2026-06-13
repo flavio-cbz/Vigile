@@ -1,420 +1,519 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router';
-import { Server, Terminal, MessageSquare, ShieldAlert, Layers } from 'lucide-react';
-import { useNodeStore } from '../store/nodeStore';
-import { useAuthStore } from '../store/authStore';
-import { useChatStore } from '../store/chatStore';
-import { useLocale } from '../i18n';
-import { usePolling } from '../hooks/usePolling';
-import { api } from '../hooks/useApi';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { Server as ServerIcon, Layers, Sparkles, Activity, CheckSquare } from 'lucide-react';
 
-// Component imports
+import { useNodeStore } from '../store/nodeStore';
+import { useUiStore } from '../store/uiStore';
+import type { ActionProposal, InsightItem } from '../store/uiStore';
+import { useInsightsStore } from '../store/insightsStore';
+import { useChatStore } from '../store/chatStore';
+
 import { HeroBanner } from '../components/dashboard/HeroBanner';
 import { SwimLane } from '../components/dashboard/SwimLane';
 import { ServerCard } from '../components/dashboard/ServerCard';
 import { ContainerCard } from '../components/dashboard/ContainerCard';
 import { InsightCard } from '../components/dashboard/InsightCard';
-import { ActivityCard } from '../components/dashboard/ActivityCard';
+import { ProposalCard } from '../components/dashboard/ProposalCard';
+import { ActivityItem } from '../components/dashboard/ActivityItem';
 import { TrendChart } from '../components/dashboard/TrendChart';
-import { EmptyState } from '../components/ui/EmptyState';
-import { CardSkeleton } from '../components/ui/CardSkeleton';
-import { ProposalModal } from '../components/modals/ProposalModal';
-import { AllChatsModal } from '../components/modals/AllChatsModal';
 
-interface MetricsMap {
-  [nodeId: string]: {
-    cpu: number;
-    mem: number;
-    disk: number;
-    uptime: string;
-    loading: boolean;
-  };
+import { usePolling } from '../hooks/usePolling';
+import { api } from '../hooks/useApi';
+import { Spinner } from '../components/primitives/Spinner';
+import { usePageTitle } from '../hooks/usePageTitle';
+import { formatActorName } from '../utils/formatActor';
+
+interface ContainerItem {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  nodeId: string;
+  nodeName: string;
 }
 
+// Helper to resolve the highest priority active insight for a node: critical > warning > info
+const getTopInsight = (insights?: InsightItem[] | null): InsightItem | null => {
+  if (!insights || insights.length === 0) return null;
+  const severityOrder: Record<string, number> = { critical: 3, warning: 2, info: 1 };
+  
+  // Filter for insights that deserve attention (critical, warning, info)
+  const activeInsights = insights.filter(ins => ins.severity in severityOrder);
+  if (activeInsights.length === 0) return null;
+
+  return [...activeInsights].sort((a, b) => {
+    const aVal = severityOrder[a.severity] || 0;
+    const bVal = severityOrder[b.severity] || 0;
+    return bVal - aVal; // Descending
+  })[0] || null;
+};
+
 export const Dashboard: React.FC = () => {
-  const { t } = useLocale();
+  usePageTitle('Tableau de bord');
   const navigate = useNavigate();
-  const { nodes, fetchNodes, selectNode, isLoading: isNodesLoading } = useNodeStore();
-  const { accessToken } = useAuthStore();
+  const { nodes, isLoading: loadingNodes, fetchNodes } = useNodeStore();
+  const { openCopilot } = useUiStore();
+  const { fetchInsights, insightsByNode } = useInsightsStore();
 
-  const {
-    sessions: chatSessions,
-    fetchSessions
-  } = useChatStore();
+  const [bulkStatus, setBulkStatus] = useState<Record<string, any>>({});
+  const [proposals, setProposals] = useState<ActionProposal[]>([]);
+  const [activity, setActivity] = useState<any[]>([]);
+  const [containers, setContainers] = useState<ContainerItem[]>([]);
 
-  // Local state
-  const [proposals, setProposals] = useState<any[]>([]);
-  const [isProposalsLoading, setIsProposalsLoading] = useState(false);
-  const [nodeMetrics, setNodeMetrics] = useState<MetricsMap>({});
+  const relevantActions = new Set([
+    'PROPOSAL_APPROVED', 'PROPOSAL_REJECTED',
+    'NODE_LOST', 'NODE_STALE', 'NODE_RECONNECTED', 'NODE_ENROLLED',
+    'RESTART_SERVICE', 'RESTART_CONTAINER'
+  ]);
+  const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [loadingContainers, setLoadingContainers] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
-  // Aggregated lists
-  const [containers, setContainers] = useState<any[]>([]);
-  const [isContainersLoading, setIsContainersLoading] = useState(false);
-  const [insights, setInsights] = useState<any[]>([]);
-  const [isInsightsLoading, setIsInsightsLoading] = useState(false);
+  // Proposal actions state
+  const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
+  const [rejectingProposalId, setRejectingProposalId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
-  // Modals state
-  const [selectedProposal, setSelectedProposal] = useState<any | null>(null);
-  const [showAllChatsModal, setShowAllChatsModal] = useState(false);
-
-  useEffect(() => {
-    selectNode('all');
-    fetchNodes();
-    fetchSessions();
-  }, [selectNode, fetchNodes, fetchSessions]);
+  // Fetch node metrics statuses
+  const fetchBulkMetrics = async () => {
+    try {
+      const data = await api<{ statuses: Record<string, any> }>('/api/nodes/bulk/status');
+      if (data && data.statuses) {
+        setBulkStatus(data.statuses);
+        setLastUpdated(Date.now());
+      }
+    } catch (err) {
+      console.error('Failed to fetch bulk statuses:', err);
+    }
+  };
 
   // Fetch proposals
-  const fetchProposals = async () => {
-    if (!accessToken) return;
-    setIsProposalsLoading(true);
+  const fetchProposalsList = async () => {
     try {
-      const data = await api<any[]>('/api/chat/proposals');
+      const data = await api<ActionProposal[]>('/api/chat/proposals?status=PENDING');
       if (data) {
         setProposals(data);
       }
-    } catch (e) {
-      console.error('Failed to load proposals:', e);
-    } finally {
-      setIsProposalsLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch proposals list:', err);
     }
   };
 
-  useEffect(() => {
-    fetchProposals();
-  }, [accessToken]);
+  // Fetch recent activity from audit logs
+  const fetchRecentActivity = async () => {
+    try {
+      const data = await api<{ entries: any[] }>('/api/audit?limit=20');
+      if (data && data.entries) {
+        const filtered = data.entries
+          .filter(e => relevantActions.has(e.action))
+          .slice(0, 8);
+        setActivity(filtered);
+      }
+    } catch (err) {
+      console.error('Failed to fetch recent audit activity:', err);
+    }
+  };
 
-  // Global polling for active lists
-  usePolling('dashboard_lists', () => {
-    fetchNodes();
-    fetchProposals();
-    fetchSessions();
-  }, 30000);
-
-  // Fetch live metrics, containers, and insights for online nodes
-  useEffect(() => {
-    const onlineNodes = nodes.filter((n) => n.online);
+  // Fetch all containers across online nodes
+  const fetchAllContainers = async () => {
+    const onlineNodes = nodes.filter(n => n.online);
     if (onlineNodes.length === 0) {
       setContainers([]);
-      setInsights([]);
       return;
     }
-
-    const fetchAllNodeMetrics = async () => {
-      // Set initial loading states
-      setNodeMetrics((prev) => {
-        const next = { ...prev };
-        onlineNodes.forEach((node) => {
-          if (!next[node.id]) {
-            next[node.id] = { cpu: 0, mem: 0, disk: 0, uptime: 'N/A', loading: true };
+    setLoadingContainers(true);
+    try {
+      const containerPromises = onlineNodes.map(async (node) => {
+        try {
+          const res = await api<{ containers: any[] }>(`/api/nodes/${node.id}/containers`, { skipToast: true });
+          if (res && res.containers) {
+            return res.containers.map(c => ({
+              ...c,
+              nodeId: node.id,
+              nodeName: node.name
+            }));
           }
-        });
-        return next;
+        } catch (err) {
+          console.error(`Failed to fetch containers for node ${node.name}:`, err);
+        }
+        return [];
       });
 
-      const fetchedMetrics: MetricsMap = {};
-      await Promise.all(
-        onlineNodes.map(async (node) => {
-          try {
-            const data = await api<any>(`/api/nodes/${node.id}/stats?limit=1`);
-            if (data && data.snapshots && data.snapshots.length > 0) {
-              const snap = data.snapshots[0];
-              const cpu = Math.round(snap.cpu_percent);
-              const mem = Math.round(snap.mem_percent);
-              const disk = Math.round(snap.disk_percent);
-              
-              const uptSec = snap.uptime_seconds;
-              const days = Math.floor(uptSec / 86400);
-              const hrs = Math.floor((uptSec % 86400) / 3600);
-              const uptimeStr = days > 0 ? `${days}j ${hrs}h` : `${hrs}h`;
+      const results = await Promise.all(containerPromises);
+      const flattened = results.flat();
+      
+      // Sort exited/stopped first, then running
+      const sorted = flattened.sort((a, b) => {
+        const aState = (a.state ?? '').toLowerCase();
+        const aStatus = (a.status ?? '').toLowerCase();
+        const bState = (b.state ?? '').toLowerCase();
+        const bStatus = (b.status ?? '').toLowerCase();
+        const aRunning = aState === 'running' || aStatus.includes('up');
+        const bRunning = bState === 'running' || bStatus.includes('up');
+        if (aRunning && !bRunning) return 1;
+        if (!aRunning && bRunning) return -1;
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      });
 
-              fetchedMetrics[node.id] = { cpu, mem, disk, uptime: uptimeStr, loading: false };
-            } else {
-              fetchedMetrics[node.id] = { cpu: 0, mem: 0, disk: 0, uptime: 'N/A', loading: false };
-            }
-          } catch (e) {
-            fetchedMetrics[node.id] = { cpu: 0, mem: 0, disk: 0, uptime: 'Erreur', loading: false };
-          }
-        })
-      );
+      setContainers(sorted);
+    } catch (err) {
+      console.error('Failed to aggregate containers:', err);
+    } finally {
+      setLoadingContainers(false);
+    }
+  };
 
-      setNodeMetrics((prev) => ({ ...prev, ...fetchedMetrics }));
-      setLastUpdated(Date.now());
-    };
+  // Load initial data — insights are fetched in parallel to prevent layout shift
+  useEffect(() => {
+    const loadAll = async () => {
+      setLoadingDashboard(true);
+      setInsightsLoading(true);
+      await fetchNodes();
+      // Start parallel fetches for metrics, proposals, and activity
+      await Promise.all([
+        fetchBulkMetrics(),
+        fetchProposalsList(),
+        fetchRecentActivity(),
+      ]);
+      setLoadingDashboard(false);
 
-    const fetchAllContainers = async () => {
-      setIsContainersLoading(true);
-      try {
-        const list = await Promise.all(
-          onlineNodes.map(async (node) => {
-            try {
-              const data = await api<{ containers: any[] }>(`/api/nodes/${node.id}/containers`);
-              if (data && data.containers) {
-                return data.containers.map((c) => ({
-                  ...c,
-                  nodeId: node.id,
-                  nodeName: node.name
-                }));
-              }
-            } catch (err) {
-              console.error(`Failed to fetch containers for ${node.name}:`, err);
-            }
-            return [];
-          })
+      // Fetch insights for all online nodes (after nodes are loaded)
+      const currentNodes = useNodeStore.getState().nodes;
+      const onlineNodes = currentNodes.filter(n => n.online && n.id);
+      if (onlineNodes.length > 0) {
+        await Promise.allSettled(
+          onlineNodes.map(n => fetchInsights(n.id))
         );
-        setContainers(list.flat());
-      } catch (err) {
-        console.error('Failed to load aggregated containers:', err);
-      } finally {
-        setIsContainersLoading(false);
       }
+      setInsightsLoading(false);
     };
 
-    const fetchAllInsights = async () => {
-      setIsInsightsLoading(true);
-      try {
-        const list = await Promise.all(
-          onlineNodes.map(async (node) => {
-            try {
-              const data = await api<{ insights: any[] }>(`/api/nodes/${node.id}/insights`);
-              if (data && data.insights) {
-                return data.insights.map((i) => ({
-                  ...i,
-                  nodeId: node.id,
-                  nodeName: node.name
-                }));
-              }
-            } catch (err) {
-              console.error(`Failed to fetch insights for ${node.name}:`, err);
-            }
-            return [];
-          })
-        );
-        setInsights(list.flat());
-      } catch (err) {
-        console.error('Failed to load aggregated insights:', err);
-      } finally {
-        setIsInsightsLoading(false);
-      }
-    };
+    loadAll();
+  }, []);
 
-    fetchAllNodeMetrics();
-    fetchAllContainers();
-    fetchAllInsights();
+  // Sync containers when node list loaded/updated
+  useEffect(() => {
+    if (nodes.length > 0) {
+      fetchAllContainers();
+    }
   }, [nodes]);
 
-  const handleProposalUpdated = () => {
-    setSelectedProposal(null);
-    fetchProposals();
-  };
+  // Poll intervals registration (using central hook)
+  usePolling('bulk_metrics_poll', fetchBulkMetrics, 15000);
+  usePolling('dashboard_proposals_poll', fetchProposalsList, 30000);
+  usePolling('dashboard_activity_poll', fetchRecentActivity, 30000);
+  usePolling('dashboard_containers_poll', fetchAllContainers, 45000);
 
-  const handleSessionDeleted = () => {
-    fetchSessions();
-  };
+  // Combine all insights into a flat list (includes real + synthetic offline insights)
+  const allInsightsList: Array<{ insight: any; nodeName: string; nodeId: string }> = [];
+  let stableMetricsCount = 0;
 
-  // Sorting Docker containers: crit/stopped first, then running
-  const isRunning = (c: any) =>
-    c.state.toLowerCase() === 'running' || c.status.toLowerCase().includes('up');
-
-  const sortedContainers = [...containers].sort((a, b) => {
-    const aRun = isRunning(a);
-    const bRun = isRunning(b);
-    if (!aRun && bRun) return -1;
-    if (aRun && !bRun) return 1;
-    return 0;
+  // Add real insights from the store
+  Object.entries(insightsByNode).forEach(([nodeId, list]) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    list.forEach((insight) => {
+      if (insight.severity === 'ok') {
+        stableMetricsCount++;
+      } else {
+        allInsightsList.push({ insight, nodeName: node.name, nodeId });
+      }
+    });
   });
 
-  return (
-    <div className="flex-grow space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-      {/* Hero Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-5">
-        <div>
-          <h1 className="text-xl font-bold text-ink-primary tracking-tight">
-            {t('nav.dashboard')}
-          </h1>
-          <p className="text-xs text-ink-secondary mt-0.5">
-            {nodes.length <= 1
-              ? "Gérez votre serveur avec l'assistance autonome de Vigile."
-              : "Gérez votre infrastructure de serveurs avec l'assistance autonome de Vigile."}
-          </p>
-        </div>
-      </div>
+  // Generate synthetic offline insights for offline nodes
+  nodes
+    .filter(n => !n.online)
+    .forEach(n => {
+      const hbTime = n.last_heartbeat;
+      const hbLabel = hbTime
+        ? new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR')
+        : null;
 
-      {/* Global Health Status Banner */}
+      allInsightsList.unshift({
+        insight: {
+          type: 'offline',
+          severity: 'offline' as const,
+          icon: '📡',
+          headline: hbTime
+            ? `Hors-ligne — dernier contact ${hbLabel}`
+            : 'Hors-ligne — aucun heartbeat enregistré',
+          detail: hbTime
+            ? `Dernier heartbeat reçu le ${hbLabel}. Vérifiez la connectivité réseau.`
+            : 'Ce nœud n\'a jamais envoyé de heartbeat. Vérifiez l\'enrollment.',
+          raw: {
+            last_heartbeat: hbTime,
+          },
+        },
+        nodeName: n.name,
+        nodeId: n.id,
+      });
+    });
+
+  const filteredActivity = activity;
+
+  const handleApproveProposal = async (id: string) => {
+    setLoadingProposalId(id);
+    try {
+      const success = await useChatStore.getState().approveProposal(id);
+      if (success) {
+        await Promise.all([fetchProposalsList(), fetchRecentActivity()]);
+      }
+    } finally {
+      setLoadingProposalId(null);
+    }
+  };
+
+  const handleRejectInit = (id: string) => {
+    setRejectingProposalId(id);
+    setRejectReason('');
+  };
+
+  const formatUptime = (seconds: number | undefined): string => {
+    if (seconds === undefined || seconds === null) return 'N/A';
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = seconds / 60;
+    if (minutes < 60) return `${Math.round(minutes)}m`;
+    const hours = minutes / 60;
+    if (hours < 24) return `${Math.round(hours)}h`;
+    const days = hours / 24;
+    return `${Math.round(days)}j`;
+  };
+
+  if (loadingDashboard || loadingNodes) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs select-none">
+        <Spinner size="md" />
+        <span>CONSTITUTION DE LA SÉQUENCE D'HUD...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 pb-10 animate-fade-in">
       <HeroBanner nodes={nodes} lastUpdated={lastUpdated} />
 
-      {/* horizontal lists wrapper */}
-      <div className="space-y-8 mt-6">
-        {/* Row 1: Servers */}
+      {insightsLoading ? (
         <SwimLane
-          title={t('swim.servers')}
-          icon={Server}
-          isLoading={isNodesLoading}
-          skeletonComponent={<CardSkeleton />}
+          title="Insights IA"
+          icon={Sparkles}
+          layout="grid"
         >
-          {nodes.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<Server size={32} />}
-              title="Aucun serveur"
-              description="Ajoutez votre premier serveur dans le menu Administration."
-            />
-          ) : (
-            nodes.map((node) => (
-              <ServerCard
-                key={node.id}
-                node={node}
-                metrics={nodeMetrics[node.id]}
-                onClick={() => navigate(`/nodes/${node.id}`)}
-              />
-            ))
-          )}
+          {[1, 2, 3].map(i => (
+            <div key={i} className="card card-insight animate-pulse flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="h-4 w-16 bg-surface-2 rounded" />
+                <div className="h-4 w-20 bg-surface-2 rounded" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-5 bg-surface-2 rounded w-full" />
+                <div className="h-5 bg-surface-2 rounded w-4/5" />
+                <div className="h-3 bg-surface-2 rounded w-3/5 mt-2" />
+              </div>
+            </div>
+          ))}
         </SwimLane>
-
-        {/* Row 2: Containers */}
-        {nodes.some(n => n.online) && (
-          <SwimLane
-            title={t('swim.containers')}
-            icon={Layers}
-            isLoading={isContainersLoading}
-            skeletonComponent={<CardSkeleton />}
-          >
-            {sortedContainers.length === 0 ? (
-              <EmptyState
-                compact
-                icon={<Layers size={32} />}
-                title="Aucun conteneur"
-                description="Aucun conteneur Docker détecté sur les serveurs actifs."
-              />
-            ) : (
-              sortedContainers.map((container) => (
-                <ContainerCard
-                  key={`${container.nodeId}-${container.id}`}
-                  nodeId={container.nodeId}
-                  nodeName={container.nodeName}
-                  container={container}
-                />
-              ))
-            )}
-          </SwimLane>
-        )}
-
-        {/* Row 3: Insights IA */}
-        {nodes.some(n => n.online) && (
-          <SwimLane
-            title={t('swim.insights')}
-            icon={ShieldAlert}
-            isLoading={isInsightsLoading}
-            skeletonComponent={<CardSkeleton />}
-          >
-            {insights.length === 0 ? (
-              <EmptyState
-                compact
-                icon={<ShieldAlert size={32} />}
-                title="Aucune alerte"
-                description="Tous vos serveurs actifs sont en bonne santé."
-              />
-            ) : (
-              insights.map((insight, idx) => (
-                <InsightCard
-                  key={`${insight.nodeId}-${idx}`}
-                  nodeId={insight.nodeId}
-                  nodeName={insight.nodeName}
-                  insight={insight}
-                />
-              ))
-            )}
-          </SwimLane>
-        )}
-
-        {/* Row 4: Tasks (Proposals) */}
+      ) : allInsightsList.length > 0 ? (
         <SwimLane
-          title={t('swim.activity')}
-          icon={Terminal}
-          onSeeAll={() => navigate('/proposals')}
-          seeAllLabel={t('dash.view_all')}
-          isLoading={isProposalsLoading}
-          skeletonComponent={<CardSkeleton />}
+          title="Insights IA"
+          icon={Sparkles}
+          layout="grid"
+          subtitle={stableMetricsCount > 0 ? `• ${stableMetricsCount} métrique${stableMetricsCount > 1 ? 's' : ''} stable${stableMetricsCount > 1 ? 's' : ''} sur la flotte` : undefined}
         >
-          {proposals.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<Terminal size={32} />}
-              title="Aucune tâche récente"
-              description="Les propositions de commandes apparaîtront ici."
+          {allInsightsList.map((item, idx) => (
+            <InsightCard
+              key={`${item.nodeId}-${item.insight.type}-${idx}`}
+              insight={item.insight}
+              nodeName={item.nodeName}
+              nodeId={item.nodeId}
+              onDiagnose={() =>
+                openCopilot({
+                  trigger: 'diagnostic',
+                  insight: item.insight,
+                  node_id: item.nodeId,
+                })
+              }
             />
-          ) : (
-            proposals.slice(0, 10).map((prop) => (
-              <ActivityCard
+          ))}
+        </SwimLane>
+      ) : stableMetricsCount > 0 ? (
+        <div className="px-4 md:px-12">
+          <div className="flex items-center gap-2 text-xs text-success bg-success/5 border border-success/15 rounded-lg py-2.5 px-4 w-fit">
+            <span className="text-sm">✓</span>
+            <span className="font-interface font-medium">
+              {stableMetricsCount} métriques stables sur la flotte (fonctionnement nominal)
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      <SwimLane
+        title="Vos serveurs"
+        icon={ServerIcon}
+        isLoading={nodes.length === 0}
+        layout="grid"
+        className={(allInsightsList.length > 0 || stableMetricsCount > 0) ? 'border-t border-border/30 pt-6 mt-6' : undefined}
+      >
+        {nodes.map((node) => {
+          const stats = bulkStatus[node.id];
+          const nodeInsights = insightsByNode[node.id];
+          const topInsight = getTopInsight(nodeInsights);
+          return (
+            <ServerCard
+              key={node.id}
+              node={node}
+              metrics={
+                stats
+                  ? {
+                      cpu: stats.cpu,
+                      mem: stats.mem,
+                      disk: stats.disk,
+                      uptime: formatUptime(stats.uptime),
+                      loading: false,
+                    }
+                  : undefined
+              }
+              topInsight={topInsight}
+              onClick={() => navigate(`/nodes/${node.id}`)}
+            />
+          );
+        })}
+      </SwimLane>
+
+      {proposals.length > 0 && (
+        <SwimLane
+          title="Actions proposées"
+          icon={CheckSquare}
+          className="border-t border-border/30 pt-6 mt-6"
+          layout="grid"
+        >
+          {proposals.map((prop) => {
+            const node = nodes.find((n) => n.id === prop.node_id);
+            return (
+              <ProposalCard
                 key={prop.id}
                 proposal={prop}
-                nodeName={nodes.find((n) => n.id === prop.node_id)?.name || prop.node_id}
-                onClick={() => setSelectedProposal(prop)}
+                nodeName={node ? node.name : 'Système'}
+                onApprove={handleApproveProposal}
+                onReject={async (id) => handleRejectInit(id)}
+                loading={loadingProposalId === prop.id}
               />
-            ))
-          )}
+            );
+          })}
         </SwimLane>
-
-        {/* Row 5: Chat Sessions */}
-        <SwimLane
-          title="Conversations Récentes"
-          icon={MessageSquare}
-          onSeeAll={() => setShowAllChatsModal(true)}
-          seeAllLabel={t('dash.view_all')}
-        >
-          {chatSessions.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<MessageSquare size={32} />}
-              title="Aucun chat récent"
-              description="Vos conversations avec l'IA s'afficheront ici."
-            />
-          ) : (
-            chatSessions.slice(0, 10).map((session) => (
-              <Link
-                key={session.id}
-                to={`/chat/${session.id}`}
-                className="w-[240px] h-[130px] shrink-0 card p-4 flex flex-col justify-between hover:border-border-hover hover:bg-surface-1 transition-all duration-200"
-              >
-                <div className="flex items-center gap-1 border-b border-border/40 pb-1">
-                  <MessageSquare size={10} className="text-accent-primary" />
-                  <span className="text-[10px] font-bold text-ink-muted truncate">
-                    {session.node_id
-                      ? (nodes.find((n) => n.id === session.node_id)?.name || 'Serveur')
-                      : 'Global'}
-                  </span>
-                </div>
-                <div className="my-1.5 text-xs font-bold text-ink-primary line-clamp-2 leading-snug">
-                  {session.title}
-                </div>
-                <div className="text-[10px] text-ink-muted font-mono italic">
-                  {new Date(session.updated_at * 1000).toLocaleDateString('fr-FR')}
-                </div>
-              </Link>
-            ))
-          )}
-        </SwimLane>
-      </div>
-
-      {/* Uptime Trend sparklines */}
-      <TrendChart nodes={nodes} />
-
-      {/* Modal: Proposal Detail */}
-      {selectedProposal && (
-        <ProposalModal
-          proposal={selectedProposal}
-          onClose={() => setSelectedProposal(null)}
-          onProposalUpdated={handleProposalUpdated}
-        />
       )}
 
-      {/* Modal: All Chats History */}
-      {showAllChatsModal && (
-        <AllChatsModal
-          chatSessions={chatSessions}
-          onClose={() => setShowAllChatsModal(false)}
-          onSessionDeleted={handleSessionDeleted}
-        />
+      <SwimLane
+        title="Conteneurs"
+        icon={Layers}
+        isLoading={loadingContainers && containers.length === 0}
+        className="border-t border-border/30 pt-6 mt-6"
+      >
+        {containers.map((container) => (
+          <ContainerCard
+            key={`${container.nodeId}-${container.id}`}
+            nodeId={container.nodeId}
+            nodeName={container.nodeName}
+            container={container}
+            onRefresh={fetchAllContainers}
+          />
+        ))}
+      </SwimLane>
+
+      {filteredActivity.length > 0 && (
+        <div className="space-y-3 relative w-full border-t border-border/30 pt-6 mt-6 animate-fade-in">
+          <div className="flex items-center justify-between px-4 md:px-12">
+            <div className="flex items-center gap-2">
+              <Activity className="text-accent w-4.5 h-4.5" />
+              <h3 className="text-sm font-bold text-text-1 tracking-wide uppercase">
+                Activité Récente
+              </h3>
+            </div>
+          </div>
+
+          <div className="px-4 md:px-12">
+            <div className="border border-border rounded-xl bg-surface divide-y divide-border overflow-hidden shadow-md">
+              {filteredActivity.map((act) => (
+                <ActivityItem
+                  key={act.id}
+                  action={act.action}
+                  actor={formatActorName(act.actor || act.user_id)}
+                  userId={act.user_id}
+                  timestamp={act.timestamp}
+                  details={act.details}
+                  nodeId={act.node_id}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="pt-4 border-t border-border-strong">
+        <TrendChart nodes={nodes} />
+      </div>
+
+      {/* Rejection Reason Modal */}
+      {rejectingProposalId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs select-none animate-fade-in">
+          <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-text-1 font-interface uppercase tracking-wider">
+                Motif du rejet requis
+              </h3>
+              <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
+                Veuillez justifier le rejet de cette proposition d'action.
+              </p>
+            </div>
+            
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Ex: Risque d'interruption de service non planifiée..."
+              className="w-full h-24 bg-surface-2 border border-border focus:border-accent/40 rounded-lg p-3 text-xs text-text-1 placeholder:text-text-3 focus:outline-none resize-none font-sans"
+              autoFocus
+            />
+            
+            <div className="flex justify-end gap-2.5 font-interface text-[10px] font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectingProposalId(null);
+                  setRejectReason('');
+                }}
+                className="px-4 py-2 border border-border hover:border-border-strong text-text-2 rounded-lg cursor-pointer transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!rejectReason.trim()}
+                onClick={async () => {
+                  const id = rejectingProposalId;
+                  const reason = rejectReason;
+                  setRejectingProposalId(null);
+                  setRejectReason('');
+                  setLoadingProposalId(id);
+                  try {
+                    const success = await useChatStore.getState().rejectProposal(id, reason);
+                    if (success) {
+                      await fetchProposalsList();
+                    }
+                  } catch (err) {
+                    console.error('Failed to reject proposal:', err);
+                  } finally {
+                    setLoadingProposalId(null);
+                  }
+                }}
+                className="px-4 py-2 bg-severity-critical text-text-1 hover:bg-severity-critical/80 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                Confirmer le rejet
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Outlet } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -8,31 +8,26 @@ import { CommandPalette } from '../ui/CommandPalette';
 import { AddNodeModal } from '../modals/AddNodeModal';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useAuthStore } from '../../store/authStore';
+import { api } from '../../hooks/useApi';
+import { usePolling } from '../../hooks/usePolling';
 
 export const RootLayout: React.FC = () => {
   const { isAddNodeModalOpen, setAddNodeModalOpen } = useLayoutStore();
 
-  // Single polling source for pending proposals count (shared via store)
-  useEffect(() => {
-    const fetchPendingCount = async () => {
-      const token = useAuthStore.getState().accessToken;
-      if (!token) return;
-      try {
-        const response = await fetch('/api/chat/proposals?status_filter=PENDING', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          useLayoutStore.getState().setPendingCount(data.length);
-        }
-      } catch {
-        void 0;
+  const fetchPendingCount = async () => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    try {
+      const data = await api<any[]>('/api/chat/proposals?status=PENDING', { skipToast: true });
+      if (data) {
+        useLayoutStore.getState().setPendingCount(data.length);
       }
-    };
-    fetchPendingCount();
-    const interval = setInterval(fetchPendingCount, 60000);
-    return () => clearInterval(interval);
-  }, []);
+    } catch {
+      void 0;
+    }
+  };
+
+  usePolling('pending_proposals_count_poll', fetchPendingCount, 60000);
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-row bg-bg text-ink relative">

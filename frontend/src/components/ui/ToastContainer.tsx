@@ -27,10 +27,10 @@ const iconMap: Record<ToastType, typeof CheckCircle2> = {
 };
 
 const typeToColors: Record<ToastType, { text: string }> = {
-  success: { text: 'text-success' },
-  error: { text: 'text-danger' },
-  info: { text: 'text-accent-primary' },
-  warning: { text: 'text-warning' },
+  success: { text: 'text-severity-ok' },
+  error: { text: 'text-severity-critical' },
+  info: { text: 'text-accent' },
+  warning: { text: 'text-severity-warning' },
 };
 
 function ToastItem({ toast }: { toast: Toast }) {
@@ -40,7 +40,7 @@ function ToastItem({ toast }: { toast: Toast }) {
 
   return (
     <div
-      className={`flex items-start gap-3 p-4 bg-surface-1 border border-border rounded-lg shadow-lg min-w-[320px] max-w-sm relative overflow-hidden ${
+      className={`flex items-start gap-3 p-4 bg-surface border border-border rounded-lg shadow-2xl min-w-[320px] max-w-sm relative overflow-hidden ${
         toast.exiting ? 'toast-exit' : 'toast-enter'
       }`}
       role="alert"
@@ -48,15 +48,15 @@ function ToastItem({ toast }: { toast: Toast }) {
       <div className={`flex-shrink-0 mt-0.5 ${colors.text}`}>
         <Icon size={18} aria-hidden="true" />
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-ink-primary">{toast.title}</p>
+      <div className="flex-1 min-w-0 font-sans text-xs">
+        <p className="text-sm font-bold text-text-1 font-interface uppercase tracking-wide">{toast.title}</p>
         {toast.message && (
-          <p className="text-xs text-ink-secondary mt-1 leading-relaxed">{toast.message}</p>
+          <p className="text-text-2 mt-1 leading-relaxed">{toast.message}</p>
         )}
       </div>
       <button
         onClick={() => removeToast(toast.id)}
-        className="flex-shrink-0 text-ink-muted hover:text-ink-primary transition-colors duration-150 p-0.5 rounded hover:bg-surface-2"
+        className="flex-shrink-0 text-text-3 hover:text-text-1 transition-colors duration-150 p-0.5 rounded hover:bg-surface-2 cursor-pointer"
         aria-label="Fermer"
       >
         <X size={16} />
@@ -83,7 +83,7 @@ export function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-3">
+    <div className="fixed top-4 right-4 z-50 flex flex-col gap-3" aria-live="polite" role="status">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} />
       ))}

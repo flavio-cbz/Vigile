@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Cpu } from 'lucide-react';
 import { api } from '../../hooks/useApi';
 import { useLocale } from '../../i18n';
@@ -22,192 +21,432 @@ interface TrendChartProps {
   nodes: Node[];
 }
 
+interface BarData {
+  index: number;
+  startTime: number;
+  endTime: number;
+  status: 'ok' | 'warning' | 'critical' | 'nodata';
+  details: string;
+  label: string;
+  snapshots: Snapshot[];
+}
+
+interface IncidentPeriod {
+  type: 'critical' | 'warning';
+  startTime: number;
+  endTime: number;
+  label: string;
+  details: string;
+}
+
 export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
   const { t } = useLocale();
-  const onlineNodes = nodes.filter((n) => n.online);
-
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('');
-  const [metric, setMetric] = useState<'cpu' | 'ram' | 'disk'>('cpu');
-  const [period, setPeriod] = useState<'24h' | '7d'>('24h');
-  const [data, setData] = useState<any[]>([]);
+  const [nodesStats, setNodesStats] = useState<Record<string, Snapshot[]>>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [period, setPeriod] = useState<'24h' | '7d'>(
+    () => (localStorage.getItem('vigile_trend_period') as '24h' | '7d') || '24h'
+  );
+
+  const handlePeriodChange = (p: '24h' | '7d') => {
+    setPeriod(p);
+    localStorage.setItem('vigile_trend_period', p);
+  };
 
   useEffect(() => {
-    if (onlineNodes.length > 0 && !selectedNodeId) {
-      setSelectedNodeId(onlineNodes[0].id);
-    }
-  }, [onlineNodes, selectedNodeId]);
+    if (nodes.length === 0) return;
 
-  useEffect(() => {
-    if (!selectedNodeId) return;
-
-    const fetchStats = async () => {
+    let active = true;
+    const fetchAllStats = async () => {
       setIsLoading(true);
       try {
-        const limit = period === '24h' ? 24 : 100;
-        const res = await api<NodeStatsResponse>(
-          `/api/nodes/${selectedNodeId}/stats?limit=${limit}`
-        );
-        if (res && res.snapshots) {
-          // Sort ascending by time
-          const sorted = [...res.snapshots].sort((a, b) => a.collected_at - b.collected_at);
-          const chartData = sorted.map((s) => ({
-            time: new Date(s.collected_at * 1000).toLocaleTimeString('fr-FR', {
-              hour: '2-digit',
-              minute: '2-digit',
-              ...(period === '7d' ? { day: 'numeric', month: 'short' } : {}),
-            }),
-            cpu: Math.round(s.cpu_percent),
-            ram: Math.round(s.mem_percent),
-            disk: Math.round(s.disk_percent),
-          }));
-          setData(chartData);
-        }
+        const limit = period === '24h' ? 30 : 90;
+        const promises = nodes.map(async (node) => {
+          try {
+            const res = await api<NodeStatsResponse>(
+              `/api/nodes/${node.id}/stats?limit=${limit}`
+            );
+            return { nodeId: node.id, snapshots: res?.snapshots || [] };
+          } catch (err) {
+            console.error(`Failed to fetch stats for node ${node.id}:`, err);
+            return { nodeId: node.id, snapshots: [] };
+          }
+        });
+
+        const results = await Promise.all(promises);
+        if (!active) return;
+
+        const newStats: Record<string, Snapshot[]> = {};
+        results.forEach(({ nodeId, snapshots }) => {
+          newStats[nodeId] = snapshots;
+        });
+        setNodesStats(newStats);
       } catch (err) {
-        console.error('Failed to fetch trend statistics:', err);
+        console.error('Failed to fetch stats for all nodes:', err);
       } finally {
-        setIsLoading(false);
+        if (active) setIsLoading(false);
       }
     };
 
-    fetchStats();
-  }, [selectedNodeId, metric, period]);
+    fetchAllStats();
+    const interval = setInterval(fetchAllStats, 30000);
 
-  if (onlineNodes.length === 0) {
-    return null;
-  }
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [nodes, period]);
 
-  const getMetricColor = () => {
-    if (metric === 'cpu') return { stroke: '#6366f1', fill: 'rgba(99, 102, 241, 0.1)' };
-    if (metric === 'ram') return { stroke: '#f59e0b', fill: 'rgba(245, 158, 11, 0.1)' };
-    return { stroke: '#22c55e', fill: 'rgba(34, 197, 94, 0.1)' };
+  const getTimelineData = (node: Node, snapshots: Snapshot[]): BarData[] => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const durationSec = period === '24h' ? 24 * 3600 : 7 * 24 * 3600;
+    const totalBars = 30;
+    const slotDurationSec = durationSec / totalBars;
+
+    const bars: BarData[] = [];
+    const isDemoNode = node.id.includes('demo');
+
+    for (let i = 0; i < totalBars; i++) {
+      const startTime = nowSec - (totalBars - i) * slotDurationSec;
+      const endTime = nowSec - (totalBars - i - 1) * slotDurationSec;
+
+      // Filter snapshots in this slot
+      const slotSnapshots = snapshots.filter(
+        (s) => s.collected_at >= startTime && s.collected_at < endTime
+      );
+
+      let status: 'ok' | 'warning' | 'critical' | 'nodata';
+      let details: string;
+
+      // Format time label for the tooltip
+      const dateOpts: Intl.DateTimeFormatOptions = {
+        hour: '2-digit',
+        minute: '2-digit',
+      };
+      if (period === '7d') {
+        dateOpts.day = '2-digit';
+        dateOpts.month = 'short';
+      }
+      const timeLabel = new Date(startTime * 1000).toLocaleString('fr-FR', dateOpts);
+
+      if (isDemoNode) {
+        // Simulated timeline for demo nodes to present a rich story
+        if (node.id === 'demo-node-05') {
+          // offline node
+          if (i >= 18) {
+            status = 'critical';
+            details = 'Hors-ligne (Interruption)';
+          } else if (i === 12 || i === 13) {
+            status = 'warning';
+            details = 'Surcharge détectée : CPU: 88%';
+          } else {
+            status = 'ok';
+            details = `Opérationnel (CPU: ${20 + (i % 5) * 8}% | RAM: 35%)`;
+          }
+        } else if (node.id === 'demo-node-01') {
+          // prod-web-01: online with some spikes
+          if (i === 8) {
+            status = 'warning';
+            details = 'Surcharge détectée : CPU: 92%';
+          } else if (i === 22) {
+            status = 'warning';
+            details = 'Surcharge détectée : RAM: 86%';
+          } else {
+            status = 'ok';
+            details = `Opérationnel (CPU: ${15 + (i % 7) * 6}% | RAM: 45%)`;
+          }
+        } else if (node.id === 'demo-node-02') {
+          // prod-db-01: online, stable
+          if (i === 14) {
+            status = 'warning';
+            details = 'Surcharge détectée : Disque: 88%';
+          } else {
+            status = 'ok';
+            details = `Opérationnel (CPU: ${10 + (i % 6) * 5}% | RAM: 58%)`;
+          }
+        } else if (node.id === 'demo-node-03') {
+          // stg-api-01: online, normal
+          status = 'ok';
+          details = `Opérationnel (CPU: ${8 + (i % 4) * 4}% | RAM: 28%)`;
+        } else {
+          // other demo nodes
+          if (i % 15 === 3) {
+            status = 'warning';
+            details = 'Surcharge détectée : CPU: 84%';
+          } else {
+            status = 'ok';
+            details = `Opérationnel (CPU: ${12 + (i % 8) * 3}% | RAM: 32%)`;
+          }
+        }
+      } else {
+        // Real node logic
+        if (slotSnapshots.length > 0) {
+          const maxCpu = Math.max(...slotSnapshots.map((s) => s.cpu_percent));
+          const maxMem = Math.max(...slotSnapshots.map((s) => s.mem_percent));
+          const maxDisk = Math.max(...slotSnapshots.map((s) => s.disk_percent));
+
+          if (maxCpu > 80 || maxMem > 80 || maxDisk > 85) {
+            status = 'warning';
+            const reasons: string[] = [];
+            if (maxCpu > 80) reasons.push(`CPU: ${Math.round(maxCpu)}%`);
+            if (maxMem > 80) reasons.push(`RAM: ${Math.round(maxMem)}%`);
+            if (maxDisk > 85) reasons.push(`Disque: ${Math.round(maxDisk)}%`);
+            details = `Surcharge détectée : ${reasons.join(', ')}`;
+          } else {
+            status = 'ok';
+            details = `Opérationnel (CPU: ${Math.round(maxCpu)}% | RAM: ${Math.round(maxMem)}%)`;
+          }
+        } else {
+          const enrolled = node.enrolled_at || node.created_at / 1000;
+          if (endTime < enrolled) {
+            status = 'nodata';
+            details = 'Non configuré';
+          } else if (!node.online && (node.last_heartbeat === null || startTime > node.last_heartbeat)) {
+            status = 'critical';
+            details = 'Hors-ligne (Interruption)';
+          } else if (!node.online) {
+            status = 'critical';
+            details = 'Hors-ligne (Interruption)';
+          } else {
+            status = 'nodata';
+            details = 'Aucune donnée reçue';
+          }
+        }
+      }
+
+      bars.push({
+        index: i,
+        startTime,
+        endTime,
+        status,
+        details,
+        label: timeLabel,
+        snapshots: slotSnapshots,
+      });
+    }
+
+    return bars;
   };
 
-  const style = getMetricColor();
+  const calculateUptime = (bars: BarData[]): string => {
+    const activeBars = bars.filter((b) => b.status !== 'nodata');
+    if (activeBars.length === 0) return '100%';
+    const upBars = activeBars.filter((b) => b.status === 'ok' || b.status === 'warning');
+    const pct = (upBars.length / activeBars.length) * 100;
+    return pct.toFixed(1) + '%';
+  };
+
+  const getIncidents = (bars: BarData[]): IncidentPeriod[] => {
+    const incidents: IncidentPeriod[] = [];
+    let currentIncident: { type: 'critical' | 'warning'; startIdx: number; endIdx: number; details: string } | null = null;
+
+    for (let idx = 0; idx < bars.length; idx++) {
+      const bar = bars[idx];
+      if (bar.status === 'critical' || bar.status === 'warning') {
+        if (currentIncident && currentIncident.type === bar.status) {
+          currentIncident.endIdx = idx;
+        } else {
+          if (currentIncident) {
+            incidents.push({
+              type: currentIncident.type,
+              startTime: bars[currentIncident.startIdx].startTime,
+              endTime: bars[currentIncident.endIdx].endTime,
+              label: bars[currentIncident.startIdx].label,
+              details: currentIncident.details,
+            });
+          }
+          currentIncident = {
+            type: bar.status,
+            startIdx: idx,
+            endIdx: idx,
+            details: bar.details,
+          };
+        }
+      } else {
+        if (currentIncident) {
+          incidents.push({
+            type: currentIncident.type,
+            startTime: bars[currentIncident.startIdx].startTime,
+            endTime: bars[currentIncident.endIdx].endTime,
+            label: bars[currentIncident.startIdx].label,
+            details: currentIncident.details,
+          });
+          currentIncident = null;
+        }
+      }
+    }
+
+    if (currentIncident) {
+      incidents.push({
+        type: currentIncident.type,
+        startTime: bars[currentIncident.startIdx].startTime,
+        endTime: bars[currentIncident.endIdx].endTime,
+        label: bars[currentIncident.startIdx].label,
+        details: currentIncident.details,
+      });
+    }
+
+    return incidents;
+  };
 
   return (
-    <div className="card w-full flex flex-col gap-4 animate-fade-in">
-      {/* Header and filters */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
+    <div className="card w-full flex flex-col gap-5 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-border-strong pb-3">
         <div>
-          <h4 className="text-sm font-bold text-ink-primary tracking-wide uppercase flex items-center gap-1.5">
-            <Cpu size={16} className="text-accent-primary" />
+          <h4 className="text-sm font-bold text-text-1 tracking-wide uppercase flex items-center gap-1.5 font-interface">
+            <Cpu size={16} className="text-accent" />
             {t('swim.trends')}
           </h4>
-          <p className="text-[10px] text-ink-secondary mt-0.5">
-            Surveillez l'activité des ressources dans le temps.
+          <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
+            Suivi de l'uptime et journal des incidents de la flotte
           </p>
         </div>
 
-        {/* Filters Grid */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Node selector */}
-          <select
-            value={selectedNodeId}
-            onChange={(e) => setSelectedNodeId(e.target.value)}
-            className="select text-xs py-1 px-2.5 max-w-[150px]"
+        {/* Period Selector */}
+        <div className="flex bg-surface-2 border border-border rounded-lg p-0.5 select-none">
+          <button
+            onClick={() => handlePeriodChange('24h')}
+            className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-colors cursor-pointer ${
+              period === '24h' ? 'bg-accent text-white' : 'text-text-3 hover:text-text-2'
+            }`}
           >
-            {onlineNodes.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name}
-              </option>
-            ))}
-          </select>
-
-          {/* Metric Selector Buttons */}
-          <div className="flex bg-surface-1 border border-border rounded-lg p-0.5">
-            <button
-              onClick={() => setMetric('cpu')}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-colors cursor-pointer ${
-                metric === 'cpu' ? 'bg-accent-primary text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'
-              }`}
-            >
-              CPU
-            </button>
-            <button
-              onClick={() => setMetric('ram')}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-colors cursor-pointer ${
-                metric === 'ram' ? 'bg-warning text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'
-              }`}
-            >
-              RAM
-            </button>
-            <button
-              onClick={() => setMetric('disk')}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-colors cursor-pointer ${
-                metric === 'disk' ? 'bg-success text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'
-              }`}
-            >
-              Disk
-            </button>
-          </div>
-
-          {/* Period Selector Buttons */}
-          <div className="flex bg-surface-1 border border-border rounded-lg p-0.5">
-            <button
-              onClick={() => setPeriod('24h')}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-colors cursor-pointer ${
-                period === '24h' ? 'bg-surface-2 text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'
-              }`}
-            >
-              24h
-            </button>
-            <button
-              onClick={() => setPeriod('7d')}
-              className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-colors cursor-pointer ${
-                period === '7d' ? 'bg-surface-2 text-ink-primary' : 'text-ink-secondary hover:text-ink-primary'
-              }`}
-            >
-              7j
-            </button>
-          </div>
+            24h
+          </button>
+          <button
+            onClick={() => handlePeriodChange('7d')}
+            className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-colors cursor-pointer ${
+              period === '7d' ? 'bg-accent text-white' : 'text-text-3 hover:text-text-2'
+            }`}
+          >
+            7j
+          </button>
         </div>
       </div>
 
-      {/* Chart container */}
-      <div className="h-[200px] w-full mt-2 relative">
-        {isLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-surface-0/60 z-10 rounded-lg">
+      {/* Nodes list */}
+      <div className="flex flex-col gap-6">
+        {isLoading && Object.keys(nodesStats).length === 0 ? (
+          <div className="py-8 flex items-center justify-center">
             <ChartSkeleton />
           </div>
-        ) : data.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-xs text-ink-muted italic">
-            {t('dash.empty_state')}
+        ) : nodes.length === 0 ? (
+          <div className="py-8 text-center text-xs text-text-3 italic">
+            Aucun serveur configuré.
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-              <XAxis
-                dataKey="time"
-                tick={{ fill: 'var(--color-ink-muted)', fontSize: 9 }}
-                axisLine={{ stroke: 'var(--color-border)' }}
-                tickLine={false}
-              />
-              <YAxis
-                domain={[0, 100]}
-                tick={{ fill: 'var(--color-ink-muted)', fontSize: 9 }}
-                axisLine={{ stroke: 'var(--color-border)' }}
-                tickLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'var(--color-surface-1)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-ink-primary)',
-                  fontSize: 11,
-                  borderRadius: 'var(--radius-md)',
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey={metric}
-                stroke={style.stroke}
-                fill={style.fill}
-                strokeWidth={1.5}
-                activeDot={{ r: 4 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          nodes.map((node) => {
+            const nodeSnaps = nodesStats[node.id] || [];
+            const timelineBars = getTimelineData(node, nodeSnaps);
+            const uptimePct = calculateUptime(timelineBars);
+            const nodeIncidents = getIncidents(timelineBars);
+
+            return (
+              <div key={node.id} className="flex flex-col gap-2.5 p-4 rounded-xl border border-border bg-surface/40 hover:border-border-strong hover:bg-surface-2/10 transition-all duration-300">
+                {/* Node info row */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        node.online
+                          ? 'bg-severity-ok shadow-[0_0_8px_var(--severity-ok)]'
+                          : 'bg-severity-critical shadow-[0_0_8px_var(--severity-critical)] animate-pulse'
+                      }`}
+                    />
+                    <span className="font-bold text-xs text-text-1">{node.name}</span>
+                    <span className="text-[10px] text-text-3 font-mono truncate max-w-[120px] sm:max-w-none">
+                      {node.hostname || 'no-hostname'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-text-3 uppercase tracking-wider">Uptime:</span>
+                    <span className={`text-xs font-mono font-bold ${
+                      uptimePct === '100.0%' || uptimePct === '100%'
+                        ? 'text-severity-ok'
+                        : uptimePct.startsWith('99')
+                        ? 'text-severity-warning'
+                        : 'text-severity-critical'
+                    }`}>
+                      {uptimePct}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bars Row */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-1 py-1.5">
+                    {timelineBars.map((bar, barIdx) => {
+                      let colorClass = 'bg-text-3/20'; // nodata
+                      if (bar.status === 'ok') colorClass = 'bg-severity-ok/70 hover:bg-severity-ok';
+                      if (bar.status === 'warning') colorClass = 'bg-severity-warning/70 hover:bg-severity-warning';
+                      if (bar.status === 'critical') colorClass = 'bg-severity-critical/70 hover:bg-severity-critical';
+
+                      return (
+                        <div
+                          key={barIdx}
+                          title={`${bar.label} : ${bar.details}`}
+                          className={`flex-1 h-6 rounded-sm transition-transform duration-100 hover:scale-y-125 cursor-pointer relative group ${colorClass}`}
+                        >
+                          {/* Rich custom Tooltip */}
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                            <div className="bg-surface-2 border border-border-strong text-text-1 text-[10px] rounded p-2 shadow-xl whitespace-nowrap flex flex-col gap-0.5">
+                              <span className="font-mono text-text-3">{bar.label}</span>
+                              <span className="font-semibold">{bar.details}</span>
+                            </div>
+                            <div className="w-1.5 h-1.5 bg-surface-2 border-r border-b border-border-strong rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2 z-40" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Time Legend */}
+                  <div className="flex items-center justify-between text-[9px] text-text-3 font-semibold uppercase tracking-wider">
+                    <span>
+                      {period === '24h' ? 'Il y a 24 heures' : 'Il y a 7 jours'}
+                    </span>
+                    <span className="w-12 h-[1px] bg-border-strong/40 flex-1 mx-2" />
+                    <span>Maintenant</span>
+                  </div>
+                </div>
+
+                {/* Incident Summary */}
+                <div className="mt-1 text-[10px] border-t border-border/20 pt-2">
+                  {nodeIncidents.length === 0 ? (
+                    <div className="flex items-center gap-1.5 text-severity-ok font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-severity-ok shrink-0" />
+                      <span>Aucun incident signalé sur la période. Fonctionnement nominal.</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5 text-severity-warning font-bold uppercase tracking-wider text-[9px]">
+                        <span>Journal des incidents ({nodeIncidents.length}) :</span>
+                      </div>
+                      <div className="flex flex-col gap-1 max-h-24 overflow-y-auto pr-1">
+                        {nodeIncidents.map((inc, incIdx) => {
+                          const isCrit = inc.type === 'critical';
+                          return (
+                            <div key={incIdx} className="flex items-start justify-between gap-4 py-1 px-2.5 rounded bg-surface-3/20 border border-border/30">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-1 h-1 rounded-full shrink-0 ${isCrit ? 'bg-severity-critical animate-pulse' : 'bg-severity-warning'}`} />
+                                <span className={isCrit ? 'text-severity-critical font-bold' : 'text-severity-warning font-bold'}>
+                                  {isCrit ? 'Coupure' : 'Alerte'}
+                                </span>
+                                <span className="text-text-2">— {inc.details}</span>
+                              </div>
+                              <span className="text-text-3 font-mono text-[9px] whitespace-nowrap">
+                                {inc.label}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useUiStore } from '../../store/uiStore';
 import {
   LayoutDashboard,
   CheckSquare,
@@ -20,12 +21,14 @@ interface CommandItem {
 }
 
 export const CommandPalette: React.FC = () => {
-  const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-  const toggleCopilot = useLayoutStore((s) => s.toggleCopilot);
+  const isOpen = useLayoutStore((s) => s.paletteOpen);
+  const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
+  const openCopilot = useUiStore((s) => s.openCopilot);
+  const closeCopilot = useUiStore((s) => s.closeCopilot);
 
   const commands: CommandItem[] = useMemo(
     () => [
@@ -34,9 +37,9 @@ export const CommandPalette: React.FC = () => {
       { id: 'audit', label: 'Audit', icon: Activity, action: () => navigate('/audit') },
       { id: 'plugins', label: 'Plugins', icon: Puzzle, action: () => navigate('/plugins') },
       { id: 'chat', label: 'Chat IA', icon: MessageSquareCode, action: () => navigate('/chat') },
-      { id: 'copilot', label: 'Basculer le Copilot', icon: Bot, action: toggleCopilot },
+      { id: 'copilot', label: 'Basculer le Copilot', icon: Bot, action: () => openCopilot({ trigger: 'manual' }) },
     ],
-    [navigate, toggleCopilot],
+    [navigate, openCopilot],
   );
 
   const filteredCommands = useMemo(
@@ -52,7 +55,7 @@ export const CommandPalette: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setIsOpen((prev) => !prev);
+        setPaletteOpen(!isOpen);
       }
       if (e.key === 'Escape' && isOpen) {
         e.preventDefault();
@@ -72,11 +75,18 @@ export const CommandPalette: React.FC = () => {
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    return () => {
+      useUiStore.getState().closeCopilot();
+    };
+  }, [navigate]);
+
   const closePalette = useCallback(() => {
-    setIsOpen(false);
+    setPaletteOpen(false);
     setSearch('');
     setSelectedIndex(0);
-  }, []);
+    closeCopilot();
+  }, [setPaletteOpen, closeCopilot]);
 
   const handlePanelKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {

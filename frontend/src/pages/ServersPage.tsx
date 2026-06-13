@@ -1,0 +1,298 @@
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { Server, Search, HardDrive, Cpu, Clock } from 'lucide-react';
+import { useNodeStore, type Node } from '../store/nodeStore';
+import { StatusDot } from '../components/primitives/StatusDot';
+import { EmptyState } from '../components/ui/EmptyState';
+import { useLocale } from '../i18n';
+import { usePageTitle } from '../hooks/usePageTitle';
+import { clsx } from 'clsx';
+import { api } from '../hooks/useApi';
+import { formatOfflineDuration } from '../utils/formatTime';
+
+const formatHeartbeatTime = (ts: number | null): string => {
+  if (!ts) return '—';
+  const date = new Date(ts < 9999999999 ? ts * 1000 : ts);
+  const hrs = date.getHours().toString().padStart(2, '0');
+  const mins = date.getMinutes().toString().padStart(2, '0');
+  return `${hrs}h${mins}`;
+};
+
+const getOfflineMiniInsight = (metrics: any): string | null => {
+  if (!metrics || (metrics.cpu === undefined && metrics.mem === undefined)) {
+    return null;
+  }
+  const cpu = metrics.cpu;
+  const mem = metrics.mem;
+  const disk = metrics.disk;
+  
+  const parts: string[] = [];
+  if (cpu !== null) parts.push(`CPU ${cpu}%`);
+  if (mem !== null) parts.push(`RAM ${mem}%`);
+  if (disk !== null) parts.push(`Disque ${disk}%`);
+  
+  if (parts.length === 0) return null;
+  
+  const base = `Dernière métrique connue : ${parts.join(', ')}`;
+  
+  if (mem !== null && mem >= 85 && cpu !== null && cpu >= 90) {
+    return `${base} — possible crash OOM ou surcharge sévère`;
+  }
+  if (mem !== null && mem >= 85) {
+    return `${base} — possible crash OOM`;
+  }
+  if (cpu !== null && cpu >= 90) {
+    return `${base} — possible surcharge CPU / crash`;
+  }
+  if (disk !== null && disk >= 90) {
+    return `${base} — disque presque saturé`;
+  }
+  return base;
+};
+
+const getResourceColor = (val: number, type: 'cpu' | 'mem' | 'disk') => {
+  const limits = {
+    cpu: { warn: 40, crit: 75 },
+    mem: { warn: 60, crit: 80 },
+    disk: { warn: 65, crit: 85 },
+  };
+  const { warn, crit } = limits[type];
+  if (val >= crit) return 'progress-bar-fill-danger';
+  if (val >= warn) return 'progress-bar-fill-warning';
+  return 'progress-bar-fill-success';
+};
+
+export const ServersPage: React.FC = () => {
+  usePageTitle('Serveurs');
+  const { nodes, isLoading, fetchNodes } = useNodeStore();
+  const [search, setSearch] = useState('');
+  const [bulkStatus, setBulkStatus] = useState<Record<string, any>>({});
+  const navigate = useNavigate();
+  const { t } = useLocale();
+
+  const fetchBulkMetrics = async () => {
+    try {
+      const data = await api<{ statuses: Record<string, any> }>('/api/nodes/bulk/status');
+      if (data && data.statuses) {
+        setBulkStatus(data.statuses);
+      }
+    } catch (err) {
+      console.error('Failed to fetch bulk statuses:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchNodes();
+    fetchBulkMetrics();
+  }, []);
+
+  const filtered = nodes.filter((n: Node) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (n.hostname || '').toLowerCase().includes(q) ||
+      (n.os || '').toLowerCase().includes(q) ||
+      n.id.toLowerCase().includes(q)
+    );
+  });
+
+  const formatTime = (ts: number | null): string => {
+    if (!ts) return '—';
+    const seconds = Math.floor((Date.now() / 1000) - ts);
+    if (seconds < 60) return `il y a ${seconds}s`;
+    if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)}min`;
+    if (seconds < 86400) return `il y a ${Math.floor(seconds / 3600)}h`;
+    return `il y a ${Math.floor(seconds / 86400)}j`;
+  };
+
+  return (
+    <div className="p-6 space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-bold uppercase tracking-wider text-text-1 flex items-center gap-2">
+            <Server className="w-5 h-5 text-accent" />
+            {t('nav.servers')}
+          </h1>
+          <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
+            {nodes.length} serveur{nodes.length !== 1 ? 's' : ''} enregistré{nodes.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher un serveur..."
+            className="w-full bg-surface border border-border-strong/20 rounded-lg pl-9 pr-3 py-2 text-xs text-text-1 placeholder:text-text-3 focus:outline-none focus:border-accent transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* Loading state */}
+      {isLoading && nodes.length === 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="bg-surface-2 border border-border-strong/20 rounded-xl p-4 animate-pulse space-y-3">
+              <div className="h-4 bg-surface-3 rounded w-3/4" />
+              <div className="h-3 bg-surface-3 rounded w-1/2" />
+              <div className="h-3 bg-surface-3 rounded w-2/3" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && filtered.length === 0 && (
+        <EmptyState
+          icon={<Server className="w-12 h-12" />}
+          title={search ? 'Aucun serveur trouvé' : 'Aucun serveur'}
+          description={search ? 'Essayez de modifier votre recherche.' : 'Générez un token d\'invitation pour ajouter votre premier serveur.'}
+          action={!search ? {
+            label: 'Ajouter un serveur',
+            onClick: () => navigate('/'),
+          } : undefined}
+        />
+      )}
+
+      {/* Server grid */}
+      {filtered.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filtered.map((node: Node) => {
+            const metrics = bulkStatus[node.id];
+            return (
+              <button
+                key={node.id}
+                onClick={() => navigate(`/nodes/${node.id}`)}
+                className={clsx(
+                  "bg-surface-2 border rounded-xl p-4 text-left transition-all duration-200 cursor-pointer group text-start flex flex-col justify-between min-h-[200px] w-full",
+                  node.online
+                    ? "border-border-strong/20 hover:border-accent/30 hover:bg-surface-2/80 card-glow-success"
+                    : "border-severity-critical/20 hover:border-severity-critical/40 hover:bg-surface-2/80 card-glow-danger"
+                )}
+              >
+                {/* Top Section */}
+                <div className="w-full">
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <StatusDot state={node.state} />
+                      <span className="text-sm font-bold text-text-1 break-all leading-tight flex-1 group-hover:text-accent transition-colors">
+                        {node.hostname || node.name || node.id.substring(0, 8)}
+                      </span>
+                    </div>
+                    <span className={clsx(
+                      'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded shrink-0',
+                      node.online
+                        ? 'bg-severity-ok/10 text-severity-ok'
+                        : 'bg-severity-critical/10 text-severity-critical'
+                    )}>
+                      {node.online ? 'EN LIGNE' : 'HORS LIGNE'}
+                    </span>
+                  </div>
+
+                  {/* Details */}
+                  <div className="space-y-1.5 text-[11px] text-text-2">
+                    {node.os && (
+                      <div className="flex items-center gap-2">
+                        <HardDrive className="w-3 h-3 text-text-3 shrink-0" />
+                        <span className="truncate">{node.os}</span>
+                      </div>
+                    )}
+                    {node.arch && (
+                      <div className="flex items-center gap-2">
+                        <Cpu className="w-3 h-3 text-text-3 shrink-0" />
+                        <span>{node.arch}</span>
+                      </div>
+                    )}
+                    {node.online && node.last_heartbeat && (
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-3 h-3 text-text-3 shrink-0" />
+                        <span>Dernier contact : {formatTime(node.last_heartbeat)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Metrics for online nodes */}
+                  {node.online && (
+                    <div className="mt-4 pt-4 border-t border-border-strong/10 space-y-2.5">
+                      {/* CPU */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-bold">
+                          <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> CPU</span>
+                          <span className="font-mono text-text-1">{(metrics && metrics.cpu !== null && metrics.cpu !== undefined) ? `${Math.round(metrics.cpu)}%` : '—'}</span>
+                        </div>
+                        <div className="progress-bar-track bg-surface-3">
+                          <div
+                            className={clsx('progress-bar-fill', (metrics && metrics.cpu !== null && metrics.cpu !== undefined) && getResourceColor(metrics.cpu, 'cpu'))}
+                            style={{ width: (metrics && metrics.cpu !== null && metrics.cpu !== undefined) ? `${metrics.cpu}%` : '0%' }}
+                          />
+                        </div>
+                      </div>
+                      {/* RAM */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-bold">
+                          <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> RAM</span>
+                          <span className="font-mono text-text-1">{(metrics && metrics.mem !== null && metrics.mem !== undefined) ? `${Math.round(metrics.mem)}%` : '—'}</span>
+                        </div>
+                        <div className="progress-bar-track bg-surface-3">
+                          <div
+                            className={clsx('progress-bar-fill', (metrics && metrics.mem !== null && metrics.mem !== undefined) && getResourceColor(metrics.mem, 'mem'))}
+                            style={{ width: (metrics && metrics.mem !== null && metrics.mem !== undefined) ? `${metrics.mem}%` : '0%' }}
+                          />
+                        </div>
+                      </div>
+                      {/* DISK */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-bold">
+                          <span className="text-text-2 flex items-center gap-1"><HardDrive className="w-3 h-3 text-text-3" /> DISQUE</span>
+                          <span className="font-mono text-text-1">{(metrics && metrics.disk !== null && metrics.disk !== undefined) ? `${Math.round(metrics.disk)}%` : '—'}</span>
+                        </div>
+                        <div className="progress-bar-track bg-surface-3">
+                          <div
+                            className={clsx('progress-bar-fill', (metrics && metrics.disk !== null && metrics.disk !== undefined) && getResourceColor(metrics.disk, 'disk'))}
+                            style={{ width: (metrics && metrics.disk !== null && metrics.disk !== undefined) ? `${metrics.disk}%` : '0%' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Diagnostic details for offline nodes */}
+                  {!node.online && (
+                    <div className="mt-4 pt-4 border-t border-border-strong/10 space-y-2.5">
+                      <div className="text-[11px] text-severity-critical font-medium space-y-1">
+                        <div className="flex items-center gap-1.5 font-semibold">
+                          <Clock className="w-3.5 h-3.5 shrink-0" />
+                          <span>Hors-ligne depuis {formatOfflineDuration(node.last_heartbeat)}</span>
+                        </div>
+                        {node.last_heartbeat && (
+                          <div className="text-[10px] text-text-3 font-mono pl-5">
+                            Dernier heartbeat à {formatHeartbeatTime(node.last_heartbeat)}
+                          </div>
+                        )}
+                      </div>
+                      {metrics && (metrics.cpu !== null || metrics.mem !== null) && (
+                        <div className="p-2.5 rounded bg-severity-critical/5 border border-severity-critical/10 text-[10px] text-text-2 w-full whitespace-normal">
+                          <span className="font-semibold text-text-1 block mb-1">Diagnostic Hors-Ligne :</span>
+                          <span>{getOfflineMiniInsight(metrics)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ID footer */}
+                <div className="mt-4 pt-3 border-t border-border-strong/10 w-full">
+                  <span className="text-[9px] font-mono text-text-3">
+                    ID: {node.id.substring(0, 12)}…
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};

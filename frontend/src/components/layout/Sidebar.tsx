@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useLocation, Link } from 'react-router';
 import { useAuthStore } from '../../store/authStore';
+import { usePermission } from '../../hooks/usePermission';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useNodeStore } from '../../store/nodeStore';
+import { useUiStore } from '../../store/uiStore';
 import {
   ShieldAlert,
   LayoutDashboard,
@@ -21,12 +23,11 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useLocale } from '../../i18n';
-const SIDEBAR_EXPANDED = 240;
-const SIDEBAR_COLLAPSED = 60;
 
 export const Sidebar: React.FC = () => {
+  const { isAdmin, isOperator } = usePermission();
+  const copilotOpen = useUiStore((state) => state.copilotOpen);
   const user = useAuthStore((state) => state.user);
-  const isAdmin = user?.role === 'admin';
   const {
     isSidebarOpen,
     isSidebarCollapsed,
@@ -59,7 +60,9 @@ export const Sidebar: React.FC = () => {
   };
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -83,15 +86,17 @@ export const Sidebar: React.FC = () => {
 
   const collapsed = !isMobile && isSidebarCollapsed;
 
-  const sidebarWidth = isMobile ? 260 : collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
-
   // ─── Server Selector ───
   const renderServerSelector = () => {
+    const current = isGlobal ? null : activeNode;
+
     if (isSingleServer) {
       const srv = nodes[0];
       return (
-        <div className="flex items-center justify-between gap-2.5 px-4 py-3 select-none border-b border-border-custom/30">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+        <div className={`flex items-center gap-2.5 px-4 py-3 select-none border-b border-border-strong/30 ${
+          collapsed ? 'justify-center px-2' : 'justify-between'
+        }`}>
+          <div className="flex items-center gap-2.5 min-w-0 flex-1 justify-center">
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
                 srv?.online
@@ -99,19 +104,21 @@ export const Sidebar: React.FC = () => {
                   : 'bg-ink-muted'
               }`}
             />
-            <div className="min-w-0 flex-1">
-              <div className="text-[0.6875rem] font-semibold text-ink truncate leading-tight">
-                {srv?.name || 'Serveur'}
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
+                  {srv?.name || 'Serveur'}
+                </div>
+                <div className="text-[9px] font-mono text-text-3 truncate">
+                  {srv?.hostname || 'Connecté'}
+                </div>
               </div>
-              <div className="text-[0.5rem] font-mono text-ink-muted truncate">
-                {srv?.hostname || 'Connecté'}
-              </div>
-            </div>
+            )}
           </div>
-          {isAdmin && (
+          {!collapsed && isAdmin && (
             <button
               onClick={() => setAddNodeModalOpen(true)}
-              className="p-1.5 rounded hover:bg-surface-hover text-accent-custom hover:text-accent-custom/80 cursor-pointer transition-colors duration-150 shrink-0"
+              className="p-1 rounded hover:bg-surface-hover/60 text-accent-custom hover:text-accent-custom/80 cursor-pointer transition-colors duration-150 shrink-0"
               title="Ajouter un serveur"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -121,137 +128,143 @@ export const Sidebar: React.FC = () => {
       );
     }
 
-    const current = isGlobal ? null : activeNode;
-
     return (
-      <div ref={dropdownRef} className="relative px-3 py-2">
-        <div className="text-[0.5rem] font-bold text-ink/75 uppercase tracking-wider mb-1.5 px-1">
-          Serveur actif
-        </div>
+      <div ref={dropdownRef} className={`relative py-2.5 ${collapsed ? 'px-2 flex justify-center' : 'px-3'}`}>
+        {!collapsed && (
+          <div className="text-[9px] font-bold text-text-3 uppercase tracking-widest mb-1.5 px-1 font-mono">
+            Serveur actif
+          </div>
+        )}
         <button
           onClick={() => setShowServerDropdown(!showServerDropdown)}
-          className="flex items-center gap-2 w-full px-2.5 py-2 rounded-lg border border-border-strong bg-surface-alt hover:border-accent-border hover:bg-accent-soft transition-all duration-150 cursor-pointer text-left"
+          className={`flex items-center gap-2 rounded-lg border border-border-strong/70 bg-surface-alt/45 hover:border-accent-border/50 hover:bg-accent-soft/10 transition-all duration-150 cursor-pointer text-left ${
+            collapsed ? 'w-9 h-9 justify-center px-0' : 'w-full px-2.5 py-2'
+          }`}
+          title={collapsed ? (current ? current.name : 'Tous les serveurs') : undefined}
         >
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
               current
                 ? current.online
-                  ? 'bg-green-custom shadow-[0_0_5px_var(--color-green-glow)]'
+                  ? 'bg-green-custom shadow-[0_0_6px_var(--color-green-glow)]'
                   : 'bg-ink-muted'
-                : 'bg-accent-custom shadow-[0_0_5px_var(--color-accent-glow)]'
+                : 'bg-accent-custom shadow-[0_0_6px_var(--color-accent-glow)]'
             }`}
           />
-          <div className="flex-1 min-w-0">
-            <div className="text-[0.6875rem] font-semibold text-ink truncate leading-tight">
-              {current ? current.name : 'Tous les serveurs'}
-            </div>
-            <div className="text-[0.5rem] font-mono text-ink truncate">
-              {current
-                ? current.online
-                  ? 'En ligne'
-                  : 'Hors ligne'
-                : `${nodes.filter((n) => n.online).length} en ligne`}
-            </div>
-          </div>
-          <svg
-            className={`w-3 h-3 text-ink-dim shrink-0 transition-transform duration-200 ${
-              showServerDropdown ? 'rotate-180' : ''
-            }`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          {!collapsed && (
+            <>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
+                  {current ? current.name : 'Tous les serveurs'}
+                </div>
+                <div className="text-[9px] font-mono text-text-3 truncate">
+                  {current
+                    ? current.online
+                      ? 'EN LIGNE'
+                      : 'HORS LIGNE'
+                    : `${nodes.filter((n) => n.online).length} EN LIGNE`}
+                </div>
+              </div>
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-text-3 shrink-0 transition-transform duration-200 ${
+                  showServerDropdown ? 'rotate-180' : ''
+                }`}
+              />
+            </>
+          )}
         </button>
 
         {showServerDropdown && (
-          <div className="absolute left-3 right-3 top-full mt-1 z-50 rounded-lg border border-border-strong bg-surface-alt shadow-xl overflow-hidden">
+          <div className={`absolute z-50 rounded-lg border border-border-strong/70 bg-surface-2/95 backdrop-blur-md shadow-2xl overflow-hidden animate-fade-in ${
+            collapsed ? 'left-full ml-3 top-0 w-56' : 'left-3 right-3 top-full mt-1.5'
+          }`}>
             {/* Sticky search input */}
-            <div className="sticky top-0 z-10 bg-surface-alt border-b border-border-strong px-2 py-2">
+            <div className="sticky top-0 z-10 bg-surface-2/80 border-b border-border-strong/30 px-2 py-2">
               <div className="relative">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted pointer-events-none" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3 pointer-events-none" />
                 <input
                   type="text"
                   value={serverSearch}
                   onChange={(e) => setServerSearch(e.target.value)}
-                  placeholder="Rechercher un serveur..."
-                  className="w-full pl-7 pr-7 py-1.5 text-[0.6875rem] bg-bg border border-border-strong rounded text-ink placeholder-ink-muted focus:border-accent-border focus:outline-hidden transition-colors"
+                  placeholder="Rechercher..."
+                  className="w-full pl-7 pr-7 py-1.5 text-[10px] bg-surface/50 border border-border-strong/50 rounded-md text-text-1 placeholder-text-3 font-mono focus:border-accent focus:outline-hidden transition-colors"
                   autoFocus
                 />
                 {serverSearch && (
                   <button
                     onClick={() => setServerSearch('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-muted hover:text-ink transition-colors cursor-pointer"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-1 transition-colors cursor-pointer"
                   >
-                    <X className="w-3 h-3" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
             </div>
-            <button
-              onClick={() => {
-                selectNode('all');
-                navigate('/');
-                setShowServerDropdown(false);
-                setServerSearch('');
-                handleNavClick();
-              }}
-              className={`flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-[0.6875rem] font-medium transition-colors duration-100 border-b border-border last:border-b-0 ${
-                isGlobal ? 'bg-accent-soft text-accent-custom' : 'text-ink-dim hover:bg-surface-hover'
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-accent-custom shadow-[0_0_5px_var(--color-accent-glow)] shrink-0" />
-              Tous les serveurs
-              <span className="ml-auto text-[0.5rem] font-mono text-ink-muted">{nodes.length}</span>
-            </button>
-            {nodes
-              .filter(node => !serverSearch || node.name.toLowerCase().includes(serverSearch.toLowerCase()))
-              .map((node) => (
+            
+            <div className="max-h-60 overflow-y-auto divide-y divide-border-strong/10 scrollable-list">
               <button
-                key={node.id}
                 onClick={() => {
-                  selectNode(node.id);
-                  navigate(`/nodes/${node.id}`);
+                  selectNode('all');
+                  navigate('/');
                   setShowServerDropdown(false);
                   setServerSearch('');
                   handleNavClick();
                 }}
-                className={`flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-[0.6875rem] font-medium transition-colors duration-100 ${
-                  selectedNodeId === node.id
-                    ? 'bg-accent-soft text-accent-custom'
-                    : 'text-ink-dim hover:bg-surface-hover'
+                className={`flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-100 cursor-pointer ${
+                  isGlobal ? 'bg-accent-soft/20 text-accent font-bold' : 'text-text-2 hover:bg-surface-3/30'
                 }`}
               >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    node.online
-                      ? 'bg-green-custom shadow-[0_0_5px_var(--color-green-glow)]'
-                      : 'bg-ink-muted'
+                <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-[0_0_5px_var(--color-accent-glow)] shrink-0" />
+                <span className="font-mono text-[10px]">TOUS LES SERVEURS</span>
+                <span className="ml-auto text-[9px] font-mono text-text-3">{nodes.length}</span>
+              </button>
+              
+              {nodes
+                .filter(node => !serverSearch || node.name.toLowerCase().includes(serverSearch.toLowerCase()))
+                .map((node) => (
+                <button
+                  key={node.id}
+                  onClick={() => {
+                    selectNode(node.id);
+                    navigate(`/nodes/${node.id}`);
+                    setShowServerDropdown(false);
+                    setServerSearch('');
+                    handleNavClick();
+                  }}
+                  className={`flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-100 cursor-pointer ${
+                    selectedNodeId === node.id
+                      ? 'bg-accent-soft/20 text-accent font-bold'
+                      : 'text-text-2 hover:bg-surface-3/30'
                   }`}
-                />
-                <span className="truncate">{node.name}</span>
-                <span className="ml-auto text-[0.5rem] font-mono text-ink">
-                  {node.online ? 'en ligne' : 'hors ligne'}
-                </span>
-              </button>
-            ))}
-            {isAdmin && (
-              <button
-                onClick={() => {
-                  setAddNodeModalOpen(true);
-                  setShowServerDropdown(false);
-                  setServerSearch('');
-                }}
-                className="flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-[0.6875rem] font-medium text-accent-custom border-t border-border hover:bg-accent-soft transition-colors duration-100"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Ajouter un serveur
-              </button>
-            )}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      node.online
+                        ? 'bg-green-custom shadow-[0_0_5px_var(--color-green-glow)]'
+                        : 'bg-ink-muted'
+                    }`}
+                  />
+                  <span className="truncate font-mono text-[10px] uppercase">{node.name}</span>
+                  <span className="ml-auto text-[8px] font-mono text-text-3 uppercase">
+                    {node.online ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              ))}
+              
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    setAddNodeModalOpen(true);
+                    setShowServerDropdown(false);
+                    setServerSearch('');
+                  }}
+                  className="flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-xs font-bold text-accent border-t border-border-strong/30 hover:bg-accent-soft/10 transition-colors duration-100 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>AJOUTER SERVEUR</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -264,21 +277,19 @@ export const Sidebar: React.FC = () => {
 
     // Primary navigation items
     const primaryItems = [
-      { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true, key: '⌘1' },
-      { to: '/servers', label: t('nav.servers'), icon: Server, key: '⌘2' },
+      { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true },
+      { to: '/servers', label: t('nav.servers'), icon: Server },
       {
         to: '/proposals',
         label: t('nav.proposals'),
         icon: CheckSquare,
         badge: pendingCount > 0 ? pendingCount : undefined,
-        key: '⌘3',
       },
       {
         to: '/chat/new',
         label: t('nav.chat'),
         icon: MessageSquareCode,
         dot: true,
-        key: '⌘4',
       },
     ];
 
@@ -291,74 +302,99 @@ export const Sidebar: React.FC = () => {
 
     const renderLink = (item: any) => {
       const Icon = item.icon;
-      const isActive = item.exact
-        ? location.pathname === item.to
-        : location.pathname.startsWith(item.to) ||
-          (item.to === '/chat/new' && location.pathname.startsWith('/chat/'));
+      const isActive = item.to === '/chat/new'
+        ? copilotOpen
+        : (item.exact
+            ? location.pathname === item.to
+            : location.pathname.startsWith(item.to));
 
       return (
         <NavLink
           key={item.to}
-          to={item.to}
+          to={item.to === '/chat/new' ? '#' : item.to}
           end={item.exact}
-          onClick={handleNavClick}
-          className={`relative flex items-center gap-2.5 rounded-lg transition-all duration-150 ${
+          onClick={(e) => {
+            if (item.to === '/chat/new') {
+              e.preventDefault();
+              const store = useUiStore.getState();
+              if (store.copilotOpen) {
+                store.closeCopilot();
+              } else {
+                store.openCopilot({ trigger: 'manual' });
+              }
+            } else {
+              handleNavClick();
+            }
+          }}
+          className={`group relative flex items-center gap-2.5 rounded-lg transition-all duration-200 ${
             collapsed
               ? 'w-9 h-9 justify-center mx-auto'
-              : 'px-2.5 py-2'
+              : 'px-2.5 py-2 mx-2 xl:px-3.5 xl:py-2.5 xl:mx-3'
           } ${
             isActive
-              ? 'text-accent-custom bg-accent-soft'
-              : 'text-ink-dim hover:text-ink hover:bg-surface-alt'
+              ? 'text-accent bg-accent-soft/80 shadow-[0_0_12px_rgba(99,102,241,0.05)] border border-accent/15'
+              : 'text-text-2 hover:text-text-1 hover:bg-surface-2/40 border border-transparent'
           }`}
         >
           {isActive && !collapsed && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 bg-accent-custom rounded-r-full shadow-[0_0_6px_var(--color-accent-glow)]" />
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2.5px] h-4 bg-accent rounded-r-full shadow-[0_0_8px_var(--color-accent-glow)]" />
           )}
-          <Icon className="w-4 h-4 shrink-0" />
+          {isActive && collapsed && (
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2.5px] h-4 bg-accent rounded-r-full shadow-[0_0_8px_var(--color-accent-glow)]" />
+          )}
+          <Icon className="w-4 h-4 xl:w-4.5 xl:h-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
           {!collapsed && (
-            <span className="text-[0.75rem] font-medium flex-1 truncate">{item.label}</span>
+            <span className="text-[11px] xl:text-[12.5px] font-medium flex-1 truncate uppercase font-mono tracking-wide">{item.label}</span>
           )}
+          
           {!collapsed && item.badge !== undefined && (
-            <span className="text-[0.5rem] font-bold px-1.5 py-0.5 rounded-full bg-amber-soft border border-amber-border text-amber-custom">
+            <span className="text-[9px] xl:text-[10px] font-bold px-1.5 py-0.5 rounded bg-severity-warning/15 border border-severity-warning/25 text-severity-warning">
               {item.badge}
             </span>
           )}
-          {!collapsed && item.dot && (
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-custom shadow-[0_0_4px_var(--color-accent-glow)]" />
+          {!collapsed && item.dot && !isActive && (
+            <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-[0_0_4px_var(--color-accent-glow)]" title="Nouvelle activité" />
           )}
           {collapsed && item.badge !== undefined && (
-            <span className="absolute -top-0.5 -right-0.5 text-[0.4375rem] font-bold px-1 py-0.5 rounded-full bg-amber-soft border border-amber-border text-amber-custom leading-none min-w-[14px] text-center">
+            <span className="absolute -top-1 -right-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-severity-warning text-white leading-none min-w-[14px] text-center shadow-md">
               {item.badge}
             </span>
           )}
-          {collapsed && item.dot && (
-            <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-accent-custom shadow-[0_0_4px_var(--color-accent-glow)]" />
+          {collapsed && item.dot && !isActive && (
+            <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-surface shadow-[0_0_4px_var(--color-accent-glow)]" title="Nouvelle activité" />
+          )}
+          
+          {/* Floating CSS Tooltip when collapsed */}
+          {collapsed && (
+            <div className="absolute left-full ml-3 px-2 py-1 rounded bg-surface-2 border border-border-strong/70 text-text-1 text-[10px] font-medium tracking-wide whitespace-nowrap shadow-lg pointer-events-none opacity-0 translate-x-[-4px] group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-150 z-50 uppercase font-mono max-w-[200px] break-words">
+              {item.label}
+            </div>
           )}
         </NavLink>
       );
     };
 
     return (
-      <nav className="flex-1 overflow-y-auto px-2 py-2 scrollbar-none flex flex-col gap-4">
+      <nav className="flex-1 overflow-y-auto py-3 scrollbar-none flex flex-col gap-4 scrollable-list">
         {/* Navigation Section */}
         <div>
           {!collapsed && (
-            <div className="text-[0.5rem] font-bold text-ink/75 uppercase tracking-wider px-2 pb-1.5">
+            <div className="text-[9px] font-bold text-text-3 uppercase tracking-widest px-4 pb-1.5 font-mono">
               Navigation
             </div>
           )}
-          <div className={`flex flex-col gap-0.5 ${collapsed ? 'items-center' : ''}`}>
+          <div className={`flex flex-col gap-1 ${collapsed ? 'items-center' : ''}`}>
             {primaryItems.map(renderLink)}
           </div>
         </div>
 
         {/* Administration Section */}
+        {(isAdmin || isOperator) && (
         <div>
           {collapsed ? (
             <>
-              <div className="border-t border-border-custom/50 my-2 w-full" />
-              <div className="flex flex-col gap-0.5 items-center">
+              <div className="border-t border-border-strong/30 my-2 w-5/6 mx-auto" />
+              <div className="flex flex-col gap-1 items-center">
                 {adminItems.map(renderLink)}
               </div>
             </>
@@ -366,23 +402,24 @@ export const Sidebar: React.FC = () => {
             <>
               <button
                 onClick={toggleAdmin}
-                className="flex items-center justify-between w-full px-2 py-1.5 text-[0.5rem] font-bold text-ink/75 uppercase tracking-wider hover:text-ink hover:bg-surface-alt rounded-lg transition-colors cursor-pointer text-left"
+                className="flex items-center justify-between w-full px-4 py-1.5 text-[9px] font-bold text-text-3 uppercase tracking-widest hover:text-text-1 hover:bg-surface-2/30 rounded-lg transition-colors cursor-pointer text-left font-mono"
               >
                 <span>{t('nav.admin')}</span>
                 {isAdminExpanded ? (
-                  <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                  <ChevronDown className="w-3.5 h-3.5 text-text-3 shrink-0" />
                 ) : (
-                  <ChevronRight className="w-3.5 h-3.5 text-ink-muted shrink-0" />
+                  <ChevronRight className="w-3.5 h-3.5 text-text-3 shrink-0" />
                 )}
               </button>
               {isAdminExpanded && (
-                <div className="flex flex-col gap-0.5 pl-1.5 mt-0.5 animate-fade-in">
+                <div className="flex flex-col gap-1 pl-1.5 mt-1 animate-fade-in">
                   {adminItems.map(renderLink)}
                 </div>
               )}
             </>
           )}
         </div>
+        )}
       </nav>
     );
   };
@@ -398,24 +435,24 @@ export const Sidebar: React.FC = () => {
           />
         )}
         <nav
-          className={`fixed top-0 left-0 h-full w-[260px] bg-surface z-50 flex flex-col transition-transform duration-300 ease-in-out overflow-hidden ${
+          className={`fixed top-0 left-0 h-full w-[260px] bg-surface/85 backdrop-blur-md z-50 flex flex-col transition-transform duration-300 ease-in-out overflow-hidden border-r border-border-strong/30 shadow-[0_0_24px_rgba(0,0,0,0.5)] ${
             isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
-          <div className="flex items-center gap-2.5 h-14 px-4 border-b border-border-custom shrink-0">
+          <div className="flex items-center gap-2.5 h-14 px-4 border-b border-border-strong/30 shrink-0">
             <Link
               to="/"
               onClick={handleNavClick}
-              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer text-ink hover:text-ink"
+              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer text-text-1 hover:text-text-1"
             >
-              <div className="w-7 h-7 rounded-md border border-accent-border bg-accent-soft flex items-center justify-center">
-                <ShieldAlert className="w-3.5 h-3.5 text-accent-custom" />
+              <div className="w-7 h-7 rounded-md border border-accent/25 bg-accent-muted/15 flex items-center justify-center shadow-[0_0_8px_var(--color-accent-glow)] shrink-0">
+                <ShieldAlert className="w-3.5 h-3.5 text-accent" />
               </div>
-              <span className="font-bold text-[0.8125rem]">Vigile</span>
+              <span className="font-bold text-xs uppercase tracking-widest font-mono">Vigile</span>
             </Link>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="ml-auto p-1 rounded hover:bg-surface-hover text-ink-muted cursor-pointer"
+              className="ml-auto p-1.5 rounded hover:bg-surface-2/60 text-text-2 hover:text-text-1 cursor-pointer transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -428,20 +465,30 @@ export const Sidebar: React.FC = () => {
           <Link
             to="/settings"
             onClick={handleNavClick}
-            className="p-2 border-t border-border-custom shrink-0 block hover:bg-surface-hover/50 transition-colors duration-150"
+            className="p-3 border-t border-border-strong/30 shrink-0 block hover:bg-surface-hover/30 transition-colors duration-150"
             title="Mon Profil & Paramètres"
           >
-            <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
-              <div className="w-7 h-7 rounded-md border border-border-strong bg-surface-alt flex items-center justify-center shrink-0">
-                <span className="text-[0.5625rem] font-bold text-ink-muted uppercase">
+            <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-surface-2/20 border border-border-strong/10">
+              <div className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 ${
+                isAdmin 
+                  ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15' 
+                  : 'border-[#2dd4bf] shadow-[0_0_8px_rgba(45,212,191,0.15)] bg-teal-500/5'
+              }`}>
+                <span className={`text-[11px] font-bold uppercase font-mono ${
+                  isAdmin ? 'text-accent' : 'text-[#2dd4bf]'
+                }`}>
                   {user?.username?.charAt(0) || 'U'}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[0.6875rem] font-semibold text-ink truncate leading-tight">
+                <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
                   {user?.username || 'Utilisateur'}
                 </div>
-                <div className="text-[0.4375rem] font-bold text-ink-muted uppercase tracking-wider">
+                <div className={`text-[8px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
+                  isAdmin 
+                    ? 'text-accent border-accent/20 bg-accent-muted/5' 
+                    : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
+                }`}>
                   {user?.role || 'visiteur'}
                 </div>
               </div>
@@ -454,80 +501,107 @@ export const Sidebar: React.FC = () => {
 
   // ─── Desktop ───
   return (
-    <nav
-      className="h-full bg-surface border-r border-border-custom flex flex-col shrink-0 overflow-hidden select-none z-40 transition-[width] duration-250 ease-out"
-      style={{ width: sidebarWidth }}
+    <div
+      className={`relative h-full bg-surface/75 backdrop-blur-md border-r border-border-strong/30 flex flex-col shrink-0 select-none z-40 transition-[width] duration-250 ease-out shadow-[4px_0_24px_rgba(0,0,0,0.05)] ${
+        collapsed ? 'sidebar-collapsed' : ''
+      }`}
+      style={{ width: 'var(--sidebar-width)' }}
     >
-      {/* Brand + Collapse */}
-      <div className={`flex items-center h-14 border-b border-border-custom shrink-0 overflow-hidden ${
-        collapsed ? 'justify-center' : 'gap-2.5 px-4'
-      }`}>
-        {!collapsed ? (
+      {/* Inner wrapper to contain all content and control scroll/clip */}
+      <div className="w-full h-full flex flex-col overflow-hidden">
+        {/* Brand Header */}
+        <div className={`flex items-center h-[var(--topbar-height)] border-b border-border-strong/30 shrink-0 overflow-hidden ${
+          collapsed ? 'justify-center' : 'gap-2.5 px-4'
+        }`}>
           <Link
             to="/"
-            className="flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer text-ink hover:text-ink shrink-0 animate-fade-in"
+            className={`flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer text-text-1 hover:text-text-1 shrink-0 ${
+              collapsed ? '' : 'animate-fade-in'
+            }`}
           >
-            <div className="w-7 h-7 rounded-md border border-accent-border bg-accent-soft flex items-center justify-center">
-              <ShieldAlert className="w-3.5 h-3.5 text-accent-custom" />
+            <div className="w-7 h-7 xl:w-8.5 xl:h-8.5 rounded-md border border-accent/25 bg-accent-muted/15 flex items-center justify-center shadow-[0_0_8px_var(--color-accent-glow)] shrink-0">
+              <ShieldAlert className="w-4 h-4 xl:w-4.5 xl:h-4.5 text-accent animate-pulse" />
             </div>
-            <span className="font-bold text-[0.8125rem] whitespace-nowrap overflow-hidden transition-opacity duration-150">
-              Vigile
-            </span>
+            {!collapsed && (
+              <span className="font-bold text-xs xl:text-sm uppercase tracking-widest font-mono">
+                Vigile
+              </span>
+            )}
           </Link>
-        ) : null}
-        <button
-          onClick={toggleSidebarCollapse}
-          className={`w-6 h-6 rounded flex items-center justify-center transition-all duration-150 cursor-pointer shrink-0 ${
-            collapsed
-              ? 'text-ink/70 hover:text-ink hover:bg-surface-alt'
-              : 'ml-auto text-ink/70 hover:text-ink hover:bg-surface-alt'
+        </div>
+
+        {/* Server selector */}
+        {renderServerSelector()}
+
+        {/* Divider when collapsed and single server */}
+        {collapsed && isSingleServer && <div className="border-t border-border-strong/30" />}
+
+        {/* Navigation */}
+        {renderNav()}
+
+        {/* User — compact info */}
+        <Link
+          to="/settings"
+          onClick={handleNavClick}
+          className={`border-t border-border-strong/30 shrink-0 block hover:bg-surface-hover/30 transition-colors duration-150 group relative ${
+            collapsed ? 'p-2.5' : 'p-3 xl:p-4'
           }`}
-          title={collapsed ? 'Étendre la sidebar' : 'Réduire la sidebar'}
+          title={collapsed ? undefined : "Mon Profil & Paramètres"}
         >
-          {collapsed ? (
-            <ChevronsRight className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronsLeft className="w-3.5 h-3.5" />
+          <div className={`flex items-center gap-2.5 xl:gap-3 rounded-lg ${
+            collapsed ? 'justify-center' : 'px-2 py-1.5 bg-surface-2/20 border border-border-strong/10'
+          }`}>
+            <div className={`rounded-full border flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+              collapsed ? 'w-8 h-8' : 'w-8 h-8 xl:w-9.5 xl:h-9.5'
+            } ${
+              isAdmin 
+                ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15' 
+                : 'border-[#2dd4bf] shadow-[0_0_8px_rgba(45,212,191,0.15)] bg-teal-500/5'
+            }`}>
+              <span className={`text-[11px] xl:text-[13px] font-bold uppercase font-mono ${
+                isAdmin ? 'text-accent' : 'text-[#2dd4bf]'
+              }`}>
+                {user?.username?.charAt(0) || 'U'}
+              </span>
+            </div>
+            
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] xl:text-[12.5px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
+                  {user?.username || 'Utilisateur'}
+                </div>
+                <div className={`text-[8px] xl:text-[9.5px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
+                  isAdmin 
+                    ? 'text-accent border-accent/20 bg-accent-muted/5' 
+                    : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
+                }`}>
+                  {user?.role || 'visiteur'}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Floating CSS Tooltip when collapsed */}
+          {collapsed && (
+            <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 rounded bg-surface-2 border border-border-strong/70 text-text-1 text-[10px] font-medium tracking-wide whitespace-nowrap shadow-lg pointer-events-none opacity-0 translate-x-[-4px] group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-150 z-50 uppercase font-mono">
+              {user?.username || 'Utilisateur'} ({user?.role || 'visiteur'})
+            </div>
           )}
-        </button>
+        </Link>
       </div>
 
-      {/* Server selector — only visible when expanded */}
-      {!collapsed && renderServerSelector()}
-
-      {/* Divider when collapsed */}
-      {collapsed && <div className="border-t border-border-custom" />}
-
-      {/* Navigation */}
-      {renderNav()}
-
-      {/* User — compact info */}
-      <Link
-        to="/settings"
-        onClick={handleNavClick}
-        className="p-2 border-t border-border-custom shrink-0 block hover:bg-surface-hover/50 transition-colors duration-150"
-        title="Mon Profil & Paramètres"
+      {/* Floating toggle button - outside the overflow-hidden wrapper so it doesn't get clipped! */}
+      <button
+        onClick={toggleSidebarCollapse}
+        className="absolute top-7 right-0 translate-x-1/2 z-50 w-6 h-6 rounded-full border border-border-strong/80 bg-surface-2/95 backdrop-blur-md flex items-center justify-center text-text-3 hover:text-text-1 hover:border-accent/40 shadow-[0_2px_8px_rgba(0,0,0,0.3)] hover:scale-105 cursor-pointer transition-all duration-200"
+        title={collapsed ? 'Étendre la sidebar' : 'Réduire la sidebar'}
       >
-        <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg">
-          <div className={`rounded-md border border-border-strong bg-surface-alt flex items-center justify-center shrink-0 ${
-            collapsed ? 'w-7 h-7 mx-auto' : 'w-7 h-7'
-          }`}>
-            <span className="text-[0.5625rem] font-bold text-ink-muted uppercase">
-              {user?.username?.charAt(0) || 'U'}
-            </span>
-          </div>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <div className="text-[0.6875rem] font-semibold text-ink truncate leading-tight">
-                {user?.username || 'Utilisateur'}
-              </div>
-              <div className="text-[0.4375rem] font-bold text-ink-muted uppercase tracking-wider">
-                {user?.role || 'visiteur'}
-              </div>
-            </div>
-          )}
-        </div>
-      </Link>
-    </nav>
+        {collapsed ? (
+          <ChevronsRight className="w-3 h-3 text-accent" />
+        ) : (
+          <ChevronsLeft className="w-3 h-3" />
+        )}
+      </button>
+    </div>
   );
 };

@@ -1,114 +1,123 @@
-import React from 'react';
-import { AlertCircle, AlertTriangle, Info, CheckCircle, Sparkles } from 'lucide-react';
-import { useLocale } from '../../i18n';
-import { useLayoutStore } from '../../store/layoutStore';
-import { useChatStore } from '../../store/chatStore';
-
-export interface Insight {
-  type: 'cpu' | 'ram' | 'disk' | 'status';
-  severity: 'ok' | 'info' | 'warning' | 'critical';
-  icon: string;
-  headline: string;
-  detail: string;
-  raw?: any;
-}
+import React, { useState, useEffect } from 'react';
+import type { InsightItem } from '../../store/uiStore';
+import { InsightText } from '../primitives/InsightText';
+import { SeverityTag } from '../primitives/SeverityTag';
+import { Sparkles } from 'lucide-react';
+import { formatOfflineDuration } from '../../utils/formatTime';
 
 interface InsightCardProps {
-  nodeId: string;
+  insight: InsightItem;
   nodeName: string;
-  insight: Insight;
+  nodeId: string;
+  onDiagnose: () => void;
 }
 
 export const InsightCard: React.FC<InsightCardProps> = ({
-  nodeId,
-  nodeName,
   insight,
+  nodeName,
+  onDiagnose,
 }) => {
-  const { t } = useLocale();
-  const setCopilotOpen = useLayoutStore((s) => s.setCopilotOpen);
-  const { createSession, sendMessage } = useChatStore();
+  const [tick, setTick] = useState(0);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  const handleAnalyze = async () => {
-    // Open CopilotPanel
-    setCopilotOpen(true);
-    
-    // Compose context message
-    const promptMsg = `Analyse le serveur ${nodeName} (${insight.type.toUpperCase()}) : "${insight.headline} - ${insight.detail}". Propose des pistes de remédiation.`;
-    
-    // Create session and send prompt
-    await createSession(nodeId, `Diag: ${nodeName}`);
-    sendMessage(promptMsg, nodeId);
-  };
+  useEffect(() => {
+    if (insight.type !== 'offline' || !insight.raw?.last_heartbeat) return;
 
-  const getSeverityColor = () => {
-    switch (insight.severity) {
-      case 'critical':
-        return {
-          border: 'border-danger/30',
-          bg: 'bg-danger-subtle',
-          iconColor: 'text-danger',
-          iconEl: <AlertCircle size={18} />
-        };
-      case 'warning':
-        return {
-          border: 'border-warning/30',
-          bg: 'bg-warning-subtle',
-          iconColor: 'text-warning',
-          iconEl: <AlertTriangle size={18} />
-        };
-      case 'info':
-        return {
-          border: 'border-accent-primary/20',
-          bg: 'bg-accent-subtle',
-          iconColor: 'text-accent-primary',
-          iconEl: <Info size={18} />
-        };
-      default:
-        return {
-          border: 'border-success/20',
-          bg: 'bg-success-subtle',
-          iconColor: 'text-success',
-          iconEl: <CheckCircle size={18} />
-        };
-    }
-  };
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 30000); // refresh every 30s
+    return () => clearInterval(interval);
+  }, [insight]);
 
-  const style = getSeverityColor();
+  // Compute headline and detail dynamically on render to avoid cascading state updates
+  let headline = insight.headline;
+  let detail = insight.detail;
+  if (insight.type === 'offline' && insight.raw?.last_heartbeat) {
+    const hbTime = insight.raw.last_heartbeat;
+    const durationStr = formatOfflineDuration(hbTime);
+    headline = `Hors-ligne depuis ${durationStr}`;
+    const hbLabel = new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR');
+    detail = `Dernier contact le ${hbLabel}. Vérifiez la connectivité réseau.`;
+  }
+
+  // Visual variations depending on severity for a premium visual design
+  let cardStatusClass = "card-accent";
+  let hoverText = "group-hover:text-accent";
+  let actionText = "text-accent";
+  let glowColor = "bg-accent/2 group-hover:bg-accent/4";
+
+  if (insight.severity === 'critical') {
+    cardStatusClass = "card-critical card-pulse-critical";
+    hoverText = "group-hover:text-severity-critical";
+    actionText = "text-severity-critical";
+    glowColor = "bg-severity-critical/5 group-hover:bg-severity-critical/10";
+  } else if (insight.severity === 'warning') {
+    cardStatusClass = "card-warning";
+    hoverText = "group-hover:text-severity-warning";
+    actionText = "text-severity-warning";
+    glowColor = "bg-severity-warning/5 group-hover:bg-severity-warning/10";
+  } else if (insight.severity === 'ok') {
+    cardStatusClass = "card-success";
+    hoverText = "group-hover:text-severity-ok";
+    actionText = "text-severity-ok";
+    glowColor = "bg-severity-ok/5 group-hover:bg-severity-ok/10";
+  } else if (insight.severity === 'offline') {
+    cardStatusClass = "card-offline";
+    hoverText = "group-hover:text-text-2";
+    actionText = "text-text-2";
+    glowColor = "bg-text-3/4 group-hover:bg-text-3/8";
+  }
 
   return (
-    <div className={`w-[290px] min-h-[140px] bg-surface-0 border ${style.border} rounded-xl p-4 flex flex-col justify-between hover:scale-[1.02] transition-all duration-200 shadow-sm animate-fade-in`}>
-      {/* Top Header */}
-      <div className="flex items-start gap-2.5">
-        <div className={`shrink-0 mt-0.5 ${style.iconColor}`}>
-          {style.iconEl}
-        </div>
-        <div className="min-w-0">
-          <h4 className="text-xs font-bold text-ink-primary leading-tight">
-            {insight.headline}
-          </h4>
-          <span className="text-[9px] text-ink-muted font-mono uppercase mt-0.5 block">
-            {nodeName} · {insight.type}
-          </span>
-        </div>
+    <div
+      onClick={onDiagnose}
+      data-tick={tick}
+      className={`card-interactive card-insight flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
+    >
+      {/* Light visual effect */}
+      <div className={`absolute top-0 right-0 w-20 h-20 rounded-bl-full pointer-events-none transition-colors ${glowColor}`} />
+
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2 z-10 shrink-0">
+        <SeverityTag severity={insight.severity} className="whitespace-nowrap" />
+        <span 
+          className="text-[10px] font-extrabold font-interface tracking-wider text-text-3 uppercase bg-surface-2 px-1.5 py-0.5 rounded border border-border whitespace-nowrap truncate max-w-[140px]"
+          title={nodeName}
+        >
+          {nodeName}
+        </span>
       </div>
 
-      {/* Details Description */}
-      <p className="text-[11px] text-ink-secondary my-2 leading-relaxed line-clamp-2">
-        {insight.detail}
-      </p>
+      {/* Insight Statement */}
+      <div className="my-2.5 z-10 flex-1 flex flex-col justify-center min-w-0">
+        <InsightText size="sm" className={`block text-text-1 font-serif !text-[16px] md:!text-[18px] leading-snug line-clamp-2 transition-colors ${hoverText}`} title={headline}>
+          {headline}
+        </InsightText>
+        <p className={`text-text-3 text-xs font-sans mt-1 leading-normal ${isExpanded ? '' : 'line-clamp-2'}`} title={detail}>
+          {detail}
+          {detail.length > 80 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
+              className="ml-1.5 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[11px]"
+            >
+              {isExpanded ? 'Moins' : 'Plus'}
+            </button>
+          )}
+        </p>
+      </div>
 
-      {/* IA Analysis Trigger CTA */}
-      <div className="border-t border-border/40 pt-2 flex items-center justify-between mt-auto">
-        <span className="text-[9px] text-ink-muted">
-          Vigil Insights
+      {/* Action Prompt */}
+      <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-2 z-10 shrink-0 min-w-0">
+        <span title="Assistant IA" className="flex items-center shrink-0">
+          <Sparkles className={`w-3.5 h-3.5 animate-pulse ${actionText}`} />
         </span>
-        <button
-          onClick={handleAnalyze}
-          className="text-[10px] font-semibold text-accent-primary hover:text-accent-hover flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
-        >
-          <Sparkles size={10} className="text-accent-primary" />
-          {t('card.analyze_ai')}
-        </button>
+
+        <span className={`text-xs font-bold font-interface group-hover:underline flex items-center gap-0.5 ${actionText} shrink-0 whitespace-nowrap`}>
+          Diagnostiquer →
+        </span>
       </div>
     </div>
   );

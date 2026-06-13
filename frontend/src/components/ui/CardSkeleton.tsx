@@ -72,15 +72,19 @@ export const ChartSkeleton: React.FC = () => (
 );
 
 export const ProposalCardSkeleton: React.FC = () => (
-  <div className="w-[280px] h-[150px] shrink-0 card p-4 flex flex-col justify-between animate-pulse-subtle">
+  <div className="w-[300px] h-60 shrink-0 card p-5 flex flex-col justify-between animate-pulse-subtle">
     <div className="flex items-center justify-between border-b border-border pb-1.5">
       <Skeleton className="h-3 w-16" />
       <Skeleton className="h-3 w-20" />
     </div>
-    <Skeleton className="h-8 w-full my-2" />
-    <div className="flex items-center justify-between">
-      <Skeleton className="h-3 w-24" />
-      <Skeleton className="h-4 w-14" />
+    <div className="space-y-2 flex-1 my-3">
+      <Skeleton className="h-3 w-1/3" />
+      <Skeleton className="h-3.5 w-1/2" />
+      <Skeleton className="h-10 w-full mt-1" />
+    </div>
+    <div className="flex items-center justify-between pt-3 border-t border-border">
+      <Skeleton className="h-6 w-[110px] rounded" />
+      <Skeleton className="h-6 w-[110px] rounded" />
     </div>
   </div>
 );

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { RefreshCw, Play, Square, Layers } from 'lucide-react';
+import { RefreshCw, Play, Square, Layers, Pause, AlertTriangle } from 'lucide-react';
 import { useLocale } from '../../i18n';
-import { useAuthStore } from '../../store/authStore';
+import { usePermission } from '../../hooks/usePermission';
 import { useToastStore } from '../../store/useToastStore';
 import { api } from '../../hooks/useApi';
 
@@ -20,6 +20,17 @@ interface ContainerCardProps {
   onRefresh?: () => void;
 }
 
+type ContainerState = 'running' | 'restarting' | 'paused' | 'stopped' | 'dead';
+
+const getContainerState = (state: string): ContainerState => {
+  const s = (state ?? '').toLowerCase();
+  if (s === 'running') return 'running';
+  if (s === 'restarting') return 'restarting';
+  if (s === 'paused') return 'paused';
+  if (s === 'dead' || s === 'removing') return 'dead';
+  return 'stopped';  // exited, created, unknown
+};
+
 export const ContainerCard: React.FC<ContainerCardProps> = ({
   nodeId,
   nodeName,
@@ -27,11 +38,10 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
   onRefresh,
 }) => {
   const { t } = useLocale();
-  const user = useAuthStore((s) => s.user);
+  const { isAdmin } = usePermission();
   const [isRestarting, setIsRestarting] = useState(false);
-
-  const isAdmin = user?.role === 'admin';
-  const isRunning = container.state.toLowerCase() === 'running' || container.status.toLowerCase().includes('up');
+  const [isExpanded, setIsExpanded] = useState(false);
+  const containerState = getContainerState(container.state);
 
   const handleRestart = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -60,32 +70,71 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
   };
 
   const getStatusBadge = () => {
-    if (isRunning) {
-      return (
-        <span className="badge badge-success flex items-center gap-1">
-          <Play size={8} className="fill-current" />
-          {t('card.status.running')}
-        </span>
-      );
+    switch (containerState) {
+      case 'running':
+        return (
+          <span className="badge badge-success flex items-center gap-1">
+            <Play size={8} className="fill-current" />
+            EN COURS
+          </span>
+        );
+      case 'restarting':
+        return (
+          <span className="badge badge-warning flex items-center gap-1">
+            <RefreshCw size={8} className="animate-spin" />
+            REDÉMARRAGE
+          </span>
+        );
+      case 'paused':
+        return (
+          <span className="badge badge-warning flex items-center gap-1">
+            <Pause size={8} className="fill-current" />
+            EN PAUSE
+          </span>
+        );
+      case 'dead':
+        return (
+          <span className="badge badge-danger flex items-center gap-1 animate-pulse">
+            <AlertTriangle size={8} />
+            DÉFAILLANT
+          </span>
+        );
+      case 'stopped':
+      default:
+        return (
+          <span className="badge badge-subtle flex items-center gap-1">
+            <Square size={8} className="fill-current" />
+            ARRÊTÉ
+          </span>
+        );
     }
-    return (
-      <span className="badge badge-danger flex items-center gap-1">
-        <Square size={8} className="fill-current" />
-        {t('card.status.stopped')}
-      </span>
-    );
   };
 
+  const isRestartDisabled = isRestarting || containerState === 'dead' || containerState === 'restarting';
+
+  // Highlight container cards according to their execution state
+  let cardStatusClass = "card-success";
+  
+  if (containerState === 'dead') {
+    cardStatusClass = "card-critical card-pulse-critical";
+  } else if (containerState === 'restarting' || containerState === 'paused') {
+    cardStatusClass = "card-warning";
+  } else if (containerState === 'stopped') {
+    cardStatusClass = "card-offline";
+  }
+
   return (
-    <div className="w-[260px] min-h-[125px] bg-surface-0 border border-border rounded-xl p-4 flex flex-col justify-between hover:border-border-hover hover:bg-surface-1 transition-all duration-200 shadow-sm animate-fade-in group">
+    <div
+      className={`card card-container flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
+    >
       {/* Top Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-ink-primary truncate group-hover:text-accent-hover transition-colors" title={container.name}>
             {container.name}
           </h4>
-          <span className="text-[10px] text-ink-muted flex items-center gap-1 font-mono uppercase truncate mt-0.5" title={nodeName}>
-            <Layers size={10} />
+          <span className="text-xs text-ink-muted flex items-center gap-1 font-mono uppercase truncate mt-0.5" title={nodeName}>
+            <Layers size={12} />
             {nodeName}
           </span>
         </div>
@@ -94,24 +143,35 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
 
       {/* Info details */}
       <div className="my-2 min-w-0">
-        <div className="text-[10px] text-ink-secondary truncate" title={container.image}>
+        <div className={`text-xs text-ink-secondary ${isExpanded ? 'break-all whitespace-normal' : 'truncate'}`} title={container.image}>
           Image: {container.image}
+          {container.image.length > 30 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
+              className="ml-1 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[10px]"
+            >
+              {isExpanded ? 'Moins' : 'Plus'}
+            </button>
+          )}
         </div>
-        <div className="text-[9px] text-ink-muted font-mono mt-1 truncate">
+        <div className={`text-xs text-ink-muted font-mono mt-1 ${isExpanded ? 'break-all whitespace-normal' : 'truncate'}`} title={container.status}>
           {container.status}
         </div>
       </div>
 
       {/* Admin actions footer */}
       <div className="border-t border-border/40 pt-2 flex items-center justify-between mt-auto">
-        <span className="text-[9px] text-ink-muted truncate font-mono">
+        <span className="text-xs text-ink-muted truncate font-mono">
           ID: {container.id.substring(0, 12)}
         </span>
         {isAdmin && (
           <button
             onClick={handleRestart}
-            disabled={isRestarting}
-            className="btn btn-secondary text-[10px] py-1 px-2 border-border/50 text-ink-secondary hover:text-ink-primary flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            disabled={isRestartDisabled}
+            className="btn btn-secondary text-xs py-1 px-2 border-border/50 text-ink-secondary hover:text-ink-primary flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             aria-label="Restart container"
           >
             <RefreshCw size={10} className={isRestarting ? 'animate-spin text-accent-primary' : ''} />
