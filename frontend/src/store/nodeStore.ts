@@ -35,8 +35,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
   error: null,
   setNodes: (nodes) => {
     const selectedId = get().selectedNodeId;
-    let finalSelectedId = selectedId;
-    let finalSelectedNode = null;
+    let finalSelectedId: string;
+    let finalSelectedNode: Node | null;
 
     if (nodes.length === 1) {
       finalSelectedId = nodes[0].id;

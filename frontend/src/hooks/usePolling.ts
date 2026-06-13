@@ -1,44 +1,58 @@
 import { useEffect, useRef } from 'react';
 
-// Shared interval registry — keyed map prevents duplicate polling intervals
-// when multiple components subscribe to the same key.
-const activePolls = new Map<string, ReturnType<typeof setInterval>>();
-const subscriberCounts = new Map<string, number>();
+// Registre de callbacks et d'intervalles partagés
+const activeCallbacks = new Map<string, Set<() => void>>();
+const activeIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
 export function usePolling(
   key: string,
   callback: () => void,
   intervalMs: number,
+  enabled = true,
 ) {
   const savedCallback = useRef(callback);
   savedCallback.current = callback;
 
   useEffect(() => {
-    // Register subscriber
-    subscriberCounts.set(key, (subscriberCounts.get(key) || 0) + 1);
+    if (!enabled) return;
 
-    // Only start interval if first subscriber
-    if (!activePolls.has(key)) {
-      callback(); // immediate first call
+    if (!activeCallbacks.has(key)) {
+      activeCallbacks.set(key, new Set());
+    }
+    const callbacks = activeCallbacks.get(key)!;
+    
+    // Wrapper local qui pointe vers le callback à jour à chaque render
+    const wrapper = () => {
+      savedCallback.current();
+    };
+    callbacks.add(wrapper);
+
+    // Initialisation de l'intervalle uniquement pour le premier abonné
+    if (!activeIntervals.has(key)) {
+      callback(); // Premier appel immédiat
       const id = setInterval(() => {
-        savedCallback.current();
+        const currentCallbacks = activeCallbacks.get(key);
+        if (currentCallbacks) {
+          currentCallbacks.forEach(cb => cb());
+        }
       }, intervalMs);
-      activePolls.set(key, id);
+      activeIntervals.set(key, id);
     }
 
+    // Nettoyage lors du démontage du composant
     return () => {
-      // Unregister subscriber
-      const count = (subscriberCounts.get(key) || 1) - 1;
-      if (count <= 0) {
-        subscriberCounts.delete(key);
-        const id = activePolls.get(key);
-        if (id) {
-          clearInterval(id);
-          activePolls.delete(key);
+      const currentCallbacks = activeCallbacks.get(key);
+      if (currentCallbacks) {
+        currentCallbacks.delete(wrapper);
+        if (currentCallbacks.size === 0) {
+          activeCallbacks.delete(key);
+          const id = activeIntervals.get(key);
+          if (id) {
+            clearInterval(id);
+            activeIntervals.delete(key);
+          }
         }
-      } else {
-        subscriberCounts.set(key, count);
       }
     };
-  }, [key, intervalMs]);
+  }, [key, intervalMs, enabled]);
 }

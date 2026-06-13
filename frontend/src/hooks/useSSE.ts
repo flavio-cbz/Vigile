@@ -62,12 +62,16 @@ export function useSSE() {
       const decoder = new TextDecoder();
       let buffer = '';
 
+      let value: Uint8Array | undefined;
+      let done = false;
       while (true) {
         // Per-read timeout: abort if no data within readTimeoutMs
         let perReadTimeout: number | null = null;
         try {
           perReadTimeout = window.setTimeout(() => controller.abort(), readTimeoutMs);
-          const { value, done } = await reader.read();
+          const result = await reader.read();
+          value = result.value;
+          done = result.done;
           window.clearTimeout(perReadTimeout);
           perReadTimeout = null;
           if (done) break;
@@ -90,7 +94,7 @@ export function useSSE() {
             if (!rawJson) continue;
             const data = JSON.parse(rawJson);
             onEvent(data);
-          } catch (e) {
+          } catch {
             // Ignore parse errors on partial streams
           }
         }

@@ -1,146 +1,198 @@
-import React, { useState, useEffect } from 'react';
-import { useLocation, Link } from 'react-router';
-import { useLayoutStore } from '../../store/layoutStore';
-import { useNodeStore } from '../../store/nodeStore';
+import React, { useState, useRef, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../../store/authStore';
-import { MessageSquareCode, Menu, Plus, RefreshCw } from 'lucide-react';
-import { useLocale } from '../../i18n';
+import { useUiStore } from '../../store/uiStore';
+import { useLayoutStore } from '../../store/layoutStore';
+import { NodeSelector } from './NodeSelector';
+import { NotifBell } from './NotifBell';
+import { LogOut, Settings, ShieldAlert, User, Compass, Palette, Search } from 'lucide-react';
+import { themes } from '../../design/themes';
 
 export const TopBar: React.FC = () => {
-  const { isCopilotOpen, toggleCopilot, setSidebarOpen, isSidebarOpen, setAddNodeModalOpen } = useLayoutStore();
-  const { nodes, selectedNodeId, fetchNodes } = useNodeStore();
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
+  const { theme, setTheme } = useUiStore();
+  const navigate = useNavigate();
   const location = useLocation();
-  const { t } = useLocale();
 
-  const pendingCount = useLayoutStore((s) => s.pendingCount);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      await fetchNodes();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchNodes();
-  }, [fetchNodes]);
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
-  // Current server context for badge
-  const isGlobal = selectedNodeId === 'all' || !selectedNodeId;
-  const activeNode = isGlobal ? null : nodes.find((n) => n.id === selectedNodeId) || null;
-
-  const getBreadcrumbs = () => {
+  const getPageTitle = () => {
     const path = location.pathname;
-    if (path === '/') return [t('nav.dashboard')];
-    if (path.startsWith('/nodes/') || path === '/servers') return [t('nav.servers')];
-    if (path === '/proposals') return [t('nav.proposals')];
-    if (path === '/audit') return [t('nav.audit')];
-    if (path === '/plugins') return [t('nav.plugins')];
-    if (path === '/settings') return [t('nav.settings')];
-    if (path.startsWith('/chat/')) return [t('nav.chat')];
-    return [];
+    if (path === '/') return 'TABLEAU DE BORD';
+    if (path.startsWith('/nodes/')) return 'DÉTAIL DU NODE';
+    if (path === '/proposals') return 'PROPOSITIONS D\'ACTIONS';
+    if (path === '/audit') return 'REGISTRE D\'AUDIT';
+    if (path === '/settings') return 'CONFIGURATION DU SYSTÈME';
+    return 'VIGILE';
   };
 
-  const breadcrumbs = getBreadcrumbs();
-  const isAdmin = user?.role === 'admin';
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const triggerSearch = () => {
+    useLayoutStore.getState().setPaletteOpen(true);
+  };
 
   return (
-    <header className="h-[60px] px-6 border-b border-border-custom bg-surface/50 backdrop-blur-md flex items-center justify-between shrink-0 z-40 relative">
-      {/* Left: Breadcrumbs + Server Context Badge */}
-      <div className="flex items-center gap-2.5 text-[0.6875rem] font-semibold text-ink-muted">
-        {breadcrumbs.map((bc, idx) => (
-          <React.Fragment key={idx}>
-            {idx > 0 && <span className="opacity-30">/</span>}
-            <span className={idx === breadcrumbs.length - 1 ? 'text-ink' : ''}>{bc}</span>
-          </React.Fragment>
-        ))}
+    <header className="h-[var(--topbar-height)] bg-surface/75 backdrop-blur-md border-b border-border-strong/30 flex items-center justify-between px-6 shrink-0 relative z-30 font-interface select-none shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+      {/* Left side: Logo & Breadcrumbs */}
+      <div className="flex items-center gap-6">
+        <Link to="/" className="flex items-center gap-2 group md:hidden">
+          <div className="w-7 h-7 xl:w-8.5 xl:h-8.5 bg-accent-muted/20 border border-accent/25 rounded flex items-center justify-center shadow-[0_0_10px_var(--color-accent-glow)] group-hover:border-accent/40 transition-colors">
+            <ShieldAlert className="w-4.5 h-4.5 xl:w-5.5 xl:h-5.5 text-accent animate-pulse" />
+          </div>
+        </Link>
 
-        {/* Server context badge */}
-        {activeNode ? (
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded border border-border-strong text-[0.625rem] font-bold text-ink cursor-default select-none">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              activeNode.online
-                ? 'bg-green-custom shadow-[0_0_6px_var(--color-green-glow)]'
-                : 'bg-ink-muted'
-            }`} />
-            <span className="truncate max-w-[130px]">{activeNode.name}</span>
+        <div className="h-4 w-px bg-border-strong/50 hidden sm:block md:hidden" />
+
+        <div className="hidden sm:flex items-center gap-2">
+          <span className="text-[10px] xl:text-[11.5px] font-extrabold tracking-widest text-text-3 uppercase font-mono">
+            CONSOLE
           </span>
-        ) : nodes.length > 0 ? (
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded border border-accent-border bg-accent-soft text-[0.5625rem] font-bold text-accent-custom cursor-default select-none">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-custom shadow-[0_0_5px_var(--color-accent-glow)]" />
-            {nodes.filter((n) => n.online).length} {t('dash.servers_online').split(' ')[1] || 'en ligne'}
+          <span className="text-[10px] xl:text-[11.5px] text-text-3 font-mono">/</span>
+          <span className="text-[10px] xl:text-[11.5px] font-bold tracking-wider text-accent/90 uppercase font-mono">
+            {getPageTitle()}
           </span>
-        ) : null}
+        </div>
       </div>
 
-      {/* Right */}
-      <div className="flex items-center gap-3">
-        {/* Mobile Sidebar Toggle */}
+      {/* Middle/Right: Fleet selector & system monitors */}
+      <div className="flex items-center gap-4">
+        {/* Search Command projecteur style */}
         <button
-          onClick={() => setSidebarOpen(!isSidebarOpen)}
-          className="md:hidden p-2 rounded border border-border-strong hover:border-accent-border text-ink-muted hover:text-ink hover:bg-surface-hover transition-all duration-200 cursor-pointer"
-          title="Menu"
+          onClick={triggerSearch}
+          className="hidden md:flex items-center gap-2 px-3 py-1.5 xl:px-4 xl:py-2 rounded-md bg-surface-2/45 border border-border-strong/45 hover:border-accent/50 text-text-2 hover:text-text-1 text-[10px] xl:text-[11.5px] font-medium transition-all duration-200 cursor-pointer shadow-inner"
         >
-          <Menu className="w-4 h-4" />
+          <Search className="w-3.5 h-3.5 xl:w-4.5 xl:h-4.5 text-text-3" />
+          <span>Rechercher...</span>
         </button>
 
-        {/* Refresh (Actualiser) - Ghost button */}
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-border-strong text-ink-muted hover:text-ink hover:bg-surface-hover text-[0.6875rem] font-medium transition-all duration-150 cursor-pointer disabled:opacity-50"
-          title={t('btn.refresh')}
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">{t('btn.refresh')}</span>
-        </button>
+        <div className="w-px h-4 bg-border-strong/50 hidden md:block" />
 
-        {/* Add Server CTA - prominent for Admin only */}
-        {isAdmin && (
-          <button
-            onClick={() => setAddNodeModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-custom hover:bg-accent-hover text-white text-[0.6875rem] font-semibold cursor-pointer transition-colors duration-150"
-            title={t('add_node.title')}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{t('add_node.title')}</span>
-          </button>
-        )}
+        <NodeSelector />
+        
+        <div className="w-px h-4 bg-border-strong/50" />
 
-        {/* Proposals indicator */}
-        {pendingCount > 0 && (
+        <nav className="flex items-center gap-1">
           <Link
-            to="/proposals"
-            className="flex items-center gap-1.5 text-[0.625rem] font-bold px-2 py-1 rounded bg-amber-soft border border-amber-border text-amber-custom animate-pulse shadow-[0_0_8px_rgba(212,168,80,0.1)]"
+            to="/"
+            className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
+              location.pathname === '/' ? 'text-accent bg-accent-muted/15' : ''
+            }`}
+            title="Dashboard"
           >
-            <span>{pendingCount} Prop{pendingCount > 1 ? 's' : ''}</span>
+            <Compass className="w-4 h-4 xl:w-5 h-5 transition-transform duration-200 hover:rotate-12" />
           </Link>
-        )}
+          <Link
+            to="/audit"
+            className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
+              location.pathname === '/audit' ? 'text-accent bg-accent-muted/15' : ''
+            }`}
+            title="Registre d'audit"
+          >
+            <ShieldAlert className="w-4 h-4 xl:w-5 h-5" />
+          </Link>
+          <Link
+            to="/settings"
+            className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
+              location.pathname === '/settings' ? 'text-accent bg-accent-muted/15' : ''
+            }`}
+            title="Paramètres"
+          >
+            <Settings className="w-4 h-4 xl:w-5 h-5 transition-transform duration-300 hover:rotate-45" />
+          </Link>
+        </nav>
 
-        {/* Copilot toggle */}
-        <button
-          onClick={toggleCopilot}
-          className={`relative p-2 rounded border transition-all duration-200 cursor-pointer ${
-            isCopilotOpen
-              ? 'border-accent-custom bg-accent-soft text-accent-custom shadow-[0_0_12px_rgba(20,184,166,0.15)]'
-              : 'border-border-strong hover:border-accent-border text-ink-muted hover:text-ink hover:bg-surface-hover'
-          }`}
-          title="Copilot IA (Ctrl+` ou Cmd+`)"
-        >
-          <MessageSquareCode className="w-4 h-4" />
-          {pendingCount > 0 && !isCopilotOpen && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-accent-custom rounded-full animate-badge-pulse" />
+        <div className="w-px h-4 bg-border-strong/50" />
+
+        <NotifBell />
+
+        {/* User profile dropdown */}
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="flex items-center gap-2 cursor-pointer p-1 rounded-md hover:bg-surface-2/60 transition-colors focus:outline-none"
+          >
+            <div className="w-6.5 h-6.5 xl:w-8 xl:h-8 rounded-full bg-accent-muted/20 border border-accent/25 flex items-center justify-center text-[10px] xl:text-[12px] font-bold text-accent shadow-[0_0_6px_var(--color-accent-glow)]">
+              {user?.username?.substring(0, 2).toUpperCase() || <User className="w-3.5 h-3.5 xl:w-4 xl:h-4" />}
+            </div>
+          </button>
+
+          {isMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_rgba(0,0,0,0.5)] py-1.5 z-50 animate-fade-in text-xs">
+              <div className="px-4 py-2.5 border-b border-border-strong/30">
+                <p className="font-bold text-text-1 truncate">{user?.username || 'Utilisateur'}</p>
+                <p className="text-[9px] font-mono text-accent uppercase tracking-wider mt-0.5 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  Rôle : {user?.role || 'operator'}
+                </p>
+              </div>
+
+              <div className="px-4 py-2.5 border-b border-border-strong/30">
+                <p className="text-[10px] font-bold text-text-3 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-accent" /> Thème Visuel
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {Object.keys(themes).map((t) => {
+                    const dotColor = 
+                      t === 'warm-dark' ? 'bg-[#6366f1]' : 
+                      t === 'cool-dark' ? 'bg-[#2dd4bf]' : 
+                      'bg-[#e8650a]';
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => setTheme(t as any)}
+                        className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-[9px] text-left uppercase truncate font-semibold border transition-all duration-150 cursor-pointer ${
+                          theme === t
+                            ? 'border-accent text-accent bg-accent-muted/20 shadow-[0_0_8px_rgba(99,102,241,0.15)]'
+                            : 'border-border-strong/30 text-text-2 hover:bg-surface-3/50'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+                        {t.replace('-', ' ')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  navigate('/settings');
+                }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-text-2 hover:text-text-1 hover:bg-surface-3/40 transition-colors"
+              >
+                <Settings className="w-3.5 h-3.5 text-text-3" />
+                <span>Configuration</span>
+              </button>
+
+              <div className="h-px bg-border-strong/30 my-1" />
+
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-severity-critical hover:bg-severity-critical/10 transition-colors font-semibold"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Déconnexion</span>
+              </button>
+            </div>
           )}
-        </button>
+        </div>
       </div>
     </header>
   );
 };
-
-

@@ -40,6 +40,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
             </p>
           </div>
         </div>
+        <button
+          onClick={() => window.location.href = '/servers'}
+          className="mt-3 px-3 py-1.5 text-[10px] font-bold font-interface uppercase tracking-wider bg-accent/10 border border-accent/20 text-accent rounded hover:bg-accent/20 transition-colors cursor-pointer"
+        >
+          Ajouter un serveur
+        </button>
       </div>
     );
   }
@@ -99,12 +105,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
       </div>
       <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
         {lastUpdated ? (
-          <span className={`text-[10px] font-mono flex items-center gap-1.5 ${isStale ? 'text-danger font-semibold' : 'text-ink-muted'}`}>
-            <RefreshCw size={10} className={isStale ? 'animate-spin' : ''} />
+          <span className={`text-[11px] font-mono flex items-center gap-1.5 ${isStale ? 'text-danger font-bold' : 'text-ink-secondary'}`}>
+            <RefreshCw size={12} className={isStale ? 'animate-spin' : ''} />
             {isStale ? t('dash.stale_warning') : t('dash.last_updated', { time: secondsAgo })}
           </span>
         ) : (
-          <span className="text-[10px] font-mono text-ink-muted">
+          <span className="text-[11px] font-mono text-ink-secondary">
             En attente de mise à jour...
           </span>
         )}
