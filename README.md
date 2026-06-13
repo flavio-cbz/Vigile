@@ -87,10 +87,9 @@ $env:PYTHONPATH="."  # Windows PowerShell
 python -m uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Le Master va initialiser la base de données SQLite `./data/vigile.db` et créer le compte administrateur par défaut : `admin` / `admin`.
+Le Master va initialiser la base de données SQLite `./data/vigile.db` et créer le compte administrateur par défaut : `admin` / `admin` (sans changement de mot de passe obligatoire, sauf si la variable d'environnement TESTING est définie à true).
 
-> [!IMPORTANT]
-> Lors de la première connexion, Vigile impose un changement immédiat du mot de passe administrateur pour des raisons de sécurité.
+> **Mode démo** : pour explorer Vigile sans aucune configuration, utilisez les identifiants `guest` / `guest` depuis l'écran de connexion. Toutes les données (nœuds, métriques, propositions, audit) sont simulées en mémoire et réinitialisées au redémarrage du serveur.
 
 ### Stack Docker (avec TLS)
 
