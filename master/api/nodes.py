@@ -11,6 +11,7 @@ Endpoints:
   DELETE /api/nodes/{node_id}                Admin: revoke a node
 """
 
+import json
 import logging
 import time
 import uuid
@@ -30,11 +31,6 @@ from master.core.security_manager import SecurityManager
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
-
-
-# ---------------------------------------------------------------------------
-# Request / Response models
-# ---------------------------------------------------------------------------
 
 
 class GenerateJoinRequest(BaseModel):
@@ -80,10 +76,6 @@ class BulkNodeStatus(BaseModel):
 class BulkStatusResponse(BaseModel):
     statuses: dict[str, BulkNodeStatus]
 
-
-# ---------------------------------------------------------------------------
-# Kickstart script template
-# ---------------------------------------------------------------------------
 
 KICKSTART_TEMPLATE = """\
 #!/usr/bin/env bash
@@ -230,11 +222,6 @@ echo "[vigile] Check status: systemctl status vigile-worker
 """
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/generate-join",
     response_model=JoinTokenResponse,
@@ -260,7 +247,6 @@ async def generate_join_token(
 
     The token is single-use and expires in 30 minutes.
     """
-    # Demo mode: return mock response
     if is_demo(claims):
         master_url = request.app.state.master_url
         fake_token = f"demo-join-token-{uuid.uuid4()}"
@@ -274,14 +260,11 @@ async def generate_join_token(
             ),
         )
 
-    # 1. Pre-create node
     node_id = await nm.create_node(db, name=body.name, ip_prefix=body.ip_prefix)
 
-    # 2. Generate JOIN_TOKEN (returns token + payload together)
     token, payload = sec.generate_join_token(node_id=node_id, ip_prefix=body.ip_prefix)
     token_hash = sec.join_token_hash(token)
 
-    # 3. Store token in DB
     token_id = str(uuid.uuid4())
     now = time.time()
     await db.execute(
@@ -300,7 +283,6 @@ async def generate_join_token(
     )
     await db.commit()
 
-    # 4. Audit
     await log_action(
         db,
         user_id=claims["sub"],
@@ -367,8 +349,6 @@ async def list_nodes(
     offset: int = Query(default=0, ge=0, description="Result offset for pagination"),
     nm: NodeManager = Depends(get_node_manager),
 ) -> list[NodeResponse]:
-    """Return a list of registered nodes, with optional pagination."""
-    # Demo mode: return mock data
     if is_demo(claims):
         return [NodeResponse(**_node_to_response(n)) for n in DEMO_NODES]
 
@@ -389,7 +369,6 @@ async def verify_chain(
     ),
 ) -> dict:
     """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
-    # Demo mode: return mock data
     if is_demo(claims):
         return {"verified": True, "entries_checked": 5, "corrupted": False, "valid": True}
 
@@ -409,9 +388,6 @@ async def get_bulk_status(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> BulkStatusResponse:
-    """Get the latest metrics snapshots and container counts for all nodes in bulk."""
-    import json
-
     if is_demo(claims):
         demo_statuses = {}
         for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
@@ -443,8 +419,6 @@ async def get_bulk_status(
                 demo_statuses[node_id] = BulkNodeStatus()
         return BulkStatusResponse(statuses=demo_statuses)
 
-    # Real mode
-    # 1. Fetch latest snapshots using window function
     snapshots_map = {}
     async with db.execute(
         """
@@ -471,7 +445,6 @@ async def get_bulk_status(
                 "uptime": row["uptime_seconds"],
             }
 
-    # 2. Combine with container count from nodes cached_containers_json
     statuses = {}
     async with db.execute("SELECT id, cached_containers_json FROM nodes") as cursor:
         for row in await cursor.fetchall():
@@ -485,7 +458,7 @@ async def get_bulk_status(
                     conts = json.loads(cached_containers)
                     if isinstance(conts, list):
                         containers_count = len(conts)
-                except Exception:
+                except json.JSONDecodeError:
                     pass
 
             statuses[node_id] = BulkNodeStatus(
@@ -510,8 +483,6 @@ async def get_node(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeResponse:
-    """Fetch detailed information for a single node."""
-    # Demo mode: return mock data
     if is_demo(claims):
         node = get_demo_node(node_id)
         if node is None:
@@ -539,7 +510,6 @@ async def revoke_node(
     Revoke a node: disconnect it, invalidate its tokens, and mark it REVOKED.
     This action is permanent — a new enrollment is required to re-add the node.
     """
-    # Demo mode: no-op (simulate successful deletion)
     if is_demo(claims):
         return None
 
@@ -566,11 +536,6 @@ async def revoke_node(
     logger.warning("Node %s revoked by user %s", node_id, claims["sub"])
 
 
-# ---------------------------------------------------------------------------
-# Logs response model
-# ---------------------------------------------------------------------------
-
-
 class LogsResponse(BaseModel):
     """Response model for live logs fetched from a Worker."""
 
@@ -580,11 +545,6 @@ class LogsResponse(BaseModel):
     service: str | None = None
     path: str | None = None
     error: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Stats response models
-# ---------------------------------------------------------------------------
 
 
 class MetricsSnapshotResponse(BaseModel):
@@ -627,8 +587,6 @@ async def get_node_stats(
     limit: Annotated[int, Query(ge=1, le=100, description="Number of snapshots to return")] = 10,
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
-    """Return the latest metrics snapshots for a node, ordered by time descending."""
-    # Demo mode: return mock metrics
     if is_demo(claims):
         demo_node = get_demo_node(node_id)
         if demo_node is None:
@@ -639,7 +597,6 @@ async def get_node_stats(
             snapshots=[MetricsSnapshotResponse(**s) for s in snapshots],
         )
 
-    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -697,7 +654,6 @@ async def get_node_logs(
 
     If neither `service` nor `path` is specified, defaults to `/var/log/syslog`.
     """
-    # Demo mode: return mock logs
     if is_demo(claims):
         demo_node = get_demo_node(node_id)
         if demo_node is None:
@@ -755,13 +711,7 @@ async def get_node_logs(
     )
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-
 def _node_to_response(node: dict) -> dict:
-    """Map DB row dict to the NodeResponse field set."""
     return {
         "id": node["id"],
         "name": node.get("name", ""),
@@ -778,11 +728,6 @@ def _node_to_response(node: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Insights & Profiling Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/{node_id}/insights",
     summary="Get real-time insights for a node (Operator+)",
@@ -795,7 +740,6 @@ async def get_node_insights(
     nm: NodeManager = Depends(get_node_manager),
     locale: str = Depends(get_locale),
 ) -> dict:
-    """Fetch real-time natural language insights for CPU, memory, and disk usage."""
     if is_demo(claims):
         insights = []
         if node_id in ("demo-node-01", "demo-node-99"):
@@ -925,7 +869,6 @@ async def get_node_insights(
             "profile_confidence": "high",
         }
 
-    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -961,7 +904,6 @@ async def regenerate_node_profile(
             context_label="Homelab Server" if locale == "en" else "Serveur homelab",
         )
 
-    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -1009,7 +951,6 @@ async def analyze_node_anomaly(
             ),
         )
 
-    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")

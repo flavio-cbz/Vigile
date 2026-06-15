@@ -51,11 +51,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-# ---------------------------------------------------------------------------
-# POST /api/chat — Streaming chat
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "",
     summary="Send a message and stream the AI response (Operator+)",
@@ -103,12 +98,10 @@ async def chat(
             for token in demo_tokens:
                 yield f"data: {json.dumps({'type': 'token', 'content': token + ' '}, separators=(',', ':'))}\n\n"
 
-            # Look for a pending demo proposal
             demo_proposal = get_demo_proposal_from_text(message)
             if demo_proposal:
                 yield f"data: {json.dumps({'type': 'proposal', 'proposal_id': demo_proposal['id'], 'action': demo_proposal['action'], 'risk_level': demo_proposal['risk_level'], 'reasoning': demo_proposal['reasoning']}, separators=(',', ':'))}\n\n"
 
-            # Save session to in-memory dict if session_id provided
             if session_id:
                 new_history = list(history) + [
                     {"role": "user", "content": message},
@@ -148,20 +141,17 @@ async def chat(
             except Exception:
                 history = []
 
-    # Build system prompt with node context if specified
     locale = "fr"
     if accept_language and accept_language.lower().startswith("en"):
         locale = "en"
     system_prompt = await _build_chat_context(nm, db, node_id, locale)
 
-    # Build messages array
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     messages.append({"role": "user", "content": message})
 
     async def _event_stream() -> Any:
         token_buffer = ""
-        tool_calls_detected: list[dict] = []
 
         try:
             async for event in llm.stream(messages, temperature=0.3):
@@ -169,11 +159,7 @@ async def chat(
                     token_buffer += event["content"]
                     yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
 
-                elif event["type"] == "tool_call":
-                    tool_calls_detected.append(event["tool_calls"])
-
                 elif event["type"] == "done":
-                    # LLM stream done — continue to proposal extraction below
                     pass
 
                 elif event["type"] == "error":
@@ -181,7 +167,6 @@ async def chat(
                     yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
                     return
 
-            # After streaming, try to extract a structured proposal
             # Note: Do not extract proposal if node_id is 'all' or None.
             proposal = None
             if node_id and node_id != "all":
@@ -202,7 +187,6 @@ async def chat(
                     )
                     yield f"data: {proposal_json}\n\n"
 
-            # Save chat history to DB if session_id is provided
             if session_id:
                 new_history = history + [
                     {"role": "user", "content": message},
@@ -240,7 +224,6 @@ async def chat(
                     )
                 await db.commit()
 
-            # Final done event
             yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
 
         except Exception as exc:
@@ -259,10 +242,6 @@ async def chat(
     )
 
 
-# ---------------------------------------------------------------------------
-# Proposals CRUD
-# ---------------------------------------------------------------------------
-
 
 @router.get(
     "/proposals",
@@ -275,7 +254,6 @@ async def list_proposals(
         default=None, description="Filter by status (PENDING, APPROVED, etc.)"
     ),
 ) -> list[dict[str, Any]]:
-    """List all action proposals, optionally filtered by status."""
     if is_demo(claims):
         props = DEMO_PROPOSALS
         if status_filter:
@@ -305,7 +283,6 @@ async def get_proposal(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
 ) -> dict[str, Any]:
-    """Fetch a single action proposal by ID."""
     if is_demo(claims):
         prop = get_demo_proposal(proposal_id)
         if prop is None:
@@ -358,7 +335,6 @@ async def approve_proposal(
             )
         return ActionProposal.from_db_row(updated).model_dump()
 
-    # Fetch proposal
     async with db.execute("SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)) as cursor:
         row = await cursor.fetchone()
     if row is None:
@@ -372,10 +348,8 @@ async def approve_proposal(
             detail=f"Proposal is {proposal.status}, not PENDING",
         )
 
-    # Approve
     proposal.approve(claims["sub"])
 
-    # Execute intent
     try:
         result = await nm.send_intent(
             proposal.node_id,
@@ -389,7 +363,6 @@ async def approve_proposal(
     except TimeoutError:
         proposal.complete(success=False, result_data={"error": "Worker did not respond in time"})
 
-    # Persist
     db_data = proposal.to_db_dict()
     await db.execute(
         """
@@ -409,7 +382,6 @@ async def approve_proposal(
     )
     await db.commit()
 
-    # Audit
     await log_action(
         db,
         user_id=claims["sub"],
@@ -519,11 +491,6 @@ async def reject_proposal(
     return proposal.model_dump()
 
 
-# ---------------------------------------------------------------------------
-# Chat Sessions CRUD (Operator+)
-# ---------------------------------------------------------------------------
-
-
 class _SessionSaveRequest(BaseModel):
     id: str | None = None
     node_id: str | None = None
@@ -540,7 +507,6 @@ async def list_sessions(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     node_id: str | None = Query(default=None, description="Filter by node ID"),
 ) -> list[dict[str, Any]]:
-    """List all chat sessions for the logged in user, optionally filtered by node_id."""
     if is_demo(claims):
         return get_demo_chat_sessions(claims["sub"])
 
@@ -578,7 +544,6 @@ async def get_session(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
 ) -> dict[str, Any]:
-    """Get the details and history of a specific chat session."""
     if is_demo(claims):
         sess = get_demo_chat_session(session_id)
         if sess is None:
@@ -679,7 +644,6 @@ async def delete_session(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
 ) -> dict[str, Any]:
-    """Delete a chat session."""
     if is_demo(claims):
         deleted = delete_demo_chat_session(session_id)
         if not deleted:
@@ -701,11 +665,6 @@ async def delete_session(
     )
     await db.commit()
     return {"success": True}
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 async def _build_chat_context(
@@ -737,7 +696,6 @@ async def _build_chat_context(
             f"{lang_instruction}"
         )
 
-    # Gather node context
     context_parts = [
         f"Node: {node.get('name', 'unknown')} (ID: {node_id[:8]}...)",
         f"State: {node.get('state', 'unknown')}",
@@ -748,7 +706,6 @@ async def _build_chat_context(
     if node.get("state") in ("CONNECTED",):
         context_parts.append("Status: online")
 
-        # Fetch latest stats
         try:
             async with db.execute(
                 "SELECT cpu_percent, mem_percent, disk_percent, uptime_seconds "
@@ -801,10 +758,6 @@ async def _try_extract_proposal(
     ai_response: str,
     user_id: str,
 ) -> ActionProposal | None:
-    """
-    After the AI responds, try to extract an action proposal
-    from the conversation context.
-    """
     try:
         req = await sllm.create(
             _ProposalRequest,
@@ -822,9 +775,7 @@ async def _try_extract_proposal(
                 {"role": "assistant", "content": ai_response},
                 {
                     "role": "user",
-                    "content": (
-                        f"Is a {_list_available_actions()} action needed? " "Reply with JSON only."
-                    ),
+                    "content": "Is a GET_STATS, READ_LOGS, LIST_SERVICES, STATUS_SERVICE, RESTART_SERVICE, LIST_CONTAINERS, RESTART_CONTAINER action needed? Reply with JSON only.",
                 },
             ],
             temperature=0.1,
@@ -847,7 +798,6 @@ async def _try_extract_proposal(
 
 
 async def _persist_proposal(db: DB, proposal: ActionProposal) -> None:
-    """Insert a new action proposal into the database."""
     data = proposal.to_db_dict()
     await db.execute(
         """
@@ -875,11 +825,4 @@ async def _persist_proposal(db: DB, proposal: ActionProposal) -> None:
         proposal.id,
         proposal.action,
         proposal.node_id,
-    )
-
-
-def _list_available_actions() -> str:
-    return (
-        "GET_STATS, READ_LOGS, LIST_SERVICES, STATUS_SERVICE, "
-        "RESTART_SERVICE, LIST_CONTAINERS, RESTART_CONTAINER"
     )

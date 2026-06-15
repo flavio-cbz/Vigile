@@ -81,20 +81,6 @@ func buildEnrollmentRequest(joinToken, workerToken string, pub ed25519.PublicKey
 	return req
 }
 
-// signChallenge signs a challenge string with the Ed25519 private key.
-func signChallenge(priv ed25519.PrivateKey, challenge string) string {
-	sig := ed25519.Sign(priv, []byte(challenge))
-	return b64enc.EncodeToString(sig)
-}
-
-// buildEnrollmentResponse builds the ENROLLMENT_RESPONSE message.
-func buildEnrollmentResponse(priv ed25519.PrivateKey, challenge string) map[string]interface{} {
-	return map[string]interface{}{
-		"type":      "ENROLLMENT_RESPONSE",
-		"signature": signChallenge(priv, challenge),
-	}
-}
-
 // readJoinToken reads the JOIN_TOKEN from file or uses the flag override.
 func readJoinToken(tokenOverride string) (string, error) {
 	if tokenOverride != "" {
