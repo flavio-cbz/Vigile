@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// Connection states.
 const (
 	stateDisconnected = iota
 	stateConnecting
@@ -43,7 +42,6 @@ type WorkerConn struct {
 	doneCh chan struct{}
 }
 
-// NewWorkerConn creates a new WorkerConn.
 // workerToken is an optional persisted token for reconnection (empty on first enrollment).
 func NewWorkerConn(masterURL, joinToken, workerToken string, privKey ed25519.PrivateKey, pubKey ed25519.PublicKey, fp Fingerprint) *WorkerConn {
 	return &WorkerConn{
@@ -115,20 +113,7 @@ func (wc *WorkerConn) runEnrollment() error {
 		if err != nil {
 			return fmt.Errorf("read success (reconnect): %w", err)
 		}
-		wc.workerToken, _ = success["worker_token"].(string)
-		wc.nodeID, _ = success["node_id"].(string)
-		if wc.nodeID == "" {
-			return fmt.Errorf("no node_id in success message (reconnect)")
-		}
-		// Persist the refreshed worker token
-		if wc.workerToken != "" {
-			if err := persistWorkerToken(wc.workerToken); err != nil {
-				logger.Printf("Warning: failed to persist refreshed worker token: %v", err)
-			}
-		}
-		nodeID = wc.nodeID
-		logger.Printf("ENROLL: reconnect success! node_id=%s", wc.nodeID)
-		return nil
+		return wc.handleSuccessMessage(success, "reconnect")
 	}
 
 	// 2. Receive ENROLLMENT_CHALLENGE (first-time enrollment only)
@@ -164,22 +149,26 @@ func (wc *WorkerConn) runEnrollment() error {
 		return fmt.Errorf("read success: %w", err)
 	}
 
+	return wc.handleSuccessMessage(success, "enroll")
+}
+
+func (wc *WorkerConn) handleSuccessMessage(success map[string]interface{}, mode string) error {
 	wc.workerToken, _ = success["worker_token"].(string)
 	wc.nodeID, _ = success["node_id"].(string)
 
 	if wc.nodeID == "" {
-		return fmt.Errorf("no node_id in success message")
+		return fmt.Errorf("no node_id in success message (%s)", mode)
 	}
 
 	// Persist the worker token for future reconnections
 	if wc.workerToken != "" {
 		if err := persistWorkerToken(wc.workerToken); err != nil {
-			logger.Printf("Warning: failed to persist worker token: %v", err)
+			logger.Printf("Warning: failed to persist worker token (%s): %v", mode, err)
 		}
 	}
 	nodeID = wc.nodeID
 
-	logger.Printf("ENROLL: success! node_id=%s", wc.nodeID)
+	logger.Printf("ENROLL: %s success! node_id=%s", mode, wc.nodeID)
 	return nil
 }
 

@@ -81,7 +81,6 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
 
   return (
     <div className={`space-y-3 relative w-full animate-fade-in ${className}`}>
-      {/* Header */}
       <div className="flex items-center justify-between px-4 md:px-12">
         <div className="flex items-center gap-2">
           <Icon className="text-accent-primary w-4.5 h-4.5" />
@@ -107,7 +106,6 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
       </div>
 
       {layout === 'grid' ? (
-        /* Grid Wrapper */
         <div className="px-4 md:px-12">
           <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pt-2 ${gridClassName}`}>
             {isLoading ? (
@@ -124,9 +122,7 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
           </div>
         </div>
       ) : (
-        /* Carousel Wrapper */
         <div className="relative">
-          {/* Left Navigation Arrow */}
           {canScrollLeft && (
             <button
               onClick={() => handleScroll('left')}
@@ -137,12 +133,10 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
             </button>
           )}
 
-          {/* Scrollable Container */}
           <div
             ref={scrollContainerRef}
             className="flex gap-4 overflow-x-auto scroll-smooth scrollbar-none snap-x snap-mandatory pt-2 pb-4 scroll-px-4 md:scroll-px-12 relative w-full"
           >
-            {/* Left Spacer */}
             <div className="shrink-0 w-4 md:w-12" />
 
             {isLoading ? (
@@ -154,17 +148,14 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
                 ))}
               </>
             ) : (
-              React.Children.map(children, (child) => {
-                if (!child) return null;
-                return <div className="snap-start shrink-0">{child}</div>;
-              })
+              React.Children.map(children, (child) => (
+                <div className="snap-start shrink-0">{child}</div>
+              ))
             )}
 
-            {/* Right Spacer */}
             <div className="shrink-0 w-4 md:w-12" />
           </div>
 
-          {/* Right Navigation Arrow */}
           {canScrollRight && (
             <button
               onClick={() => handleScroll('right')}

@@ -22,7 +22,6 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
   const isOnline = node.online;
   const isLoading = metrics?.loading;
 
-  // State-based card styling logic for visual color highlights
   let cardStatusClass = "card-success";
 
   if (!isOnline) {
@@ -42,7 +41,6 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
       onClick={onClick}
       className={`card-interactive card-server flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
     >
-      {/* Header */}
       <div className="flex items-center justify-between border-b border-border/40 pb-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Server size={16} className={isOnline ? 'text-accent-primary' : 'text-ink-muted'} />
@@ -74,7 +72,6 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
         </div>
       </div>
 
-      {/* Body */}
       <div className="py-2 flex-1 flex flex-col justify-center min-w-0">
         {isOnline ? (
           isLoading ? (
@@ -131,7 +128,6 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
         )}
       </div>
 
-      {/* State-aware Footer */}
       <div className="text-xs font-bold font-interface border-t border-border/40 pt-2 shrink-0 select-none flex justify-between items-center">
         {!isOnline ? (
           <>

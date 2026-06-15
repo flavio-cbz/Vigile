@@ -1,12 +1,4 @@
-"""
-Vigile — Shared FastAPI Dependencies
-
-Provides reusable dependency-injected objects:
-  - get_db()           : active aiosqlite connection
-  - get_security()     : SecurityManager singleton
-  - get_node_manager() : NodeManager singleton
-  - CurrentUser        : type alias for the authenticated user's claims dict
-"""
+"""Shared FastAPI dependency-injected objects for the Vigile control plane."""
 
 import threading
 from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator
@@ -31,11 +23,6 @@ if TYPE_CHECKING:
 
 bearer_scheme = HTTPBearer(auto_error=False)
 ACCESS_TOKEN_COOKIE = "vigile_access_token"
-
-
-# ---------------------------------------------------------------------------
-# Database dependency
-# ---------------------------------------------------------------------------
 
 
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
@@ -127,7 +114,6 @@ async def get_current_user(
     if user_id == "demo-user" or claims.get("username") == "guest":
         row = {"is_active": 1, "must_change_password": 0}
     else:
-        # Check active state and must_change_password in DB
         async with db.execute(
             "SELECT is_active, must_change_password FROM users WHERE id = ?",
             (user_id,),
@@ -166,8 +152,6 @@ def require_role(*roles: str) -> Any:
         current_user: Annotated[dict[str, Any], Depends(get_current_user)],
     ) -> dict[str, Any]:
         user_role = current_user.get("role", "viewer")
-
-        # Check if the user's role satisfies ANY of the required roles
         user_level = ROLES_HIERARCHY.get(user_role, 0)
         required_level = min(ROLES_HIERARCHY.get(r, 99) for r in roles)
         if user_level < required_level:

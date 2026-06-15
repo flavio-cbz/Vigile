@@ -1,9 +1,7 @@
 import React from 'react';
 
-type StatusState = 'connected' | 'reconnecting' | 'lost' | 'revoked' | 'stale' | 'pending' | 'enrolling';
-
 interface StatusDotProps {
-  state: StatusState | string;
+  state: string;
   className?: string;
 }
 
@@ -41,7 +39,6 @@ export const StatusDot: React.FC<StatusDotProps> = ({ state, className = '' }) =
       default:
         return {
           bg: 'bg-text-3',
-          pulse: '',
           shouldPulse: false,
         };
     }

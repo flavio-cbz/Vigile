@@ -58,19 +58,16 @@ export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'profile' | 'system'>('profile');
   const { isAdmin, can } = usePermission();
 
-  // Profile / Password change states
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // System settings states
   const [systemSettings, setSystemSettings] = useState<SystemSettingsResponse | null>(null);
   const [systemLoading, setSystemLoading] = useState(false);
   const [systemError, setSystemError] = useState<string | null>(null);
 
-  // LLM config states
   const [llmModel, setLlmModel] = useState('');
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
@@ -79,7 +76,6 @@ export const SettingsPage: React.FC = () => {
   const [llmTesting, setLlmTesting] = useState(false);
   const [llmFeedback, setLlmFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // Sync LLM states when systemSettings changes
   useEffect(() => {
     if (systemSettings) {
       setLlmModel(systemSettings.llm_model || '');
@@ -104,7 +100,7 @@ export const SettingsPage: React.FC = () => {
       if (data) {
         setLlmFeedback({ type: 'success', msg: data.message || 'La configuration LLM est valide.' });
       }
-    } catch (err: any) {
+    } catch (err: Error) {
       setLlmFeedback({ type: 'error', msg: err.message || 'Une erreur de test est survenue.' });
     } finally {
       setLlmTesting(false);
@@ -129,14 +125,13 @@ export const SettingsPage: React.FC = () => {
         setSystemSettings(data);
         setLlmFeedback({ type: 'success', msg: 'Les paramètres LLM ont été enregistrés et appliqués.' });
       }
-    } catch (err: any) {
+    } catch (err: Error) {
       setLlmFeedback({ type: 'error', msg: err.message || "Erreur lors de l'enregistrement." });
     } finally {
       setLlmSaving(false);
     }
   };
 
-  // Fetch system settings
   const fetchSystemSettings = async () => {
     if (!can('view-settings')) return;
     setSystemLoading(true);
@@ -146,7 +141,7 @@ export const SettingsPage: React.FC = () => {
       if (data) {
         setSystemSettings(data);
       }
-    } catch (err: any) {
+    } catch (err: Error) {
       setSystemError(err.message || "Impossible de charger les paramètres système.");
     } finally {
       setSystemLoading(false);
@@ -159,7 +154,6 @@ export const SettingsPage: React.FC = () => {
     }
   }, [activeTab, can]);
 
-  // Handle password change
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordFeedback(null);
@@ -176,7 +170,7 @@ export const SettingsPage: React.FC = () => {
 
     setPasswordLoading(true);
     try {
-      await api<any>('/api/auth/change-password', {
+      await api<unknown>('/api/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({
           old_password: oldPassword,
@@ -191,7 +185,7 @@ export const SettingsPage: React.FC = () => {
       setTimeout(() => {
         logout();
       }, 2000);
-    } catch (err: any) {
+    } catch (err: Error) {
       setPasswordFeedback({ type: 'error', msg: err.message || 'Mot de passe actuel invalide.' });
     } finally {
       setPasswordLoading(false);
@@ -216,7 +210,6 @@ export const SettingsPage: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in font-interface">
-      {/* Title */}
       <div>
         <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
           Paramètres du Système
@@ -226,7 +219,6 @@ export const SettingsPage: React.FC = () => {
         </p>
       </div>
 
-      {/* Tabs */}
       <div className="border-b border-border flex gap-4 shrink-0 overflow-x-auto no-scrollbar">
         <button
           onClick={() => setActiveTab('profile')}
@@ -258,13 +250,10 @@ export const SettingsPage: React.FC = () => {
         </p>
       )}
 
-      {/* Panel View */}
       <div className="space-y-6">
         {activeTab === 'profile' && (
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-            {/* Left Col: Details & Theme Switcher */}
             <div className="md:col-span-5 space-y-6">
-              {/* Account Box */}
               <div className="p-5 border border-border rounded-xl bg-surface shadow">
                 <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider mb-4 flex items-center gap-2">
                   <User className="w-4 h-4 text-accent" />
@@ -297,7 +286,6 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Theme Selector Box */}
               <div className="p-5 border border-border rounded-xl bg-surface shadow">
                 <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider mb-4 flex items-center gap-2">
                   <Palette className="w-4 h-4 text-accent" />
@@ -371,7 +359,6 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Right Col: Change Password */}
             <div className="md:col-span-7">
               <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4">
                 <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2">
@@ -478,7 +465,6 @@ export const SettingsPage: React.FC = () => {
 
             {systemSettings && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 font-sans">
-                {/* Copilot Settings */}
                 <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4">
                   <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2 border-b border-border pb-2 font-interface">
                     <Cpu className="w-4 h-4 text-accent" />
@@ -591,7 +577,6 @@ export const SettingsPage: React.FC = () => {
                   </form>
                 </div>
 
-                {/* Session Config */}
                 <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4">
                   <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2 border-b border-border pb-2 font-interface">
                     <ShieldCheck className="w-4 h-4 text-accent" />
@@ -619,7 +604,6 @@ export const SettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Master Details */}
                 <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4 md:col-span-2">
                   <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2 border-b border-border pb-2 font-interface">
                     <Database className="w-4 h-4 text-accent" />

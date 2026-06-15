@@ -80,10 +80,6 @@ class InsightsManager:
         self._llm_client = llm_client
         self._sllm = StructuredLLM(llm_client) if llm_client else None
 
-    # -----------------------------------------------------------------------
-    # Phase 1: Profile Generation
-    # -----------------------------------------------------------------------
-
     async def generate_profile(
         self,
         node_id: str,
@@ -98,7 +94,6 @@ class InsightsManager:
         """
         logger.info("Generating profile for node %s (force=%s)...", node_id, force)
 
-        # 1. Fetch node info
         node = await nm.get_node(db, node_id)
         if not node:
             raise ValueError(f"Node not found: {node_id}")
@@ -107,7 +102,6 @@ class InsightsManager:
         os_name = node.get("os") or ""
         arch = node.get("arch") or ""
 
-        # 2. Get containers and services lists (from cache, or live query if empty)
         services = []
         containers = []
 
@@ -115,14 +109,14 @@ class InsightsManager:
         if cached_services:
             try:
                 services = json.loads(cached_services)
-            except Exception:
+            except json.JSONDecodeError:
                 pass
 
         cached_containers = node.get("cached_containers_json")
         if cached_containers:
             try:
                 containers = json.loads(cached_containers)
-            except Exception:
+            except json.JSONDecodeError:
                 pass
 
         # If cache is empty and node is connected, try to query them live to feed the profile
@@ -153,7 +147,6 @@ class InsightsManager:
                 except Exception as e:
                     logger.warning("Profile gen: failed live containers query: %s", e)
 
-        # 3. Call LLM to generate profile
         profile = None
         if self._sllm and self._llm_client and self._llm_client.base_url:
             lang_instruction = (
@@ -191,14 +184,12 @@ class InsightsManager:
                     ex,
                 )
 
-        # 4. Fallback to local heuristic rules
         if not profile:
             profile = self.generate_fallback_profile(
                 node_id, hostname, os_name, services, containers
             )
             logger.info("✓ Generated fallback profile for node %s", node_id)
 
-        # 5. Persist profile to DB
         now = time.time()
         await db.execute(
             """
@@ -232,7 +223,6 @@ class InsightsManager:
         """Generate a basic, rules-based NodeProfile when LLM is unavailable."""
         known_heavy = []
 
-        # Analyze Docker containers
         for c in containers:
             c_name = c.get("name", "").lower()
             if "plex" in c_name or "jellyfin" in c_name:
@@ -276,7 +266,6 @@ class InsightsManager:
                     )
                 )
 
-        # Analyze systemd services
         for s in services:
             s_name = s.get("name", "").lower()
             if "plex" in s_name:
@@ -312,7 +301,6 @@ class InsightsManager:
                     )
                 )
 
-        # Context label suggestion
         context = "Serveur général"
         host_lower = hostname.lower()
         if "web" in host_lower or "nginx" in host_lower:
@@ -333,10 +321,6 @@ class InsightsManager:
             baseline_ram_percent=65.0,
             context_label=context,
         )
-
-    # -----------------------------------------------------------------------
-    # Phase 2: Real-time Insights (Deterministic)
-    # -----------------------------------------------------------------------
 
     async def get_insights(
         self,
@@ -419,17 +403,14 @@ class InsightsManager:
 
         insights = []
 
-        # --- A. DISK INSIGHT (On-the-fly Linear Regression) ---
         disk_insight = await self._calculate_disk_insight(node_id, db, latest_snap)
         if disk_insight:
             insights.append(disk_insight)
 
-        # --- B. CPU INSIGHT ---
         cpu_insight = self._calculate_cpu_insight(latest_snap, profile, node)
         if cpu_insight:
             insights.append(cpu_insight)
 
-        # --- C. RAM INSIGHT ---
         ram_insight = self._calculate_ram_insight(latest_snap, profile)
         if ram_insight:
             insights.append(ram_insight)
@@ -455,7 +436,7 @@ class InsightsManager:
         if disk_total == 0:
             return None
 
-        # Query metrics snapshots from the last 24 hours (86400 seconds)
+        # Query metrics snapshots from the last 24 hours
         now = time.time()
         limit_time = now - 86400
 
@@ -477,7 +458,6 @@ class InsightsManager:
         free_gb = free_bytes / (1024**3)
         used_percent = round(disk_percent, 1)
 
-        # Calculate slope if we have enough snapshots (need at least 2)
         slope = 0.0  # GB per day
         if len(snapshots) >= 2:
             t0 = snapshots[0]["collected_at"]
@@ -512,7 +492,6 @@ class InsightsManager:
                 severity = "ok"
                 icon = "✅"
 
-            # Human friendly time estimation
             if days_left < 1:
                 headline = "Disque plein dans moins d'un jour !"
             elif days_left < 7:
@@ -556,7 +535,6 @@ class InsightsManager:
         """Match current CPU load against node profile rules and active processes."""
         cpu_percent = latest_snap.get("cpu_percent", 0.0)
 
-        # Parse active containers and services cache
         active_containers = []
         cached_containers = node.get("cached_containers_json")
         if cached_containers:
@@ -566,7 +544,7 @@ class InsightsManager:
                     for c in json.loads(cached_containers)
                     if c.get("state") == "running" or "up" in c.get("status", "").lower()
                 ]
-            except Exception:
+            except json.JSONDecodeError:
                 pass
 
         active_services = []
@@ -578,18 +556,15 @@ class InsightsManager:
                     for s in json.loads(cached_services)
                     if s.get("state") == "active"
                 ]
-            except Exception:
+            except json.JSONDecodeError:
                 pass
 
-        # Identify heavy processes that are active and exceed threshold
         culprit = None
         headline = "Serveur au repos"
         detail = "Activités d'arrière-plan normales"
         icon = "💤"
 
-        # Check rules
         for p in profile.known_heavy_processes:
-            # Check if this process config is running
             is_running = False
             if p.container_name and p.container_name in active_containers:
                 is_running = True
@@ -598,7 +573,6 @@ class InsightsManager:
 
             if is_running and cpu_percent >= p.cpu_threshold_percent:
                 culprit = p
-                # If multiple processes exceed threshold, choose the one with higher threshold
                 break
 
         if cpu_percent > 75:
@@ -691,10 +665,6 @@ class InsightsManager:
             },
         }
 
-    # -----------------------------------------------------------------------
-    # Phase 3: Anomaly AI Analysis (On-Demand)
-    # -----------------------------------------------------------------------
-
     async def analyze_anomaly(
         self,
         node_id: str,
@@ -715,11 +685,9 @@ class InsightsManager:
         if not node:
             raise ValueError(f"Node not found: {node_id}")
 
-        # Fetch active containers and services lists
         cached_services = node.get("cached_services_json") or "[]"
         cached_containers = node.get("cached_containers_json") or "[]"
 
-        # Get latest metrics
         latest_snap = None
         async with db.execute(
             "SELECT * FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",

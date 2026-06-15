@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Copy, Check, RefreshCw } from 'lucide-react';
-import { useNodeStore } from '../../store/nodeStore';
+import { useNodeStore, type Node } from '../../store/nodeStore';
 import { useToastStore } from '../../store/useToastStore';
 import { api } from '../../hooks/useApi';
 import { useLocale } from '../../i18n';
@@ -36,13 +36,16 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
     setJoinData(null);
 
     try {
-      const data = await api<any>('/api/nodes/generate-join', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: nodeName,
-          ip_prefix: ipPrefix || null,
-        }),
-      });
+      const data = await api<{ node_id: string; token: string; curl_command: string }>(
+        '/api/nodes/generate-join',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: nodeName,
+            ip_prefix: ipPrefix || null,
+          }),
+        },
+      );
 
       if (data) {
         setJoinData(data);
@@ -50,20 +53,19 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
         setIpPrefix('');
         useNodeStore.getState().fetchNodes(); // Refresh list to see the PENDING node
       }
-    } catch (err: any) {
-      setEnrollError(err.message);
+    } catch (err) {
+      setEnrollError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Polling for connection
   useEffect(() => {
     if (!joinData || !joinData.node_id || isEnrolled) return;
 
     const intervalId = setInterval(async () => {
       try {
-        const nodes = await api<any[]>('/api/nodes', { skipToast: true });
+        const nodes = await api<Node[]>('/api/nodes', { skipToast: true });
         if (nodes) {
           const enrolledNode = nodes.find((n) => n.id === joinData.node_id);
           if (enrolledNode && enrolledNode.online) {
@@ -163,7 +165,6 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
           </form>
         ) : (
           <div className="space-y-4 animate-fade-in">
-            {/* Waiting indicator */}
             {!isEnrolled && (
               <div className="flex items-center justify-center gap-2 p-2.5 bg-accent-subtle border border-accent-primary/20 rounded-lg text-accent-primary text-[0.625rem] font-medium leading-relaxed animate-pulse">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />

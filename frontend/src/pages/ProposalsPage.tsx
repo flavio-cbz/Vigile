@@ -212,7 +212,6 @@ export const ProposalsPage: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in font-interface">
-      {/* Title */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
@@ -231,7 +230,6 @@ export const ProposalsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Filter toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg text-xs">
         <div className="flex items-center gap-1.5 relative">
           <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">Statut :</span>
@@ -267,7 +265,6 @@ export const ProposalsPage: React.FC = () => {
         </span>
       </div>
 
-      {/* Main List */}
       {loading && proposals.length === 0 ? (
         <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
           <Spinner size="sm" />
@@ -301,7 +298,6 @@ export const ProposalsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Rejection Modal */}
       {rejectingId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs select-none animate-fade-in">
           <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">
@@ -362,7 +358,6 @@ export const ProposalsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Approval Confirmation Modal */}
       {approvingId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs select-none animate-fade-in">
           <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">

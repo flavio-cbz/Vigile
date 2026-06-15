@@ -25,7 +25,7 @@ export const InsightCard: React.FC<InsightCardProps> = ({
 
     const interval = setInterval(() => {
       setTick((t) => t + 1);
-    }, 30000); // refresh every 30s
+    }, 30000);
     return () => clearInterval(interval);
   }, [insight]);
 
@@ -40,7 +40,6 @@ export const InsightCard: React.FC<InsightCardProps> = ({
     detail = `Dernier contact le ${hbLabel}. Vérifiez la connectivité réseau.`;
   }
 
-  // Visual variations depending on severity for a premium visual design
   let cardStatusClass = "card-accent";
   let hoverText = "group-hover:text-accent";
   let actionText = "text-accent";
@@ -74,10 +73,8 @@ export const InsightCard: React.FC<InsightCardProps> = ({
       data-tick={tick}
       className={`card-interactive card-insight flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
     >
-      {/* Light visual effect */}
       <div className={`absolute top-0 right-0 w-20 h-20 rounded-bl-full pointer-events-none transition-colors ${glowColor}`} />
 
-      {/* Header */}
       <div className="flex items-center justify-between gap-2 z-10 shrink-0">
         <SeverityTag severity={insight.severity} className="whitespace-nowrap" />
         <span
@@ -88,7 +85,6 @@ export const InsightCard: React.FC<InsightCardProps> = ({
         </span>
       </div>
 
-      {/* Insight Statement */}
       <div className="my-2.5 z-10 flex-1 flex flex-col justify-center min-w-0">
         <InsightText size="sm" className={`block text-text-1 font-serif !text-[16px] md:!text-[18px] leading-snug line-clamp-2 transition-colors ${hoverText}`} title={headline}>
           {headline}
@@ -109,7 +105,6 @@ export const InsightCard: React.FC<InsightCardProps> = ({
         </p>
       </div>
 
-      {/* Action Prompt */}
       <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-2 z-10 shrink-0 min-w-0">
         <span title="Assistant IA" className="flex items-center shrink-0">
           <Sparkles className={`w-3.5 h-3.5 animate-pulse ${actionText}`} />

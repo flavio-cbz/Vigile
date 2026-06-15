@@ -71,12 +71,10 @@ export const Dashboard: React.FC = () => {
   const [loadingContainers, setLoadingContainers] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
-  // Proposal actions state
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
   const [rejectingProposalId, setRejectingProposalId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  // Fetch node metrics statuses
   const fetchBulkMetrics = async () => {
     try {
       const data = await api<{ statuses: Record<string, any> }>('/api/nodes/bulk/status');
@@ -89,7 +87,6 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Fetch proposals
   const fetchProposalsList = async () => {
     try {
       const data = await api<ActionProposal[]>('/api/chat/proposals?status=PENDING');
@@ -101,7 +98,6 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Fetch recent activity from audit logs
   const fetchRecentActivity = async () => {
     try {
       const data = await api<{ entries: any[] }>('/api/audit?limit=20');
@@ -116,7 +112,6 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Fetch all containers across online nodes
   const fetchAllContainers = async () => {
     const onlineNodes = nodes.filter(n => n.online);
     if (onlineNodes.length === 0) {
@@ -165,13 +160,11 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Load initial data — insights are fetched in parallel to prevent layout shift
   useEffect(() => {
     const loadAll = async () => {
       setLoadingDashboard(true);
       setInsightsLoading(true);
       await fetchNodes();
-      // Start parallel fetches for metrics, proposals, and activity
       await Promise.all([
         fetchBulkMetrics(),
         fetchProposalsList(),
@@ -179,7 +172,6 @@ export const Dashboard: React.FC = () => {
       ]);
       setLoadingDashboard(false);
 
-      // Fetch insights for all online nodes (after nodes are loaded)
       const currentNodes = useNodeStore.getState().nodes;
       const onlineNodes = currentNodes.filter(n => n.online && n.id);
       if (onlineNodes.length > 0) {
@@ -193,14 +185,12 @@ export const Dashboard: React.FC = () => {
     loadAll();
   }, []);
 
-  // Sync containers when node list loaded/updated
   useEffect(() => {
     if (nodes.length > 0) {
       fetchAllContainers();
     }
   }, [nodes]);
 
-  // Poll intervals registration (using central hook)
   usePolling('bulk_metrics_poll', fetchBulkMetrics, 15000);
   usePolling('dashboard_proposals_poll', fetchProposalsList, 30000);
   usePolling('dashboard_activity_poll', fetchRecentActivity, 30000);
@@ -210,7 +200,6 @@ export const Dashboard: React.FC = () => {
   const allInsightsList: Array<{ insight: any; nodeName: string; nodeId: string }> = [];
   let stableMetricsCount = 0;
 
-  // Add real insights from the store
   Object.entries(insightsByNode).forEach(([nodeId, list]) => {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return;
@@ -223,7 +212,6 @@ export const Dashboard: React.FC = () => {
     });
   });
 
-  // Generate synthetic offline insights for offline nodes
   nodes
     .filter(n => !n.online)
     .forEach(n => {
@@ -251,8 +239,6 @@ export const Dashboard: React.FC = () => {
         nodeId: n.id,
       });
     });
-
-  const filteredActivity = activity;
 
   const handleApproveProposal = async (id: string) => {
     setLoadingProposalId(id);
@@ -422,7 +408,7 @@ export const Dashboard: React.FC = () => {
         ))}
       </SwimLane>
 
-      {filteredActivity.length > 0 && (
+      {activity.length > 0 && (
         <div className="space-y-3 relative w-full border-t border-border/30 pt-6 mt-6 animate-fade-in">
           <div className="flex items-center justify-between px-4 md:px-12">
             <div className="flex items-center gap-2">
@@ -435,7 +421,7 @@ export const Dashboard: React.FC = () => {
 
           <div className="px-4 md:px-12">
             <div className="border border-border rounded-xl bg-surface divide-y divide-border overflow-hidden shadow-md">
-              {filteredActivity.map((act) => (
+              {activity.map((act) => (
                 <ActivityItem
                   key={act.id}
                   action={act.action}
@@ -455,7 +441,6 @@ export const Dashboard: React.FC = () => {
         <TrendChart nodes={nodes} />
       </div>
 
-      {/* Rejection Reason Modal */}
       {rejectingProposalId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs select-none animate-fade-in">
           <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">

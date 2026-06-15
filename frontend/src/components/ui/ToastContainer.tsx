@@ -26,17 +26,17 @@ const iconMap: Record<ToastType, typeof CheckCircle2> = {
   warning: AlertTriangle,
 };
 
-const typeToColors: Record<ToastType, { text: string }> = {
-  success: { text: 'text-severity-ok' },
-  error: { text: 'text-severity-critical' },
-  info: { text: 'text-accent' },
-  warning: { text: 'text-severity-warning' },
+const typeToColors: Record<ToastType, string> = {
+  success: 'text-severity-ok',
+  error: 'text-severity-critical',
+  info: 'text-accent',
+  warning: 'text-severity-warning',
 };
 
 function ToastItem({ toast }: { toast: Toast }) {
   const removeToast = useToastStore((s) => s.removeToast);
   const Icon = iconMap[toast.type];
-  const colors = typeToColors[toast.type];
+  const colorClass = typeToColors[toast.type];
 
   return (
     <div
@@ -45,7 +45,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       }`}
       role="alert"
     >
-      <div className={`flex-shrink-0 mt-0.5 ${colors.text}`}>
+      <div className={`flex-shrink-0 mt-0.5 ${colorClass}`}>
         <Icon size={18} aria-hidden="true" />
       </div>
       <div className="flex-1 min-w-0 font-sans text-xs">

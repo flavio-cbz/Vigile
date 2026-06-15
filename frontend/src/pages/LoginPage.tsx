@@ -5,7 +5,6 @@ import { LoginForm } from '../components/auth/LoginForm';
 import { ShieldAlert, KeyRound, Loader2, Cpu, Activity, Terminal as TerminalIcon } from 'lucide-react';
 import { api } from '../hooks/useApi';
 
-// Dynamic particle canvas visualization matching the visual style
 const ParticleCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -43,14 +42,13 @@ const ParticleCanvas: React.FC = () => {
         vx: (Math.random() - 0.5) * 0.35,
         vy: (Math.random() - 0.5) * 0.35,
         r: Math.random() * 1.5 + 1,
-        c: 'rgba(232, 101, 10, 0.25)', // Orange accent color translucent
+        c: 'rgba(232, 101, 10, 0.25)',
       });
     }
 
     const draw = () => {
       ctx.clearRect(0, 0, w, h);
 
-      // Grid outline
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.008)';
       ctx.lineWidth = 0.5;
       const size = 60;
@@ -67,7 +65,6 @@ const ParticleCanvas: React.FC = () => {
         ctx.stroke();
       }
 
-      // Draw lines between nodes
       ctx.lineWidth = 0.6;
       for (let i = 0; i < num; i++) {
         for (let j = i + 1; j < num; j++) {
@@ -113,7 +110,6 @@ const ParticleCanvas: React.FC = () => {
   return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />;
 };
 
-// Simulated bootlogs display
 const BootLogs: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const ref = useRef<HTMLDivElement>(null);
@@ -183,7 +179,6 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [originalUsername, setOriginalUsername] = useState<string>('');
 
-  // Forced password update variables
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -209,7 +204,6 @@ export const LoginPage: React.FC = () => {
       }
       const { access_token, refresh_token } = data;
 
-      // Call /me to inspect password status
       let meData: any = null;
       try {
         meData = await api<any>('/api/auth/me', {
@@ -230,7 +224,6 @@ export const LoginPage: React.FC = () => {
             return;
           }
         } catch {
-          // Fall through
         }
         throw err;
       }
@@ -282,11 +275,9 @@ export const LoginPage: React.FC = () => {
         skipToast: true,
       });
 
-      // Re-trigger login with new credentials
       setMustChangePassword(false);
       setTempToken(null);
 
-      // Auto reconnect with original username
       await handleLogin(originalUsername, newPassword);
     } catch (err: any) {
       setError(err.message);
@@ -305,11 +296,9 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen w-screen bg-[#0a0a0f] flex flex-col lg:flex-row overflow-hidden relative">
-      {/* Decorative Network visualisation (Left panel) */}
       <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-[#0e0b09] to-[#161210] border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
         <ParticleCanvas />
 
-        {/* LOGO */}
         <div className="z-10 flex items-center gap-3">
           <div className="w-10 h-10 border border-accent/20 bg-accent/5 rounded-lg flex items-center justify-center shadow-lg">
             <ShieldAlert className="w-5 h-5 text-accent animate-pulse" />
@@ -322,7 +311,6 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Hero headline */}
         <div className="z-10 max-w-lg my-auto space-y-8 animate-fade-in">
           <div>
             <span className="text-[9px] font-extrabold text-accent uppercase tracking-widest bg-accent-muted px-2 py-0.5 border border-accent/15 rounded font-interface">
@@ -336,7 +324,6 @@ export const LoginPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Core HUD stats */}
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title="La chaîne d'audit SHA-256 empêche toute modification non autorisée">
               <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
@@ -359,22 +346,18 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Live system boot logs */}
         <div className="z-10">
           <BootLogs />
         </div>
       </div>
 
-      {/* Right panel: Forms card */}
       <div className="w-full lg:w-1/2 xl:w-2/5 flex items-center justify-center p-6 sm:p-12 bg-[#0a0a0f] relative overflow-hidden shrink-0">
         <div className="absolute inset-0 block lg:hidden">
           <ParticleCanvas />
         </div>
 
-        {/* Background glow shadow */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-accent-muted rounded-full filter blur-[100px] opacity-40 pointer-events-none" />
 
-        {/* Form container */}
         <div className="w-full max-w-sm border border-border rounded-xl bg-surface p-8 relative animate-fade-in z-10 shadow-2xl">
           <div className="flex flex-col items-center mb-8 text-center">
             <div className="w-12 h-12 border border-accent/20 bg-accent-muted rounded-xl flex items-center justify-center mb-3 shadow lg:hidden">

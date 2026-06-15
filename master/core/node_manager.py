@@ -53,7 +53,6 @@ class NodeState(str, Enum):
     REVOKED = "REVOKED"  # Manually revoked, all connections refused
 
 
-# Allowed transitions: (from_state, to_state)
 VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
     (NodeState.PENDING, NodeState.ENROLLING),
     (NodeState.ENROLLING, NodeState.CONNECTED),
@@ -80,8 +79,6 @@ VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
 
 
 class ActiveConnection:
-    """Wraps an active WebSocket with metadata."""
-
     def __init__(self, node_id: str, websocket: WebSocket) -> None:
         self.node_id = node_id
         self.websocket = websocket
@@ -101,7 +98,6 @@ class ActiveConnection:
 # ---------------------------------------------------------------------------
 
 
-# Valid column names for safe SQL updates in transition_state
 _VALID_NODE_FIELDS: set[str] = {
     "state",
     "hostname",
@@ -297,11 +293,11 @@ class NodeManager:
                                 if c.get("state") == "running"
                                 or "up" in c.get("status", "").lower()
                             ]
-                            known_conts = [
+                            known_conts = {
                                 p.get("container_name")
                                 for p in profile_dict.get("known_heavy_processes", [])
                                 if p.get("container_name")
-                            ]
+                            }
                             new_apps_detected = any(fc not in known_conts for fc in fresh_running)
 
                         if expired_time or new_apps_detected:
@@ -394,9 +390,8 @@ class NodeManager:
                     raise ValueError(f"Invalid node field: {k}")
             fields.update(extra_fields)
 
-        updates = {k: v for k, v in fields.items()}
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [node_id]
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [node_id]
 
         await db.execute(
             f"UPDATE nodes SET {set_clause} WHERE id = ?",
@@ -617,7 +612,6 @@ class NodeManager:
                 logger.exception("Heartbeat monitor error (will retry)")
 
     def _cleanup_stale_intents(self) -> int:
-        """Remove pending intents that are done or have been waiting longer than their max_age."""
         now = time.time()
         stale_ids: list[str] = []
         for intent_id, future in list(self._pending_intents.items()):

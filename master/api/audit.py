@@ -5,7 +5,6 @@ Vigile — Audit API
 from __future__ import annotations
 
 import json
-import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -13,8 +12,6 @@ from pydantic import BaseModel
 
 from master.api.demo_data import DEMO_AUDIT_ENTRIES, is_demo
 from master.api.deps import DB, require_role
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -49,7 +46,6 @@ async def list_audit_entries(
     action: str | None = Query(default=None, description="Filter by action name"),
 ) -> AuditListResponse:
     """Fetch audit log entries, ordered by sequence descending, with pagination."""
-    # Demo mode: return mock data, no DB queries
     if is_demo(claims):
         # Demo entries must be sorted newest-first to match real SQL behavior
         entries = sorted(DEMO_AUDIT_ENTRIES, key=lambda e: e["sequence"], reverse=True)

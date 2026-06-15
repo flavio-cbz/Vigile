@@ -19,22 +19,12 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
-
-
 class ContainerSummary(BaseModel):
     id: str = Field(description="Container ID (12-char prefix)")
     name: str = Field(description="Container name")
     image: str = Field(description="Container image")
     state: str = Field(description="Container state (running, exited, etc.)")
     ports: list[str] = Field(default_factory=list, description="Port mappings")
-
-
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
 
 
 def parse_container_list(output: str) -> list[dict[str, Any]] | None:
@@ -48,11 +38,6 @@ def parse_container_list(output: str) -> list[dict[str, Any]] | None:
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logger.warning("Invalid container list from worker: %s", exc)
         return None
-
-
-# ---------------------------------------------------------------------------
-# Plugin registration
-# ---------------------------------------------------------------------------
 
 
 def register(pm) -> None:

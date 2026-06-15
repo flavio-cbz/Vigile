@@ -27,10 +27,8 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Public Login Route */}
       <Route path="/login" element={<LoginPage />} />
 
-      {/* Authenticated Workspace Layout */}
       <Route
         path="/"
         element={
@@ -50,7 +48,6 @@ export default function App() {
         <Route path="chat/new" element={<ChatRedirect />} />
       </Route>
 
-      {/* Fallback Navigate */}
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

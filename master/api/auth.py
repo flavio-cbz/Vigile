@@ -28,11 +28,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-# ---------------------------------------------------------------------------
-# Request / Response models
-# ---------------------------------------------------------------------------
-
-
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1, max_length=256)
@@ -122,11 +117,6 @@ def _get_refresh_token(body: RefreshRequest, request: Request) -> str:
     return token
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/login",
     response_model=TokenResponse,
@@ -167,7 +157,6 @@ async def login(
             expires_in=sec.jwt_access_token_ttl,
         )
 
-    # Fetch user from DB
     async with db.execute(
         "SELECT id, username, password_hash, role, is_active FROM users WHERE username = ?",
         (body.username,),
@@ -197,7 +186,6 @@ async def login(
             detail="Account deactivated",
         )
 
-    # Issue tokens
     access_token = sec.create_access_token(
         user_id=user["id"],
         username=user["username"],
@@ -205,7 +193,6 @@ async def login(
     )
     refresh_token, family_id = sec.create_refresh_token(user_id=user["id"])
 
-    # Store refresh token in DB
     token_id = str(uuid.uuid4())
     token_hash = sec.hash_refresh_token(refresh_token)
     now = time.time()
@@ -219,7 +206,6 @@ async def login(
         (token_id, user["id"], token_hash, family_id, now, expires_at),
     )
 
-    # Update last_login
     await db.execute(
         "UPDATE users SET last_login = ? WHERE id = ?",
         (time.time(), user["id"]),
@@ -287,7 +273,6 @@ async def refresh_token(
     user_id = claims["sub"]
     token_hash = sec.hash_refresh_token(refresh_token_value)
 
-    # Look up token in DB
     async with db.execute(
         "SELECT id, user_id, family_id, revoked, expires_at FROM refresh_tokens WHERE token_hash = ?",
         (token_hash,),
@@ -330,7 +315,6 @@ async def refresh_token(
             detail="Refresh token expired",
         )
 
-    # Fetch user
     async with db.execute(
         "SELECT id, username, role, is_active FROM users WHERE id = ?",
         (user_id,),
@@ -343,14 +327,12 @@ async def refresh_token(
             detail="User not found or deactivated",
         )
 
-    # Mark old token as revoked
     now = time.time()
     await db.execute(
         "UPDATE refresh_tokens SET revoked = 1, revoked_at = ? WHERE id = ?",
         (now, db_token["id"]),
     )
 
-    # Create new tokens (using same family_id)
     access_token = sec.create_access_token(
         user_id=user["id"],
         username=user["username"],
@@ -360,7 +342,6 @@ async def refresh_token(
         user_id=user["id"], family_id=db_token["family_id"]
     )
 
-    # Store new refresh token in DB
     new_token_id = str(uuid.uuid4())
     new_token_hash = sec.hash_refresh_token(new_refresh_token)
     expires_at = now + sec.jwt_refresh_token_ttl
@@ -400,7 +381,6 @@ async def logout(
     db: DB,
     sec: SecurityManager = Depends(get_security),
 ):
-    """Log out by revoking the provided refresh token."""
     refresh_token_value = body.refresh_token or request.cookies.get(REFRESH_TOKEN_COOKIE)
     if not refresh_token_value:
         _clear_auth_cookies(response)
@@ -441,7 +421,6 @@ async def change_password(
     sec: SecurityManager = Depends(get_security),
 ):
     """Change the password for the current authenticated user and reset their must_change_password flag."""
-    # Block demo user
     if is_demo(current_user):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -450,7 +429,6 @@ async def change_password(
 
     user_id = current_user["sub"]
 
-    # Fetch user password hash
     async with db.execute(
         "SELECT password_hash, username FROM users WHERE id = ?",
         (user_id,),
@@ -463,27 +441,23 @@ async def change_password(
             detail="User not found",
         )
 
-    # Verify old password
     if not sec.verify_password(body.old_password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid old password",
         )
 
-    # Hash new password and update user
     new_hash = sec.hash_password(body.new_password)
     await db.execute(
         "UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?",
         (new_hash, time.time(), user_id),
     )
 
-    # Revoke all refresh tokens for this user
     await db.execute(
         "UPDATE refresh_tokens SET revoked = 1, revoked_at = ? WHERE user_id = ?",
         (time.time(), user_id),
     )
 
-    # Log action in audit trail
     await log_action(
         db,
         user_id=user_id,
@@ -500,7 +474,6 @@ async def change_password(
     summary="Get the current authenticated user's profile",
 )
 async def get_me(current_user: CurrentUser) -> UserProfile:
-    """Return the profile of the currently authenticated user."""
     return UserProfile(
         user_id=current_user["sub"],
         username=current_user["username"],

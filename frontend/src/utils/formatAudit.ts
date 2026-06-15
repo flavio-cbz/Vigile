@@ -78,9 +78,9 @@ export function formatAuditText(
     case 'STOP_SERVICE': {
       const serviceName = details.service || details.target || '';
       const res = details.result || 'success';
-      const key = action === 'START_SERVICE' ? 'audit.event.service_start' :
-                  action === 'STOP_SERVICE' ? 'audit.event.service_stop' :
-                  'audit.event.service_restart';
+      let key = 'audit.event.service_restart';
+      if (action === 'START_SERVICE') key = 'audit.event.service_start';
+      else if (action === 'STOP_SERVICE') key = 'audit.event.service_stop';
       return t(key, { service: serviceName, result: res });
     }
     case 'RESTART_CONTAINER':
@@ -89,9 +89,9 @@ export function formatAuditText(
     case 'CONTAINER_RESTART': {
       const containerName = details.container || details.target || '';
       const res = details.result || 'success';
-      const key = action === 'START_CONTAINER' ? 'audit.event.container_start' :
-                  action === 'STOP_CONTAINER' ? 'audit.event.container_stop' :
-                  'audit.event.container_restart';
+      let key = 'audit.event.container_restart';
+      if (action === 'START_CONTAINER') key = 'audit.event.container_start';
+      else if (action === 'STOP_CONTAINER') key = 'audit.event.container_stop';
       return t(key, { container: containerName, result: res });
     }
     case 'GENERATE_JOIN_TOKEN':
@@ -108,8 +108,7 @@ export function formatAuditText(
     case 'UPDATE_INTENT_CONFIG':
       return t('audit.event.update_config', { setting: details.setting || 'configuration' });
     default:
-      // Fallback
-      if (typeof details === 'object' && Object.keys(details).length > 0) {
+      if (Object.keys(details).length > 0) {
         const detailsStr = Object.entries(details).map(([k, v]) => `${k}: ${v}`).join(', ');
         return `${entry.action.replace(/_/g, ' ')} (${detailsStr})`;
       }

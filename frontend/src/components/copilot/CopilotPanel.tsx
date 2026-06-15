@@ -55,24 +55,20 @@ export const CopilotPanel: React.FC = () => {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [copilotOpen, closeCopilot]);
 
-  // Auto-scroll messages container
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [activeSession?.history, isStreaming]);
 
-  // Load chat session when CopilotContext is updated
   useEffect(() => {
     if (!copilotOpen) return;
 
     const setupSession = async () => {
       setLoadingSession(true);
       try {
-        // Fetch sessions for the node or all
         await fetchSessions(nodeId);
 
-        // Find existing session or create a new one
         const { sessions: latestSessions } = useChatStore.getState();
         const nodeSessions = latestSessions.filter((s) => s.node_id === nodeId);
         if (nodeSessions.length > 0) {
@@ -90,26 +86,27 @@ export const CopilotPanel: React.FC = () => {
     setupSession();
   }, [copilotOpen, nodeId, fetchSessions, selectSession, createSession, targetNode?.name]);
 
-  // Check trigger and auto-send prompt if diagnostic is clicked
   useEffect(() => {
     if (copilotOpen && activeSession && !loadingSession && !isStreaming) {
       const triggerDiagnostic = async () => {
         if (copilotContext?.trigger === 'diagnostic' && copilotContext.insight) {
-          const prompt = `Fais un diagnostic détaillé de cette anomalie : "${copilotContext.insight.headline}". Détails : "${copilotContext.insight.detail}"`;
+          const insight = copilotContext.insight;
+          const prompt = `Fais un diagnostic détaillé de cette anomalie : "${insight.headline}". Détails : "${insight.detail}"`;
 
           // Only trigger if we don't already have messages related to this in history
           const alreadySent = activeSession.history?.some(
-            (msg) => msg.role === 'user' && msg.content.includes(copilotContext.insight!.headline)
+            (msg) => msg.role === 'user' && msg.content.includes(insight.headline)
           );
 
           if (!alreadySent) {
             await sendMessage(prompt, nodeId);
           }
         } else if (copilotContext?.trigger === 'proposal' && copilotContext.proposal) {
-          const prompt = `Que penses-tu de l'action proposée : "${copilotContext.proposal.action}" sur "${copilotContext.proposal.node_id}"? Raisonnement : ${copilotContext.proposal.reasoning}`;
+          const proposal = copilotContext.proposal;
+          const prompt = `Que penses-tu de l'action proposée : "${proposal.action}" sur "${proposal.node_id}"? Raisonnement : ${proposal.reasoning}`;
 
           const alreadySent = activeSession.history?.some(
-            (msg) => msg.role === 'user' && msg.content.includes(copilotContext.proposal!.action)
+            (msg) => msg.role === 'user' && msg.content.includes(proposal.action)
           );
 
           if (!alreadySent) {
@@ -131,7 +128,6 @@ export const CopilotPanel: React.FC = () => {
     try {
       const success = await approveProposal(id);
       if (success && activeSession) {
-        // Refresh session to reflect changes
         await fetchSessions(nodeId);
       }
     } finally {
@@ -169,7 +165,6 @@ export const CopilotPanel: React.FC = () => {
       </span>
       <CopilotHeader nodeName={targetNode?.name} onClose={closeCopilot} />
 
-      {/* Messages viewport */}
       <div className="flex-1 overflow-y-auto no-scrollbar bg-surface/40 flex flex-col">
         {loadingSession ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs">
@@ -202,7 +197,6 @@ export const CopilotPanel: React.FC = () => {
         )}
       </div>
 
-      {/* Text area input footer */}
       <CopilotInput onSend={handleSendMessage} disabled={loadingSession || isStreaming} />
     </div>
   );

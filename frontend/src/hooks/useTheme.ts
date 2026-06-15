@@ -9,19 +9,13 @@ export function useTheme() {
     const root = document.documentElement;
     const activeTheme = themes[theme];
 
-    // Remove any previously set themes (represented by variables)
-    // and apply the new ones.
     Object.entries(activeTheme).forEach(([variable, value]) => {
       root.style.setProperty(variable, value);
     });
 
-    // Save active theme class on body for utility classes matching
+    // Body class enables utility-class matching against the active theme.
     Object.keys(themes).forEach((k) => {
-      if (k === theme) {
-        root.classList.add(k);
-      } else {
-        root.classList.remove(k);
-      }
+      root.classList.toggle(k, k === theme);
     });
   }, [theme]);
 

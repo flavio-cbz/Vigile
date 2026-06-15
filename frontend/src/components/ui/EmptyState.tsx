@@ -25,8 +25,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       <div className="flex flex-col items-center justify-center text-center">
         <div className={`text-ink-muted opacity-45 ${compact ? 'mb-2.5' : 'mb-5'}`}>
           {React.isValidElement(icon)
-            ? React.cloneElement(icon as React.ReactElement<any>, {
-                className: `${(icon.props as any).className || ''} ${compact ? 'w-7 h-7' : 'w-12 h-12'}`
+            ? React.cloneElement(icon as React.ReactElement<{ className?: string }>, {
+                className: `${icon.props.className ?? ''} ${compact ? 'w-7 h-7' : 'w-12 h-12'}`,
               })
             : icon}
         </div>

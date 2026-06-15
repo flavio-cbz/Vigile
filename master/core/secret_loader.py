@@ -14,11 +14,8 @@ Usage::
     # Returns env var LLM_API_KEY, or reads file from LLM_API_KEY_FILE path
 """
 
-import logging
 import os
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 
 def load_secret(
@@ -44,25 +41,22 @@ def load_secret(
     Raises
     ------
     RuntimeError
-        If ``required=True`` and no source is found.
+        If a file path is configured but cannot be read.
     """
     if file_var is None:
         file_var = f"{env_var}_FILE"
 
-    # Priority 1: direct environment variable
     value = os.environ.get(env_var)
     if value:
         return value
 
-    # Priority 2: Docker secrets file path
     file_path_str = os.environ.get(file_var)
     if file_path_str:
         try:
             return Path(file_path_str).read_text().strip()
         except (OSError, IOError) as exc:
             raise RuntimeError(
-                f"Cannot read secret file '{file_path_str}' " f"(from {file_var}): {exc}"
+                f"Cannot read secret file '{file_path_str}' (from {file_var}): {exc}"
             ) from exc
 
-    # Not configured — return empty string (caller decides if required)
     return ""

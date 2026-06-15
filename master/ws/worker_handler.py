@@ -46,10 +46,8 @@ from master.db.database import get_db_conn, transaction
 
 logger = logging.getLogger(__name__)
 
-# Maximum time to wait for each enrollment step (seconds)
 ENROLLMENT_STEP_TIMEOUT = 30.0
 
-# WebSocket close codes (4000-4999 are application-defined)
 WS_CLOSE_INVALID_TOKEN = 4400
 WS_CLOSE_TOKEN_CONSUMED = 4401
 WS_CLOSE_TOKEN_EXPIRED = 4402
@@ -60,18 +58,8 @@ WS_CLOSE_TIMEOUT = 4408
 WS_CLOSE_SERVER_ERROR = 4500
 
 
-# ---------------------------------------------------------------------------
-# WebSocket route handler (called from main.py)
-# ---------------------------------------------------------------------------
-
-
 async def worker_join_handler(websocket: WebSocket) -> None:
-    """
-    Main entry point for /ws/worker/join.
-
-    Accepts the WebSocket, runs the enrollment handshake, then enters
-    the operational loop. Handles all errors by closing with appropriate codes.
-    """
+    """Entry point for /ws/worker/join — runs enrollment then operational loop."""
     logger.debug("HANDLER CALLED for WS %s", id(websocket))
 
     from master.config import settings
@@ -100,10 +88,7 @@ async def worker_join_handler(websocket: WebSocket) -> None:
     node_id: str | None = None
 
     try:
-        # Phase 1: Enrollment handshake
         node_id = await _run_enrollment(websocket, db, remote)
-
-        # Phase 2: Operational loop
         await _run_operational(websocket, db, node_id, remote)
 
     except WebSocketDisconnect as exc:
@@ -130,13 +115,8 @@ async def worker_join_handler(websocket: WebSocket) -> None:
                     await node_manager.transition_state(db, node_id, NodeState.RECONNECTING)
                 elif current == NodeState.ENROLLING:
                     await node_manager.transition_state(db, node_id, NodeState.PENDING)
-            except Exception:
+            except (aiosqlite.Error, _EnrollmentError):
                 logger.exception("Failed to update state on disconnect for node %s", node_id)
-
-
-# ---------------------------------------------------------------------------
-# Phase 1: Enrollment
-# ---------------------------------------------------------------------------
 
 
 async def _run_enrollment(
@@ -144,12 +124,8 @@ async def _run_enrollment(
     db: aiosqlite.Connection,
     remote: str,
 ) -> str:
-    """
-    Run the full enrollment handshake.
-    Returns the node_id on success, raises _EnrollmentError on failure.
-    """
+    """Run the full enrollment handshake. Returns node_id on success, raises _EnrollmentError on failure."""
 
-    # ── Step 1: Receive ENROLLMENT_REQUEST ──────────────────────────────────
     req = await _recv_typed(websocket, "ENROLLMENT_REQUEST", timeout=ENROLLMENT_STEP_TIMEOUT)
 
     join_token: str = req.get("join_token", "")
@@ -161,7 +137,7 @@ async def _run_enrollment(
     if not public_key_b64:
         raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing public_key")
 
-    # ── Step 1.5: Reconnect mode — skip JOIN_TOKEN + Ed25519 challenge ─────
+    # Reconnect mode — skip JOIN_TOKEN + Ed25519 challenge
     if reconnect and worker_token:
         return await _run_reconnect(websocket, db, remote, worker_token, public_key_b64)
 
@@ -169,7 +145,7 @@ async def _run_enrollment(
     if not join_token:
         raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing join_token or worker_token")
 
-    # ── Step 2: Validate JOIN_TOKEN (HMAC + TTL) ────────────────────────────
+    # Validate JOIN_TOKEN (HMAC + TTL)
     try:
         payload = get_security_instance().decode_join_token(join_token)
     except ValueError as exc:
@@ -177,7 +153,7 @@ async def _run_enrollment(
 
     node_id: str = payload["node_id"]
 
-    # ── Step 3: Check IP prefix restriction ─────────────────────────────────
+    # Check IP prefix restriction
     ip_prefix = payload.get("ip_prefix", "")
     if ip_prefix and not remote.startswith(ip_prefix):
         logger.warning(
@@ -188,7 +164,7 @@ async def _run_enrollment(
         )
         raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "IP prefix restriction violated")
 
-    # ── Step 4: Validate token in DB (existence + consumed + expiry) ───────
+    # Validate token in DB (existence + consumed + expiry)
     token_hash = get_security_instance().join_token_hash(join_token)
 
     async with db.execute(
@@ -205,7 +181,7 @@ async def _run_enrollment(
     if time.time() > token_row["expires_at"]:
         raise _EnrollmentError(WS_CLOSE_TOKEN_EXPIRED, "Token expired")
 
-    # ── Step 5: Check node state ────────────────────────────────────────────
+    # Check node state
     node_state = await _get_node_state(db, node_id)
 
     if node_state == NodeState.REVOKED:
@@ -224,23 +200,22 @@ async def _run_enrollment(
             f"Node is in unexpected state: {node_state}",
         )
 
-    # ── Step 6: Transition to ENROLLING ─────────────────────────────────────
+    # Transition to ENROLLING
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
 
-    # ── Step 7: Generate and send CHALLENGE ─────────────────────────────────
+    # Generate and send CHALLENGE
     challenge = get_security_instance().generate_challenge()
     await _send(
         websocket, {"type": "ENROLLMENT_CHALLENGE", "challenge": challenge}, node_id=node_id
     )
 
-    # ── Step 8: Receive ENROLLMENT_RESPONSE ─────────────────────────────────
     resp = await _recv_typed(websocket, "ENROLLMENT_RESPONSE", timeout=ENROLLMENT_STEP_TIMEOUT)
     signature_b64: str = resp.get("signature", "")
 
     if not signature_b64:
         raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing signature in response")
 
-    # ── Step 9: Verify Ed25519 signature ────────────────────────────────────
+    # Verify Ed25519 signature
     if not get_security_instance().verify_ed25519_signature(
         public_key_b64, challenge, signature_b64
     ):
@@ -253,7 +228,7 @@ async def _run_enrollment(
 
     logger.info("Ed25519 signature verified for node %s", node_id)
 
-    # ── Step 10: Atomic DB commit — consume token + store node data ──────────
+    # Atomic DB commit — consume token + store node data
     now = time.time()
     hostname = fingerprint.get("hostname", "")
     machine_id = fingerprint.get("machine_id", "")
@@ -311,7 +286,6 @@ async def _run_enrollment(
 
     logger.info("Enrollment DB committed for node %s (hostname=%s)", node_id, hostname)
 
-    # ── Step 11: Transition to CONNECTED ────────────────────────────────────
     await node_manager.transition_state(
         db,
         node_id,
@@ -319,11 +293,9 @@ async def _run_enrollment(
         extra_fields={"last_heartbeat": now},
     )
 
-    # ── Step 12: Register WebSocket connection ───────────────────────────────
     conn = await node_manager.register_connection(node_id, websocket)
     conn.remote_address = remote
 
-    # ── Step 13: Send ENROLLMENT_SUCCESS ────────────────────────────────────
     await _send(
         websocket,
         {
@@ -336,7 +308,6 @@ async def _run_enrollment(
         node_id=node_id,
     )
 
-    # ── Step 14: Audit ───────────────────────────────────────────────────────
     await log_action(
         db,
         user_id="system",
@@ -361,11 +332,6 @@ async def _run_enrollment(
     return node_id
 
 
-# ---------------------------------------------------------------------------
-# Phase 1.5: Reconnect enrollment (skip Ed25519 challenge)
-# ---------------------------------------------------------------------------
-
-
 async def _run_reconnect(
     websocket: WebSocket,
     db: aiosqlite.Connection,
@@ -376,7 +342,7 @@ async def _run_reconnect(
     """Handle reconnect enrollment: validate worker_token, verify public_key match, skip challenge."""
     security = get_security_instance()
 
-    # ── R1: Verify worker_token (JWT validity + DB revocation) ──────────────
+    # Verify worker_token (JWT validity + DB revocation)
     try:
         claims = await security.verify_worker_token_async(worker_token, db)
     except ValueError as exc:
@@ -387,7 +353,7 @@ async def _run_reconnect(
     if not node_id:
         raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Worker token missing subject")
 
-    # ── R2: Fetch node and verify public_key match (anti-theft) ────────────
+    # Fetch node and verify public_key match (anti-theft)
     async with db.execute("SELECT state, public_key FROM nodes WHERE id = ?", (node_id,)) as cursor:
         node_row = await cursor.fetchone()
 
@@ -410,7 +376,7 @@ async def _run_reconnect(
             WS_CLOSE_SIGNATURE_INVALID, "Public key mismatch — token theft detected"
         )
 
-    # ── R3: Check node state ───────────────────────────────────────────────
+    # Check node state
     node_state = NodeState(node_row["state"])
     if node_state == NodeState.REVOKED:
         raise _EnrollmentError(WS_CLOSE_REVOKED, "Node is revoked")
@@ -420,13 +386,12 @@ async def _run_reconnect(
             f"Node is in unexpected state for reconnect: {node_state}",
         )
 
-    # Accepted states for reconnect: RECONNECTING, LOST, STALE
     logger.info("Reconnect for node %s (state=%s, remote=%s)", node_id, node_state.value, remote)
 
-    # ── R4: Transition to ENROLLING ───────────────────────────────────────
+    # Transition to ENROLLING
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
 
-    # ── R5: Generate fresh worker_token, update DB ─────────────────────────
+    # Generate fresh worker_token, update DB
     now = time.time()
     async with transaction(db):
         # Revoke old token
@@ -456,7 +421,6 @@ async def _run_reconnect(
             ),
         )
 
-    # ── R6: Transition to CONNECTED ────────────────────────────────────────
     await node_manager.transition_state(
         db,
         node_id,
@@ -464,11 +428,9 @@ async def _run_reconnect(
         extra_fields={"last_heartbeat": now},
     )
 
-    # ── R7: Register WebSocket connection ──────────────────────────────────
     conn = await node_manager.register_connection(node_id, websocket)
     conn.remote_address = remote
 
-    # ── R8: Send ENROLLMENT_SUCCESS ────────────────────────────────────────
     await _send(
         websocket,
         {
@@ -481,7 +443,6 @@ async def _run_reconnect(
         node_id=node_id,
     )
 
-    # ── R9: Audit ───────────────────────────────────────────────────────────
     reconnection_count = 1
     try:
         async with db.execute(
@@ -491,7 +452,7 @@ async def _run_reconnect(
             row = await cursor.fetchone()
         if row:
             reconnection_count = row["cnt"] + 1
-    except Exception:
+    except aiosqlite.Error:
         pass
 
     await log_action(
@@ -510,11 +471,6 @@ async def _run_reconnect(
     return node_id
 
 
-# ---------------------------------------------------------------------------
-# Phase 2: Operational loop
-# ---------------------------------------------------------------------------
-
-
 async def _run_operational(
     websocket: WebSocket,
     db: aiosqlite.Connection,
@@ -526,8 +482,8 @@ async def _run_operational(
 
     Message types from Worker:
       HEARTBEAT       → respond with HEARTBEAT_ACK, touch heartbeat timestamp
-      INTENT_RESULT   → forward result to waiting caller (Sprint 2: response_future)
-      STATUS_REPORT   → store latest metrics snapshot (Sprint 2)
+      INTENT_RESULT   → forward result to waiting caller
+      STATUS_REPORT   → store latest metrics snapshot
 
     Message types to Worker:
       HEARTBEAT_ACK   → acknowledge heartbeat
@@ -584,7 +540,6 @@ async def _run_operational(
             )
 
         elif msg_type == "STATUS_REPORT":
-            # Normalize and store metrics snapshot via plugin system
             snapshot = plugin_manager.call_first("normalize_status_report", raw_report=msg)
             if snapshot:
                 await plugin_manager.async_call(
@@ -602,7 +557,7 @@ async def _run_operational(
 
                         im = get_insights_manager()
                         asyncio.create_task(im.generate_profile(node_id, db, node_manager))
-                except Exception as ex:
+                except (aiosqlite.Error, ImportError) as ex:
                     logger.warning(
                         "Failed to start background profiling task for node %s: %s", node_id, ex
                     )
@@ -613,15 +568,10 @@ async def _run_operational(
             logger.warning("Node %s: unknown message type '%s'", node_id, msg_type)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 class _EnrollmentError(Exception):
     """Typed error for enrollment failures with a WS close code."""
 
-    def __init__(self, code: int, detail: str) -> None:
+    def __init__(self, code: int, detail: str):
         self.code = code
         self.detail = detail
         super().__init__(detail)
@@ -632,11 +582,7 @@ async def _recv_typed(
     expected_type: str,
     timeout: float,
 ) -> dict[str, Any]:
-    """
-    Receive a JSON message from the WebSocket within `timeout` seconds.
-    Validates that the message has the expected `type` field.
-    Raises asyncio.TimeoutError or _EnrollmentError.
-    """
+    """Receive a JSON message with `expected_type` within `timeout` seconds."""
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=timeout)
     except asyncio.TimeoutError:
@@ -656,12 +602,7 @@ async def _recv_typed(
 
 
 async def _send(websocket: WebSocket, data: dict[str, Any], node_id: str | None = None) -> None:
-    """Serialize and send a JSON message over the WebSocket.
-
-    Protected against WebSocketDisconnect: catches the exception, cleans up
-    any pending intent futures for the given node, logs a warning, and does
-    NOT re-raise (avoids orphan futures and worker handler crashes).
-    """
+    """Serialize and send a JSON message over the WebSocket (best-effort, swallows disconnects)."""
     try:
         await websocket.send_text(json.dumps(data, separators=(",", ":")))
     except WebSocketDisconnect:
@@ -671,10 +612,10 @@ async def _send(websocket: WebSocket, data: dict[str, Any], node_id: str | None 
 
 
 async def _close(websocket: WebSocket, code: int, reason: str) -> None:
-    """Close the WebSocket with a given code and reason string (best-effort)."""
+    """Close the WebSocket with a given code and reason (best-effort)."""
     try:
         await websocket.close(code=code, reason=reason)
-    except Exception:
+    except (WebSocketDisconnect, RuntimeError):
         pass
 
 
@@ -688,8 +629,7 @@ async def _get_node_state(db: aiosqlite.Connection, node_id: str) -> NodeState:
 
 
 def _get_remote_address(websocket: WebSocket) -> str:
-    """Extract the client IP address from the WebSocket connection.
-    Only trusts X-Forwarded-For if the direct peer is in the trusted_proxies list."""
+    """Extract the client IP, trusting X-Forwarded-For only from trusted proxies."""
     client = websocket.client
     client_ip = client.host if client else ""
 

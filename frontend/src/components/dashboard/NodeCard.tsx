@@ -31,10 +31,8 @@ export const NodeCard: React.FC<NodeCardProps> = ({
       onClick={onClick}
       className={`card-interactive w-full max-w-sm flex flex-col justify-between group relative overflow-hidden card-accent ${isExpanded ? '!h-auto' : 'h-48'}`}
     >
-      {/* Light glow pattern inside on hover */}
       <div className="absolute top-0 right-0 w-24 h-24 bg-accent/2 pointer-events-none rounded-bl-full group-hover:bg-accent/5 transition-colors duration-200" />
 
-      {/* Card Header */}
       <div className="flex items-center justify-between gap-2 z-10">
         <div className="flex items-center gap-2 truncate">
           <StatusDot state={node.state} />
@@ -47,7 +45,6 @@ export const NodeCard: React.FC<NodeCardProps> = ({
         </button>
       </div>
 
-      {/* Card Body - Human Insight First */}
       <div className="my-2.5 z-10 flex-1 flex flex-col justify-center min-w-0">
         {topInsight ? (
           <div className="space-y-0.5">
@@ -81,7 +78,6 @@ export const NodeCard: React.FC<NodeCardProps> = ({
         )}
       </div>
 
-      {/* Card Footer - Technical Data Second */}
       <div className="flex items-center justify-between gap-2 z-10 pt-2 border-t border-border/40">
         {metrics ? (
           <MetricPill

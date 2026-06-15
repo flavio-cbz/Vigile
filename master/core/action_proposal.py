@@ -9,6 +9,7 @@ The Human-in-the-Loop cycle:
   4. On reject → status=REJECTED
 """
 
+import json
 import time
 import uuid
 from typing import Any
@@ -42,7 +43,6 @@ class ActionProposal(BaseModel):
     result: dict[str, Any] | None = None
 
     def approve(self, user_id: str) -> None:
-        """Transition to APPROVED."""
         if self.status != "PENDING":
             raise ValueError(f"Cannot approve proposal in state {self.status}")
         self.status = "APPROVED"
@@ -50,7 +50,6 @@ class ActionProposal(BaseModel):
         self.updated_at = time.time()
 
     def reject(self, user_id: str, reason: str = "") -> None:
-        """Transition to REJECTED."""
         if self.status != "PENDING":
             raise ValueError(f"Cannot reject proposal in state {self.status}")
         self.status = "REJECTED"
@@ -68,7 +67,6 @@ class ActionProposal(BaseModel):
         self.updated_at = time.time()
 
     def to_db_dict(self) -> dict[str, Any]:
-        """Serialize to a flat dict for DB insertion."""
         return {
             "id": self.id,
             "node_id": self.node_id,
@@ -89,33 +87,17 @@ class ActionProposal(BaseModel):
 
     @classmethod
     def from_db_row(cls, row: dict[str, Any]) -> "ActionProposal":
-        """Deserialize from a DB row dict."""
         data = dict(row)
         data["params"] = _json_loads(data.pop("params_json", "{}"))
         data["result"] = _json_loads(data.pop("result_json", "null"))
         return cls(**data)
 
 
-RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-
-_VALID_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "PENDING": {"APPROVED", "REJECTED"},
-    "APPROVED": {"EXECUTED", "FAILED"},
-    "REJECTED": set(),
-    "EXECUTED": set(),
-    "FAILED": set(),
-}
-
-
 def _json_dumps(obj: Any) -> str:
-    import json
-
     return json.dumps(obj, separators=(",", ":"))
 
 
 def _json_loads(s: str | None) -> Any:
-    import json
-
     if s is None:
         return None
     try:

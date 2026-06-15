@@ -109,7 +109,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
       const startTime = nowSec - (totalBars - i) * slotDurationSec;
       const endTime = nowSec - (totalBars - i - 1) * slotDurationSec;
 
-      // Filter snapshots in this slot
       const slotSnapshots = snapshots.filter(
         (s) => s.collected_at >= startTime && s.collected_at < endTime
       );
@@ -117,7 +116,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
       let status: 'ok' | 'warning' | 'critical' | 'nodata';
       let details: string;
 
-      // Format time label for the tooltip
       const dateOpts: Intl.DateTimeFormatOptions = {
         hour: '2-digit',
         minute: '2-digit',
@@ -131,7 +129,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
       if (isDemoNode) {
         // Simulated timeline for demo nodes to present a rich story
         if (node.id === 'demo-node-05') {
-          // offline node
           if (i >= 18) {
             status = 'critical';
             details = 'Hors-ligne (Interruption)';
@@ -290,7 +287,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
 
   return (
     <div className="card w-full flex flex-col gap-5 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between border-b border-border-strong pb-3">
         <div>
           <h4 className="text-sm font-bold text-text-1 tracking-wide uppercase flex items-center gap-1.5 font-interface">
@@ -302,7 +298,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
           </p>
         </div>
 
-        {/* Period Selector */}
         <div className="flex bg-surface-2 border border-border rounded-lg p-0.5 select-none">
           <button
             onClick={() => handlePeriodChange('24h')}
@@ -323,7 +318,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
         </div>
       </div>
 
-      {/* Nodes list */}
       <div className="flex flex-col gap-6">
         {isLoading && Object.keys(nodesStats).length === 0 ? (
           <div className="py-8 flex items-center justify-center">
@@ -342,7 +336,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
 
             return (
               <div key={node.id} className="flex flex-col gap-2.5 p-4 rounded-xl border border-border bg-surface/40 hover:border-border-strong hover:bg-surface-2/10 transition-all duration-300">
-                {/* Node info row */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span
@@ -372,7 +365,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                   </div>
                 </div>
 
-                {/* Bars Row */}
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center justify-between gap-1 py-1.5">
                     {timelineBars.map((bar, barIdx) => {
@@ -387,7 +379,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                           title={`${bar.label} : ${bar.details}`}
                           className={`flex-1 h-6 rounded-sm transition-transform duration-100 hover:scale-y-125 cursor-pointer relative group ${colorClass}`}
                         >
-                          {/* Rich custom Tooltip */}
                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
                             <div className="bg-surface-2 border border-border-strong text-text-1 text-[10px] rounded p-2 shadow-xl whitespace-nowrap flex flex-col gap-0.5">
                               <span className="font-mono text-text-3">{bar.label}</span>
@@ -400,7 +391,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                     })}
                   </div>
 
-                  {/* Time Legend */}
                   <div className="flex items-center justify-between text-[9px] text-text-3 font-semibold uppercase tracking-wider">
                     <span>
                       {period === '24h' ? 'Il y a 24 heures' : 'Il y a 7 jours'}
@@ -410,7 +400,6 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                   </div>
                 </div>
 
-                {/* Incident Summary */}
                 <div className="mt-1 text-[10px] border-t border-border/20 pt-2">
                   {nodeIncidents.length === 0 ? (
                     <div className="flex items-center gap-1.5 text-severity-ok font-medium">
