@@ -28,18 +28,15 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     """
     logger.info("Running database migrations...")
 
-    # Create tables
     for ddl in ALL_TABLES:
         await db.execute(ddl)
 
-    # Create indexes
     for idx_sql in CREATE_INDEXES:
         await db.execute(idx_sql)
 
     await db.commit()
     logger.info("Tables and indexes OK.")
 
-    # Idempotent dynamic columns upgrade for insights and caching
     async with db.execute("PRAGMA table_info(nodes)") as cursor:
         columns = [row["name"] for row in await cursor.fetchall()]
 
@@ -61,7 +58,6 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.commit()
         logger.info("Added insights and caching columns to nodes table.")
 
-    # Stamp Alembic version if not already versioned (idempotent)
     await db.execute(
         "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
     )
@@ -71,7 +67,6 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     )
     await db.commit()
 
-    # Seed data
     await _seed_default_admin(db)
     await _seed_default_plugins(db)
     logger.info("Migrations complete.")
@@ -117,7 +112,6 @@ async def _seed_default_admin(db: aiosqlite.Connection) -> None:
         (user_id, "admin", password_hash, must_change, now, now),
     )
 
-    # Log the seeding event in the audit trail
     await _seed_genesis_audit(db, user_id)
 
     await db.commit()

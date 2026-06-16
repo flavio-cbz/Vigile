@@ -26,7 +26,7 @@ Sprint en cours : 5
   except JWTError:
       pass
   ```
-- **Problème :** L'exception de signature ou d'expiration JWT is capturée et ignorée silencieusement lors de la validation du jeton d'accès.
+- **Problème :** L'exception de signature ou d'expiration JWT est capturée et ignorée silencieusement lors de la validation du jeton d'accès.
 - **Action requise :** Enregistrer l'erreur de décodage du token dans les journaux système avec un niveau `warning`.
 
 ### [B-03] Exception interceptée silencieusement (pass sans log)
@@ -258,7 +258,7 @@ Sprint en cours : 5
 ### [G-04] Timeout / Deadline TCP hardcodé (Magic Number)
 - **Fichier :** [worker/connection.go:214](file:///Users/flavio/Documents/Projets/Youcloud-API/worker/connection.go#L214)
 - **Extrait :** `_ = ws.SetReadDeadline(time.Now().Add(90 * time.Second))`
-- **Problème :** Utilisation directe de `90 * time.Second` en dur dans le code d'affectation de deadline de socket.
+- **Problème :** Utilisation directe de `90 * time.Second` en dur dans le code d'affecter la deadline de socket.
 - **Action requise :** Utiliser la constante définie `heartbeatTimeout` à la place.
 
 ### [G-06] Fonction sans passage de context.Context
@@ -314,16 +314,10 @@ Sprint en cours : 5
 - **Action requise :** Différencier les noms, par ex. renommer l'API en `verify_audit_chain`.
 
 ### [A-02] Commentaire didactique paraphrase le code
-- **Fichier :** [master/core/secret_loader.py:68](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/secret_loader.py#L68)
-- **Extrait :** `# Not configured — return empty string (caller decides if required)`
-- **Problème :** Le commentaire répète textuellement la logique triviale implémentée.
-- **Action requise :** Retirer les commentaires redondants.
+- ✅ Aucune occurrence trouvée (Récemment nettoyé dans le commit `d0b66ef`).
 
 ### [A-07] Dicts/caches sans TTL ou cleanup
-- **Fichier :** [master/core/node_manager.py:126](file:///Users/flavio/Documents/Projets/Youcloud-API/master/core/node_manager.py#L126)
-- **Extrait :** `self._pending_intents: dict[str, asyncio.Future] = {}`
-- **Problème :** Ce dictionnaire stocke des requêtes WebSocket en cours. Si des requêtes échouent sans émettre de réponse, elles restent indéfiniment en mémoire.
-- **Action requise :** Implémenter une routine de nettoyage périodique (garbage collection des futures expirés).
+- ✅ Aucune occurrence trouvée (Le dictionnaire `_pending_intents` dans `node_manager.py` possède désormais un mécanisme de nettoyage par âge `_cleanup_stale_intents` appelé dans la boucle de heartbeat).
 
 ### [P-01] Prompts non versionnés
 - **Fichier :** [master/api/chat.py:147](file:///Users/flavio/Documents/Projets/Youcloud-API/master/api/chat.py#L147)
@@ -340,7 +334,7 @@ Sprint en cours : 5
 ### [S-02] Colonnes status sans contrainte CHECK
 - **Fichier :** [master/db/alembic/versions/001_initial_schema.py:145](file:///Users/flavio/Documents/Projets/Youcloud-API/master/db/alembic/versions/001_initial_schema.py#L145)
 - **Extrait :** `sa.Column("status", sa.String(), nullable=False, server_default="PENDING")`
-- **Problème :** La colonne stocke un état textuel sans contrainte d'intégrité au niveau DB, ce qui peut mener à des états invalides ou incohérents.
+- **Problème :** La colonne stocke un état textuel sans contrainte d'intégrité au niveau DB, ce qui peut mener à des états incohérents.
 - **Action requise :** Définir une contrainte CHECK restreignant les valeurs permises (PENDING, APPROVED, REJECTED, EXECUTED, FAILED).
 
 ### [S-03] ALTER TABLE sans DEFAULT
@@ -352,7 +346,7 @@ Sprint en cours : 5
 ### [X-03] Config hardcodée
 - **Fichier :** [master/db/database.py:37](file:///Users/flavio/Documents/Projets/Youcloud-API/master/db/database.py#L37)
 - **Extrait :** `conn = await aiosqlite.connect(self._path, timeout=30.0)`
-- **Problème :** La valeur de `timeout` de connexion DB est codée en dur.
+- **Problème :** La valeur de `timeout` de connexion DB émaillée en dur.
 - **Action requise :** Centraliser dans `config.py`.
 
 ### [X-06] Dépendances non whitelistées
@@ -373,23 +367,26 @@ Sprint en cours : 5
 
 ### M-01 : Hot spots (fichiers les plus modifiés)
 Les fichiers les plus modifiés de la base de code, nécessitant une surveillance accrue de la complexité :
-- `master/api/deps.py` : 10 modifications
+- `master/api/deps.py` : 11 modifications
 - `master/ws/worker_handler.py` : 9 modifications
 - `master/main.py` : 9 modifications
+- `master/core/node_manager.py` : 9 modifications
 - `master/config.py` : 9 modifications
-- `master/core/node_manager.py` : 8 modifications
-- `master/api/nodes.py` : 8 modifications
+- `master/api/nodes.py` : 9 modifications
 
 ### M-02 : Ratio ajout/suppression (dernier sprint)
-- **Ratio insertions/suppressions :** `19691 insertions / 15901 suppressions = 1.24` (Seuil d'alerte : 10).
-Le ratio est très équilibré, indiquant une saine refactorisation et élimination de code inutile au cours du sprint en cours.
+- **Ratio insertions/suppressions :** `19982 insertions / 16318 suppressions = 1.22` (Seuil d'alerte : 10).
+Le ratio est très équilibré, indiquant une saine refactorisation et élimination de code inutile au cours du sprint 5.
 
 ### M-03 : Commits récents sans tests
 Commits du sprint 5 modifiant des sources mais n'incluant aucun test unitaire associé :
-- ⚠️  `f8e79c7` fix(ci/worker): resolve Go test compilation error and eliminate redundant CI formatting checks
-- ⚠️  `a4ed73a` chore(frontend/build): compile production build files and update master/static/
-- ⚠️  `8ee37bd` feat(frontend/ui): implement premium layouts, refactor pages and custom UI controls
-- ⚠️  `71940d8` style(backend): add noqa F821 for intentional lazy LLM type hints
+- ⚠️ `d0b66ef` refactor: remove AI-generated slop, clean comments/docstrings, and refactor Go worker connection/stats/enrollment helpers
+- ⚠️ `f8e79c7` fix(ci/worker): resolve Go test compilation error and eliminate redundant CI formatting checks
+- ⚠️ `a4ed73a` chore(frontend/build): compile production build files and update master/static/
+- ⚠️ `8ee37bd` feat(frontend/ui): implement premium layouts, refactor pages and custom UI controls
+- ⚠️ `d7bfcef` feat(frontend/core): clean up styles, update store states and translation files
+- ⚠️ `78be01d` chore(repo): clean up codemaps, omo folders, and update CI/pre-commit config
+- ⚠️ `71940d8` style(backend): add noqa F821 for intentional lazy LLM type hints
 
 ---
 
@@ -401,9 +398,9 @@ Vérifier l'existence et la couverture de tests spécifiques pour valider les co
 - *heartbeat + unregister race condition* (WebSocket coupé en cours de mise à jour de l'état).
 
 ### DOC-01 : Écart de documentation des API Routes
-- Il y a **42 routes d'API** actives déclarées dans le code sous `master/api/`.
+- Il y a **44 routes d'API** actives déclarées dans le code sous `master/api/`.
 - Cependant, seulement **9 routes clés** sont documentées dans le `README.md`.
-- Écart : 33 routes non documentées à intégrer dans la doc d'architecture.
+- Écart : 35 routes non documentées à intégrer dans la doc d'architecture.
 
 ### D-02 : Audit des vulnérabilités de sécurité Python (CVE)
 - `pip-audit` n'a pas pu être exécuté automatiquement (exécutable absent de l'environnement).
@@ -412,10 +409,12 @@ Vérifier l'existence et la couverture de tests spécifiques pour valider les co
 ---
 
 ## ✅ Points positifs
-- **[T-01] Excellente couverture des modules critiques :** Les tests affichent une couverture globale de **97%** sur la sécurité (`security_manager.py`), l'authentification (`auth.py`) et la DB (`database.py`), dépassant le seuil minimum requis de 95%.
+- **[T-01] Excellente couverture des modules critiques :** Les tests affichent une couverture globale de **97%** sur la sécurité (`security_manager.py`), **97%** sur l'authentification (`auth.py`) et **98%** sur la DB (`database.py`), dépassant largement le seuil minimum requis de 95%. La couverture globale du projet `master/` est de **86%**.
+- **[T-02] Aucun test skip ou xfail :** Aucun test unitaire n'est désactivé ou marqué comme dysfonctionnel de manière permanente dans la suite de tests.
 - **[D-01] Versions strictes :** Les versions des dépendances Python dans `requirements.txt` sont toutes épinglées (`==`).
 - **[S-01] Idempotence DB :** Toutes les tables sont créées avec la clause d'idempotence `CREATE TABLE IF NOT EXISTS` dans `models.py`.
-- **[D-04] Worker standard standardisé :** Le worker utilise strictement le compilateur Go 1.23 standard et sa bibliothèque intégrée (stdlib only), sans importation de dépendances tierces potentiellement vérolées.
+- **[D-04] Worker standardisé :** Le worker utilise strictement le compilateur Go 1.23 standard et sa bibliothèque intégrée (stdlib only), sans importation de dépendances tierces potentiellement non fiables.
+- **[DOC-02] Cohérence SESSION.md :** Non applicable (le fichier obsolète `docs/SESSION.md` a été archivé dans le commit `cf15cf9` pour éviter les incohérences de documentation active).
 
 ---
 *Rapport généré par la tâche d'audit automatique.*

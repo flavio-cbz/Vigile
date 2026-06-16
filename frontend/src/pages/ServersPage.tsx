@@ -107,7 +107,6 @@ export const ServersPage: React.FC = () => {
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold uppercase tracking-wider text-text-1 flex items-center gap-2">
@@ -129,7 +128,6 @@ export const ServersPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Loading state */}
       {isLoading && nodes.length === 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -142,7 +140,6 @@ export const ServersPage: React.FC = () => {
         </div>
       )}
 
-      {/* Empty state */}
       {!isLoading && filtered.length === 0 && (
         <EmptyState
           icon={<Server className="w-12 h-12" />}
@@ -155,7 +152,6 @@ export const ServersPage: React.FC = () => {
         />
       )}
 
-      {/* Server grid */}
       {filtered.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map((node: Node) => {
@@ -171,9 +167,7 @@ export const ServersPage: React.FC = () => {
                     : "border-severity-critical/20 hover:border-severity-critical/40 hover:bg-surface-2/80 card-glow-danger"
                 )}
               >
-                {/* Top Section */}
                 <div className="w-full">
-                  {/* Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <StatusDot state={node.state} />
@@ -191,7 +185,6 @@ export const ServersPage: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* Details */}
                   <div className="space-y-1.5 text-[11px] text-text-2">
                     {node.os && (
                       <div className="flex items-center gap-2">
@@ -213,10 +206,8 @@ export const ServersPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Metrics for online nodes */}
                   {node.online && (
                     <div className="mt-4 pt-4 border-t border-border-strong/10 space-y-2.5">
-                      {/* CPU */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
                           <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> CPU</span>
@@ -229,7 +220,6 @@ export const ServersPage: React.FC = () => {
                           />
                         </div>
                       </div>
-                      {/* RAM */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
                           <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> RAM</span>
@@ -242,7 +232,6 @@ export const ServersPage: React.FC = () => {
                           />
                         </div>
                       </div>
-                      {/* DISK */}
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
                           <span className="text-text-2 flex items-center gap-1"><HardDrive className="w-3 h-3 text-text-3" /> DISQUE</span>
@@ -258,7 +247,6 @@ export const ServersPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Diagnostic details for offline nodes */}
                   {!node.online && (
                     <div className="mt-4 pt-4 border-t border-border-strong/10 space-y-2.5">
                       <div className="text-[11px] text-severity-critical font-medium space-y-1">
@@ -282,7 +270,6 @@ export const ServersPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* ID footer */}
                 <div className="mt-4 pt-3 border-t border-border-strong/10 w-full">
                   <span className="text-[9px] font-mono text-text-3">
                     ID: {node.id.substring(0, 12)}…

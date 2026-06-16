@@ -130,7 +130,6 @@ export async function api<T = unknown>(
             displayMessage = parsed.detail || parsed.message || parsed.error || errorText;
           }
         } catch {
-          // Not JSON, fallback
         }
         const error = new Error(displayMessage || `HTTP ${response.status}`);
         if (response.status >= 500 && !skipToast) {

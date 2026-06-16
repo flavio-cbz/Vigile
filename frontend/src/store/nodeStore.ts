@@ -98,8 +98,9 @@ export const useNodeStore = create<NodeState>((set, get) => ({
         selectedNodeId: newSelectedId,
         isLoading: false
       });
-    } catch (err: any) {
-      set({ error: err.message, isLoading: false });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur inconnue';
+      set({ error: message, isLoading: false });
     }
   }
 }));

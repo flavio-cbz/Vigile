@@ -65,7 +65,6 @@ export function useSSE() {
       let value: Uint8Array | undefined;
       let done = false;
       while (true) {
-        // Per-read timeout: abort if no data within readTimeoutMs
         let perReadTimeout: number | null = null;
         try {
           perReadTimeout = window.setTimeout(() => controller.abort(), readTimeoutMs);

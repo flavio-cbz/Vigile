@@ -23,7 +23,6 @@ export const CopilotInput: React.FC<CopilotInputProps> = ({ onSend, disabled = f
     setText('');
   };
 
-  // Auto-resize textarea heights
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;

@@ -86,8 +86,6 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
         addToast('success', 'Proposition rejetée', '');
         onProposalUpdated(proposal.id, 'REJECTED');
         onClose();
-        setRejectionReason('');
-        setIsRejectingState(false);
       } else {
         const data = await res.json();
         addToast('error', 'Erreur', data.detail || "Erreur lors du rejet");

@@ -49,7 +49,6 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
     }
   };
 
-  // Safe parameters extraction
   const parsedParams = typeof proposal.params === 'object' ? proposal.params :
                        (proposal as any).params_json ? (() => {
                          try {
@@ -65,7 +64,6 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
                         parsedParams?.container ||
                         'Système';
 
-  // Highlight pending actions based on risk level for enhanced operator awareness
   let cardStatusClass = "card-success";
 
   const risk = proposal.risk_level.toLowerCase();
@@ -79,15 +77,12 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
     <div
       className={`card card-proposal flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
     >
-      {/* Risk label indicator */}
       <div className="flex items-center justify-between gap-2 shrink-0">
-          {/* PROPOSITION IA label removed */}
         <span className={`text-[10px] font-extrabold font-interface tracking-wide uppercase px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0 ${getRiskStyles(proposal.risk_level)}`}>
           {getRiskLabel(proposal.risk_level)}
         </span>
       </div>
 
-      {/* Content description */}
       <div className="my-3 min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-xs font-bold text-text-3 font-interface uppercase tracking-wider mb-1.5">
           <ShieldAlert className="w-3.5 h-3.5 text-accent" />
@@ -112,7 +107,6 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
         </p>
       </div>
 
-      {/* Action buttons footer */}
       <div className="flex flex-wrap gap-2 pt-3 border-t border-border/40 shrink-0 justify-between items-center w-full">
         {proposal.status !== 'PENDING' ? (
           <div className="flex-1 text-center py-1.5 font-bold font-interface text-[9px] uppercase tracking-wider select-none w-full">

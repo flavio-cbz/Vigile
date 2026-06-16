@@ -72,7 +72,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const data = await api<ChatSession[]>(url);
       if (data) {
         set({ sessions: data });
-        // Update activeSession reference if selected
         const { activeSessionId } = get();
         if (activeSessionId) {
           const active = data.find(s => s.id === activeSessionId) || null;
@@ -211,7 +210,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const assistantMessage: Message = { role: 'assistant', content: '' };
       const sessionId = currentSession.id;
 
-      // Helper: update to the latest history snapshot
       const updateAssistantMessage = () => {
         const state = get();
         if (!state.activeSession || state.activeSession.id !== sessionId) return;
@@ -228,7 +226,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       };
 
-      // Insert placeholder
       set(state => {
         if (!state.activeSession) return {};
         const withPlaceholder = [...(state.activeSession.history || []), { ...assistantMessage }];

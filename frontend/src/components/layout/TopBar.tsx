@@ -48,7 +48,6 @@ export const TopBar: React.FC = () => {
 
   return (
     <header className="h-[var(--topbar-height)] bg-surface/75 backdrop-blur-md border-b border-border-strong/30 flex items-center justify-between px-6 shrink-0 relative z-30 font-interface select-none shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
-      {/* Left side: Logo & Breadcrumbs */}
       <div className="flex items-center gap-6">
         <Link to="/" className="flex items-center gap-2 group md:hidden">
           <div className="w-7 h-7 xl:w-8.5 xl:h-8.5 bg-accent-muted/20 border border-accent/25 rounded flex items-center justify-center shadow-[0_0_10px_var(--color-accent-glow)] group-hover:border-accent/40 transition-colors">
@@ -69,9 +68,7 @@ export const TopBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Middle/Right: Fleet selector & system monitors */}
       <div className="flex items-center gap-4">
-        {/* Search Command projecteur style */}
         <button
           onClick={triggerSearch}
           className="hidden md:flex items-center gap-2 px-3 py-1.5 xl:px-4 xl:py-2 rounded-md bg-surface-2/45 border border-border-strong/45 hover:border-accent/50 text-text-2 hover:text-text-1 text-[10px] xl:text-[11.5px] font-medium transition-all duration-200 cursor-pointer shadow-inner"
@@ -120,7 +117,6 @@ export const TopBar: React.FC = () => {
 
         <NotifBell />
 
-        {/* User profile dropdown */}
         <div ref={menuRef} className="relative">
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}

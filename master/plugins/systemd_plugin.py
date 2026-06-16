@@ -20,11 +20,6 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
-
-
 class ServiceInfo(BaseModel):
     name: str = Field(description="Systemd unit name (e.g. ssh.service)")
     state: str = Field(description="Active state (active, inactive, etc.)")
@@ -37,11 +32,6 @@ class ServiceStatus(BaseModel):
     enabled: str = Field(description="Whether service is enabled")
 
 
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
-
-
 def parse_service_list(output: str) -> list[dict[str, str]] | None:
     """Parse the JSON array returned by the Worker for LIST_SERVICES."""
     try:
@@ -50,7 +40,7 @@ def parse_service_list(output: str) -> list[dict[str, str]] | None:
             return None
         validated = [ServiceInfo(**item).model_dump() for item in raw]
         return validated
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         logger.warning("Invalid service list from worker: %s", exc)
         return None
 
@@ -61,14 +51,9 @@ def parse_service_status(output: str) -> dict[str, str] | None:
         raw = json.loads(output)
         validated = ServiceStatus(**raw)
         return validated.model_dump()
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         logger.warning("Invalid service status from worker: %s", exc)
         return None
-
-
-# ---------------------------------------------------------------------------
-# Plugin registration
-# ---------------------------------------------------------------------------
 
 
 def register(pm) -> None:

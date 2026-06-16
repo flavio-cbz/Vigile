@@ -68,7 +68,6 @@ export const Sidebar: React.FC = () => {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -86,7 +85,6 @@ export const Sidebar: React.FC = () => {
 
   const collapsed = !isMobile && isSidebarCollapsed;
 
-  // ─── Server Selector ───
   const renderServerSelector = () => {
     const current = isGlobal ? null : activeNode;
 
@@ -178,7 +176,6 @@ export const Sidebar: React.FC = () => {
           <div className={`absolute z-50 rounded-lg border border-border-strong/70 bg-surface-2/95 backdrop-blur-md shadow-2xl overflow-hidden animate-fade-in ${
             collapsed ? 'left-full ml-3 top-0 w-56' : 'left-3 right-3 top-full mt-1.5'
           }`}>
-            {/* Sticky search input */}
             <div className="sticky top-0 z-10 bg-surface-2/80 border-b border-border-strong/30 px-2 py-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3 pointer-events-none" />
@@ -271,11 +268,9 @@ export const Sidebar: React.FC = () => {
     );
   };
 
-  // ─── Navigation ───
   const renderNav = () => {
     const { t } = useLocale();
 
-    // Primary navigation items
     const primaryItems = [
       { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true },
       { to: '/servers', label: t('nav.servers'), icon: Server },
@@ -293,7 +288,6 @@ export const Sidebar: React.FC = () => {
       },
     ];
 
-    // Admin/Secondary navigation items
     const adminItems = [
       { to: '/plugins', label: t('nav.plugins'), icon: Grid },
       { to: '/audit', label: t('nav.audit'), icon: Activity },
@@ -336,10 +330,7 @@ export const Sidebar: React.FC = () => {
               : 'text-text-2 hover:text-text-1 hover:bg-surface-2/40 border border-transparent'
           }`}
         >
-          {isActive && !collapsed && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2.5px] h-4 bg-accent rounded-r-full shadow-[0_0_8px_var(--color-accent-glow)]" />
-          )}
-          {isActive && collapsed && (
+          {isActive && (
             <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2.5px] h-4 bg-accent rounded-r-full shadow-[0_0_8px_var(--color-accent-glow)]" />
           )}
           <Icon className="w-4 h-4 xl:w-4.5 xl:h-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -376,7 +367,6 @@ export const Sidebar: React.FC = () => {
 
     return (
       <nav className="flex-1 overflow-y-auto py-3 scrollbar-none flex flex-col gap-4 scrollable-list">
-        {/* Navigation Section */}
         <div>
           {!collapsed && (
             <div className="text-[9px] font-bold text-text-3 uppercase tracking-widest px-4 pb-1.5 font-mono">
@@ -388,7 +378,6 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Administration Section */}
         {(isAdmin || isOperator) && (
         <div>
           {collapsed ? (
@@ -424,7 +413,6 @@ export const Sidebar: React.FC = () => {
     );
   };
 
-  // ─── Mobile Drawer ───
   if (isMobile) {
     return (
       <>
@@ -461,7 +449,6 @@ export const Sidebar: React.FC = () => {
           {renderServerSelector()}
           {renderNav()}
 
-          {/* User */}
           <Link
             to="/settings"
             onClick={handleNavClick}
@@ -499,7 +486,6 @@ export const Sidebar: React.FC = () => {
     );
   }
 
-  // ─── Desktop ───
   return (
     <div
       className={`relative h-full bg-surface/75 backdrop-blur-md border-r border-border-strong/30 flex flex-col shrink-0 select-none z-40 transition-[width] duration-250 ease-out shadow-[4px_0_24px_rgba(0,0,0,0.05)] ${
@@ -507,9 +493,7 @@ export const Sidebar: React.FC = () => {
       }`}
       style={{ width: 'var(--sidebar-width)' }}
     >
-      {/* Inner wrapper to contain all content and control scroll/clip */}
       <div className="w-full h-full flex flex-col overflow-hidden">
-        {/* Brand Header */}
         <div className={`flex items-center h-[var(--topbar-height)] border-b border-border-strong/30 shrink-0 overflow-hidden ${
           collapsed ? 'justify-center' : 'gap-2.5 px-4'
         }`}>
@@ -530,16 +514,12 @@ export const Sidebar: React.FC = () => {
           </Link>
         </div>
 
-        {/* Server selector */}
         {renderServerSelector()}
 
-        {/* Divider when collapsed and single server */}
         {collapsed && isSingleServer && <div className="border-t border-border-strong/30" />}
 
-        {/* Navigation */}
         {renderNav()}
 
-        {/* User — compact info */}
         <Link
           to="/settings"
           onClick={handleNavClick}

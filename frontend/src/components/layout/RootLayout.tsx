@@ -23,7 +23,7 @@ export const RootLayout: React.FC = () => {
         useLayoutStore.getState().setPendingCount(data.length);
       }
     } catch {
-      void 0;
+      // Swallow — polling errors are non-critical
     }
   };
 

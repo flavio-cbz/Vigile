@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 
-
 interface LayoutState {
   isCopilotOpen: boolean;
   isSidebarOpen: boolean;

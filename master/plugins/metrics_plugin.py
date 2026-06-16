@@ -24,11 +24,6 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Data model for a metrics snapshot from a Worker
-# ---------------------------------------------------------------------------
-
-
 class MetricsSnapshot(BaseModel):
     """
     Validated schema for a STATUS_REPORT from a Worker node.
@@ -40,7 +35,6 @@ class MetricsSnapshot(BaseModel):
     are still accepted but zero-values flag missing data.
     """
 
-    # CPU
     cpu_percent: float = Field(
         default=0.0,
         ge=0.0,
@@ -68,7 +62,6 @@ class MetricsSnapshot(BaseModel):
         description="Number of CPU cores detected",
     )
 
-    # Memory
     mem_total_bytes: int = Field(
         default=0,
         ge=0,
@@ -86,7 +79,6 @@ class MetricsSnapshot(BaseModel):
         description="Memory usage as percentage (0-100)",
     )
 
-    # Swap
     swap_total_bytes: int = Field(
         default=0,
         ge=0,
@@ -98,7 +90,6 @@ class MetricsSnapshot(BaseModel):
         description="Used swap space in bytes",
     )
 
-    # Disk
     disk_total_bytes: int = Field(
         default=0,
         ge=0,
@@ -116,7 +107,6 @@ class MetricsSnapshot(BaseModel):
         description="Disk usage as percentage (0-100)",
     )
 
-    # System
     uptime_seconds: float = Field(
         default=0.0,
         ge=0.0,
@@ -128,7 +118,6 @@ class MetricsSnapshot(BaseModel):
         description="Number of running processes",
     )
 
-    # Timestamp (set by Master on arrival, Worker may also send its own)
     collected_at: float = Field(
         default_factory=time.time,
         description="Unix timestamp when metrics were collected",
@@ -136,12 +125,10 @@ class MetricsSnapshot(BaseModel):
 
     @property
     def mem_free_bytes(self) -> int:
-        """Derived: free memory = total - used."""
         return self.mem_total_bytes - self.mem_used_bytes
 
     @property
     def disk_free_bytes(self) -> int:
-        """Derived: free disk = total - used."""
         return self.disk_total_bytes - self.disk_used_bytes
 
     def to_prometheus_labels(self) -> dict[str, str | float | int]:
@@ -162,11 +149,6 @@ class MetricsSnapshot(BaseModel):
     def model_dump_flat(self) -> dict[str, Any]:
         """Return a flat dict of all fields (for DB storage / JSON serialization)."""
         return self.model_dump()
-
-
-# ---------------------------------------------------------------------------
-# Plugin registration
-# ---------------------------------------------------------------------------
 
 
 def register(pm) -> None:
@@ -195,11 +177,6 @@ def register(pm) -> None:
     pm.register("on_status_report", _on_status_report, plugin_name="metrics")
 
     logger.info("Metrics plugin registered.")
-
-
-# ---------------------------------------------------------------------------
-# Hook implementations
-# ---------------------------------------------------------------------------
 
 
 def get_config_schema() -> dict[str, Any]:
@@ -256,7 +233,7 @@ def _normalize_status_report(raw_report: dict) -> dict | None:
             snapshot.disk_percent,
         )
         return snapshot.model_dump_flat()
-    except Exception as exc:
+    except ValueError as exc:
         logger.warning("Invalid status report: %s", exc)
         return None
 
@@ -279,7 +256,6 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
         logger.debug("on_status_report: no DB handle — skipping persistence")
         return
 
-    import time
     import uuid
 
     now = time.time()

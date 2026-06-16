@@ -58,12 +58,9 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
         t('card.restarting') + ' ' + container.name
       );
       if (onRefresh) onRefresh();
-    } catch (err: any) {
-      useToastStore.getState().addToast(
-        'error',
-        'Erreur',
-        err.message || 'Impossible de redémarrer le conteneur.'
-      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Impossible de redémarrer le conteneur.';
+      useToastStore.getState().addToast('error', 'Erreur', message);
     } finally {
       setIsRestarting(false);
     }
@@ -112,7 +109,6 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
 
   const isRestartDisabled = isRestarting || containerState === 'dead' || containerState === 'restarting';
 
-  // Highlight container cards according to their execution state
   let cardStatusClass = "card-success";
 
   if (containerState === 'dead') {
@@ -127,7 +123,6 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
     <div
       className={`card card-container flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
     >
-      {/* Top Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-ink-primary truncate group-hover:text-accent-hover transition-colors" title={container.name}>
@@ -141,7 +136,6 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
         <div className="shrink-0">{getStatusBadge()}</div>
       </div>
 
-      {/* Info details */}
       <div className="my-2 min-w-0">
         <div className={`text-xs text-ink-secondary ${isExpanded ? 'break-all whitespace-normal' : 'truncate'}`} title={container.image}>
           Image: {container.image}
@@ -162,7 +156,6 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
         </div>
       </div>
 
-      {/* Admin actions footer */}
       <div className="border-t border-border/40 pt-2 flex items-center justify-between mt-auto">
         <span className="text-xs text-ink-muted truncate font-mono">
           ID: {container.id.substring(0, 12)}

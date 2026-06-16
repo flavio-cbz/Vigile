@@ -54,7 +54,7 @@ export const TimeAgo: React.FC<TimeAgoProps> = ({ timestamp, className = '' }) =
     };
 
     calculateTime();
-    const interval = setInterval(calculateTime, 30000); // refresh every 30s
+    const interval = setInterval(calculateTime, 30000);
 
     return () => clearInterval(interval);
   }, [timestamp]);

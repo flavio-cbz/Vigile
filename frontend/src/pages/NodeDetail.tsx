@@ -124,7 +124,6 @@ export const NodeDetail: React.FC = () => {
   const { openCopilot } = useUiStore();
   const { insights, loading: loadingInsights, refresh: refreshInsights } = useNodeInsights(id || null);
 
-  // States
   const [node, setNode] = useState<any>(null);
   const [loadingNode, setLoadingNode] = useState(true);
 
@@ -156,18 +155,15 @@ export const NodeDetail: React.FC = () => {
   const [statsHistory, setStatsHistory] = useState<any[]>([]);
   const [loadingStats, setLoadingStats] = useState(false);
 
-  // Services State
   const [services, setServices] = useState<any[]>([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [serviceFilter, setServiceFilter] = useState('');
   const [serviceSearch, setServiceSearch] = useState('');
 
-  // Containers State
   const [containers, setContainers] = useState<any[]>([]);
   const [loadingContainers, setLoadingContainers] = useState(false);
   const [containerSearch, setContainerSearch] = useState('');
 
-  // Logs State
   const [logs, setLogs] = useState<string>('');
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logsService, setLogsService] = useState<string>('');
@@ -175,7 +171,6 @@ export const NodeDetail: React.FC = () => {
   const [logsAutoScroll, setLogsAutoScroll] = useState(true);
   const logsConsoleRef = useRef<HTMLDivElement>(null);
 
-  // Operations actions loading states
   const [restartingService, setRestartingService] = useState<string | null>(null);
   const [restartingContainer, setRestartingContainer] = useState<string | null>(null);
 
@@ -252,7 +247,6 @@ export const NodeDetail: React.FC = () => {
     }
   };
 
-  // Initial load
   useEffect(() => {
     const init = async () => {
       setLoadingNode(true);
@@ -262,7 +256,6 @@ export const NodeDetail: React.FC = () => {
     init();
   }, [id]);
 
-  // Tab dynamic loading
   useEffect(() => {
     if (activeTab === 'metrics') fetchStatsHistory();
     if (activeTab === 'services') fetchServicesList();
@@ -274,14 +267,12 @@ export const NodeDetail: React.FC = () => {
   usePolling('detail_metrics_poll', fetchStatsHistory, 15000, activeTab === 'metrics');
   usePolling('detail_logs_poll', fetchNodeLogs, 10000, activeTab === 'logs');
 
-  // Logs Scroll helper
   useEffect(() => {
     if (logsAutoScroll && logsConsoleRef.current) {
       logsConsoleRef.current.scrollTop = logsConsoleRef.current.scrollHeight;
     }
   }, [logs, logsAutoScroll]);
 
-  // Control services restart
   const handleRestartService = async (serviceName: string) => {
     if (!id || !isAdmin) return;
     setRestartingService(serviceName);
@@ -295,7 +286,6 @@ export const NodeDetail: React.FC = () => {
     }
   };
 
-  // Control containers restart
   const handleRestartContainer = async (containerId: string) => {
     if (!id || !isAdmin) return;
     setRestartingContainer(containerId);
@@ -334,7 +324,6 @@ export const NodeDetail: React.FC = () => {
     );
   }
 
-  // Filter lists
   const filteredServices = services.filter((srv) => {
     const matchesSearch = srv.name.toLowerCase().includes(serviceSearch.toLowerCase());
     const matchesStatus =
@@ -352,7 +341,6 @@ export const NodeDetail: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
-      {/* Back button */}
       <button
         onClick={() => navigate('/')}
         className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface hover:bg-surface-2 border border-border text-[10px] rounded font-interface font-bold uppercase tracking-widest text-text-2 hover:text-text-1 cursor-pointer transition-colors"
@@ -361,7 +349,6 @@ export const NodeDetail: React.FC = () => {
         <span>TABLEAU DE BORD</span>
       </button>
 
-      {/* Header Profile summary */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-xl border border-border bg-surface relative overflow-hidden shadow">
         <div className="flex items-center gap-4 z-10 min-w-0">
           <div className="w-12 h-12 bg-accent-muted border border-accent/20 rounded-xl flex items-center justify-center text-accent">
@@ -388,7 +375,6 @@ export const NodeDetail: React.FC = () => {
           </div>
         </div>
 
-        {/* Live metric strips */}
         <div className="flex flex-wrap items-center gap-2 shrink-0 z-10">
           {node.online && (
             <MetricPill
@@ -402,7 +388,6 @@ export const NodeDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* Navigation tabs */}
       <div className="border-b border-border font-interface select-none shrink-0 flex overflow-x-auto no-scrollbar gap-4">
         {[
           { id: 'insights', label: 'Analyses IA', count: displayInsights.length },
@@ -432,9 +417,7 @@ export const NodeDetail: React.FC = () => {
         ))}
       </div>
 
-      {/* Tab Panels */}
       <div className="min-h-96">
-        {/* Insights Tab */}
         {activeTab === 'insights' && (
           <div className="space-y-4">
             <div className="flex justify-between items-center px-1">
@@ -523,7 +506,6 @@ export const NodeDetail: React.FC = () => {
           </div>
         )}
 
-        {/* Metrics Tab */}
         {activeTab === 'metrics' && (
           <div className="space-y-6">
             <h3 className="text-xs font-interface font-bold uppercase tracking-widest text-text-3 px-1">
@@ -596,10 +578,8 @@ export const NodeDetail: React.FC = () => {
           </div>
         )}
 
-        {/* Services Tab */}
         {activeTab === 'services' && (
           <div className="space-y-4">
-            {/* Filter toolbar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
@@ -694,10 +674,8 @@ export const NodeDetail: React.FC = () => {
           </div>
         )}
 
-        {/* Containers Tab */}
         {activeTab === 'containers' && (
           <div className="space-y-4">
-            {/* Filter toolbar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg">
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
@@ -782,13 +760,10 @@ export const NodeDetail: React.FC = () => {
           </div>
         )}
 
-        {/* Logs Tab */}
         {activeTab === 'logs' && (
           <div className="space-y-4">
-            {/* Logs configuration bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg font-interface text-xs select-none">
               <div className="flex flex-wrap items-center gap-3">
-                {/* Service filtering */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">Cible :</span>
                   <select
@@ -803,7 +778,6 @@ export const NodeDetail: React.FC = () => {
                   </select>
                 </div>
 
-                {/* Lines limits */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">Lignes :</span>
                   <select
@@ -817,7 +791,6 @@ export const NodeDetail: React.FC = () => {
                   </select>
                 </div>
 
-                {/* Auto Scroll */}
                 <label className="flex items-center gap-1.5 text-text-2 cursor-pointer font-semibold">
                   <input
                     type="checkbox"
@@ -838,7 +811,6 @@ export const NodeDetail: React.FC = () => {
               </button>
             </div>
 
-            {/* Logs console window */}
             <div className="relative">
               {loadingLogs && (
                 <div className="absolute inset-0 bg-surface/50 backdrop-blur-xs flex items-center justify-center z-10 rounded-lg">

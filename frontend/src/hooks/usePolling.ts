@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 
-// Registre de callbacks et d'intervalles partagés
 const activeCallbacks = new Map<string, Set<() => void>>();
 const activeIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
@@ -27,9 +26,8 @@ export function usePolling(
     };
     callbacks.add(wrapper);
 
-    // Initialisation de l'intervalle uniquement pour le premier abonné
     if (!activeIntervals.has(key)) {
-      callback(); // Premier appel immédiat
+      callback();
       const id = setInterval(() => {
         const currentCallbacks = activeCallbacks.get(key);
         if (currentCallbacks) {
@@ -39,7 +37,6 @@ export function usePolling(
       activeIntervals.set(key, id);
     }
 
-    // Nettoyage lors du démontage du composant
     return () => {
       const currentCallbacks = activeCallbacks.get(key);
       if (currentCallbacks) {

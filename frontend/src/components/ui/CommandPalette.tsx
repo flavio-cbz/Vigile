@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useUiStore } from '../../store/uiStore';
@@ -81,12 +81,12 @@ export const CommandPalette: React.FC = () => {
     };
   }, [navigate]);
 
-  const closePalette = useCallback(() => {
+  const closePalette = () => {
     setPaletteOpen(false);
     setSearch('');
     setSelectedIndex(0);
     closeCopilot();
-  }, [setPaletteOpen, closeCopilot]);
+  };
 
   const handlePanelKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {

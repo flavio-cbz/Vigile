@@ -12,7 +12,6 @@ export const NotifBell: React.FC = () => {
   const [proposals, setProposals] = useState<any[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Fetch proposals from API on mount and periodically
   useEffect(() => {
     const loadProposals = async () => {
       try {
@@ -47,10 +46,8 @@ export const NotifBell: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Compute offline nodes
   const offlineNodes = nodes.filter(n => !n.online && n.state !== 'PENDING');
 
-  // Total count
   const count = offlineNodes.length + proposals.length;
 
   return (

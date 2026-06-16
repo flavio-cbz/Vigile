@@ -32,10 +32,9 @@ export const AuditPage: React.FC = () => {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
-  const [limit] = useState(25);
+  const limit = 25;
   const [offset, setOffset] = useState(0);
 
-  // Chain verification status
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{
     valid: boolean;
@@ -75,7 +74,7 @@ export const AuditPage: React.FC = () => {
         setVerifyResult(data);
         useToastStore.getState().addToast('success', 'Intégrité vérifiée', 'La chaîne de hash est valide');
       }
-    } catch (err: any) {
+    } catch (err: Error) {
       console.error('Chain verification error:', err);
       setVerifyResult({
         valid: false,
@@ -90,7 +89,6 @@ export const AuditPage: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in font-interface">
-      {/* Title block */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
@@ -121,7 +119,6 @@ export const AuditPage: React.FC = () => {
         )}
       </div>
 
-      {/* Verification Result Banner */}
       {verifyResult && (
         <div className={`p-4 border rounded-xl flex items-start gap-3.5 animate-fade-in font-sans text-xs ${
           verifyResult.valid
@@ -158,7 +155,6 @@ export const AuditPage: React.FC = () => {
         </div>
       )}
 
-      {/* Table list container */}
       <div className="space-y-4">
         {loading && entries.length === 0 ? (
           <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
@@ -220,7 +216,6 @@ export const AuditPage: React.FC = () => {
           </div>
         )}
 
-        {/* Table Pagination */}
         {total > limit && (
           <div className="flex items-center justify-between px-1 text-xs select-none">
             <button

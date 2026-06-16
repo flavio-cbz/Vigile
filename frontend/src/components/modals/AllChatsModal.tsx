@@ -53,7 +53,8 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
       } else {
         addToast('error', 'Erreur', 'Impossible de supprimer la session.');
       }
-    } catch {
+    } catch (e) {
+      console.error(e);
       addToast('error', 'Erreur', 'Erreur lors de la communication.');
     }
   };

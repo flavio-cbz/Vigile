@@ -78,7 +78,6 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
       case 'DELETE_PLUGIN':
         return <FileCode className="w-3.5 h-3.5 text-accent" />;
       default:
-        // Legacy fallback
         if (actUpper.includes('LOGIN')) return <LogIn className="w-3.5 h-3.5 text-accent" />;
         if (actUpper.includes('LOGOUT')) return <LogOut className="w-3.5 h-3.5 text-text-3" />;
         if (actUpper.includes('CONTAINER')) return <Terminal className="w-3.5 h-3.5 text-severity-info" />;
@@ -134,12 +133,9 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
       case 'DELETE_PLUGIN':
         return 'Plugin supprimé';
       default:
-        // formatting fallback
         return action.replace(/_/g, ' ');
     }
   };
-
-
 
   const { t } = useLocale();
   const friendlyText = formatAuditText(

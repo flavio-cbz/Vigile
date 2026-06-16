@@ -32,7 +32,6 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
     <div className={`flex gap-3 px-4 py-3 border-b border-border/30 ${
       isUser ? 'bg-surface/30' : 'bg-surface-2/30'
     }`}>
-      {/* Avatar */}
       <div className="shrink-0 mt-0.5">
         {isUser ? (
           <div className="w-6.5 h-6.5 rounded-full bg-surface-3 border border-border flex items-center justify-center text-text-2">
@@ -45,7 +44,6 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
         )}
       </div>
 
-      {/* Message Bubble content */}
       <div className="flex-1 min-w-0 space-y-3 font-sans text-xs">
         <div className="flex items-center gap-1.5 justify-between">
           <span className="font-bold text-[10px] tracking-wide text-text-1 font-interface">
@@ -63,7 +61,6 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
           )}
         </p>
 
-        {/* Display inline proposal card if present */}
         {message.proposal && (
           <div className="mt-2 animate-fade-in">
             <ProposalInline
@@ -83,4 +80,3 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
     </div>
   );
 };
-export type { Message };

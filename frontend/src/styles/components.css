@@ -1,8 +1,7 @@
-/* Cards */
 .card, .card-interactive {
   background-color: var(--color-surface-0);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl); /* Rayon d'arrondi standardisé à 16px */
+  border-radius: var(--radius-xl);
   padding: var(--spacing-4);
   transition: border-color var(--transition-normal), background-color var(--transition-normal), box-shadow var(--transition-normal), transform var(--transition-normal);
   backdrop-filter: blur(12px);
@@ -24,11 +23,10 @@
   transform: translateY(0) scale(1.0);
 }
 
-/* Card sizes & shapes */
 .card-insight {
   width: 320px;
   max-width: 100%;
-  height: 208px; /* Hauteur compacte h-52 */
+  height: 208px;
 }
 
 .card-server {
@@ -49,7 +47,6 @@
   min-height: 180px;
 }
 
-/* Card Severity & Status Variations */
 .card-critical {
   border-color: var(--color-border-critical);
   box-shadow: 0 0 15px rgba(239, 68, 68, 0.04);
@@ -125,7 +122,6 @@
   animation: border-pulse 2s infinite ease-in-out;
 }
 
-/* Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -204,7 +200,6 @@
   box-shadow: var(--shadow-glow-danger);
 }
 
-/* Badges */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -242,7 +237,6 @@
   color: var(--color-danger);
 }
 
-/* Inputs and Forms */
 .input, .select {
   font-family: var(--font-sans);
   font-size: var(--font-size-sm);
@@ -265,7 +259,6 @@
   color: var(--color-ink-muted);
 }
 
-/* Progress bar */
 .progress-bar-track {
   background-color: var(--color-surface-2);
   border-radius: var(--radius-full);

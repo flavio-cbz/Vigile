@@ -14,6 +14,7 @@ Run with:
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -45,10 +46,6 @@ from master.db.database import close_db, init_db
 from master.db.migrations import run_migrations
 from master.ws.worker_handler import worker_join_handler
 
-# ---------------------------------------------------------------------------
-# Logging configuration
-# ---------------------------------------------------------------------------
-
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -61,11 +58,6 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("passlib").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Application lifespan
-# ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
@@ -86,13 +78,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
       2. (migrations are idempotent — no teardown)
       1. Close database
     """
-    # ── Startup ───────────────────────────────────────────────────────────
-    # Load LLM settings override if exists (files I/O belongs to edge)
+    # Load LLM settings override if exists
     override_path = Path(settings.database_path).parent / "settings_override.json"
     if override_path.exists():
         try:
-            import json
-
             with override_path.open("r", encoding="utf-8") as f:
                 overrides = json.load(f)
             settings.apply_overrides(
@@ -101,7 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 model=overrides.get("llm_model", settings.llm_model),
             )
             logger.info("Loaded LLM settings overrides from %s", override_path)
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.error("Failed to load settings overrides: %s", e)
 
     logger.info("=" * 60)
@@ -120,16 +109,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("🔒 Secure mode active: HTTPS/WSS is enforced.")
 
-    # 1. Init DB
     db = await init_db(settings.database_path)
     logger.info("Database connection established.")
 
-    # 2. Migrations
     await run_migrations(db)
 
-    # 3. (Jinja2 templates removed in favor of React SPA)
-
-    # 4. Initialize SecurityManager (with explicit DI from settings)
+    # Initialize SecurityManager (DI from settings)
     master_key = load_or_generate_master_key(settings.master_key_path)
     init_security(
         server_secret=settings.server_secret_key,
@@ -142,14 +127,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         jwt_refresh_token_ttl=settings.jwt_refresh_token_ttl,
         master_private_key=master_key,
     )
-    # 4.5. Initialize PluginManager
     await plugin_manager.initialize(db)
 
-    # 5. Load plugins
     loaded = plugin_manager.load_plugins_from_dir(settings.plugins_dir)
     logger.info("Plugins loaded: %s", loaded or "none")
 
-    # 6. Node Manager
     await node_manager.start(
         heartbeat_interval=settings.heartbeat_interval,
         lost_threshold=settings.heartbeat_lost_threshold,
@@ -162,14 +144,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.trusted_proxies = settings.trusted_proxies
     rate_limiter.trusted_proxies = settings.trusted_proxies
 
-    # 7. Start Rate Limiter Cleanup Task
     cleanup_task = rate_limiter.start_cleanup_task(app)
 
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
 
-    # ── Shutdown ──────────────────────────────────────────────────────────
     logger.info("Master Node shutting down...")
     cleanup_task.cancel()
     try:
@@ -179,11 +159,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await node_manager.stop()
     await close_db()
     logger.info("Shutdown complete.")
-
-
-# ---------------------------------------------------------------------------
-# FastAPI application
-# ---------------------------------------------------------------------------
 
 
 app = FastAPI(
@@ -208,10 +183,6 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException) ->
         status_code=exc.status_code, content={"detail": exc.detail}, headers=headers
     )
 
-
-# ---------------------------------------------------------------------------
-# Middleware
-# ---------------------------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -271,10 +242,6 @@ if settings.enforce_https:
 
     logger.warning("HTTPS enforcement enabled — non-HTTPS requests will be rejected.")
 
-# ---------------------------------------------------------------------------
-# REST Routers
-# ---------------------------------------------------------------------------
-
 app.include_router(auth_router)
 app.include_router(nodes_router)
 app.include_router(services_router)
@@ -283,17 +250,8 @@ app.include_router(audit_router)
 app.include_router(admin_router)
 app.include_router(demo_router)
 
-# ---------------------------------------------------------------------------
-# Static Files
-# ---------------------------------------------------------------------------
-
 os.makedirs("master/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="master/static"), name="static")
-
-# ---------------------------------------------------------------------------
-# WebSocket Routes
-# ---------------------------------------------------------------------------
-
 
 @app.websocket("/ws/worker/join")
 async def ws_worker_join(websocket: WebSocket) -> None:
@@ -307,17 +265,8 @@ async def ws_worker_join(websocket: WebSocket) -> None:
     await worker_join_handler(websocket)
 
 
-# ---------------------------------------------------------------------------
-# System endpoints
-# ---------------------------------------------------------------------------
-
-
 @app.get("/health", tags=["system"], summary="Health check")
 async def health_check() -> JSONResponse:
-    """
-    Basic health check endpoint.
-    Returns uptime, connected node count, and version.
-    """
     uptime = time.time() - getattr(app.state, "startup_time", time.time())
     return JSONResponse(
         {
@@ -334,16 +283,13 @@ async def spa_fallback_exception_handler(request: Request, exc: HTTPException) -
     """Serve static assets if they exist, otherwise fall back to SPA index.html."""
     path = request.url.path.lstrip("/")
 
-    # 1. Exclude API and WebSocket endpoints
     if path.startswith("api/") or path.startswith("ws/"):
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    # 2. Check if requested file exists in the SPA dist folder
     file_path = Path("frontend/dist") / path
     if file_path.is_file():
         return FileResponse(file_path)
 
-    # 3. Fallback to index.html for client-side routing
     index_path = Path("frontend/dist/index.html")
     if index_path.exists():
         return FileResponse(index_path)

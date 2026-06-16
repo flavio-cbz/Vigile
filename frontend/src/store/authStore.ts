@@ -17,7 +17,6 @@ interface AuthState {
   setTokens: (accessToken: string | null, refreshToken: string | null) => void;
 }
 
-// Helper to get initial state from localStorage
 const getStoredAuth = () => {
   try {
     const userStr = localStorage.getItem('vigile_user');

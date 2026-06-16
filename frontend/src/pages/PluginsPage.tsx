@@ -71,7 +71,7 @@ export const PluginsPage: React.FC = () => {
         );
         addToast('success', 'Plugin', res.loaded ? 'Plugin activé.' : 'Plugin désactivé.');
       }
-    } catch (err: any) {
+    } catch (err: Error) {
       addToast('error', 'Erreur', err.message || 'Impossible de basculer le plugin.');
     } finally {
       setToggling(null);
@@ -101,7 +101,7 @@ export const PluginsPage: React.FC = () => {
 
       addToast('success', 'Plugin', `Plugin "${file.name}" uploadé avec succès.`);
       await fetchPlugins();
-    } catch (err: any) {
+    } catch (err: Error) {
       addToast('error', 'Erreur', err.message || 'Échec de l\'upload du plugin.');
     } finally {
       setUploading(false);
@@ -111,7 +111,6 @@ export const PluginsPage: React.FC = () => {
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold uppercase tracking-wider text-text-1 flex items-center gap-2">
@@ -153,7 +152,6 @@ export const PluginsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Loading */}
       {loading && plugins.length === 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -166,7 +164,6 @@ export const PluginsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Empty */}
       {!loading && plugins.length === 0 && (
         <EmptyState
           icon={<Package className="w-12 h-12" />}
@@ -179,7 +176,6 @@ export const PluginsPage: React.FC = () => {
         />
       )}
 
-      {/* Plugin grid */}
       {plugins.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {plugins.map((plugin) => {
@@ -194,7 +190,6 @@ export const PluginsPage: React.FC = () => {
                     : 'border-border-strong/20 hover:border-border-strong/40'
                 )}
               >
-                {/* Header */}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className={clsx(
@@ -234,14 +229,12 @@ export const PluginsPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Module path */}
                 <div className="mb-2">
                   <code className="text-[9px] font-mono text-text-3 bg-surface-3 px-1.5 py-0.5 rounded truncate block">
                     {plugin.module || plugin.path}
                   </code>
                 </div>
 
-                {/* Hooks */}
                 {plugin.hooks && plugin.hooks.length > 0 && (
                   <div className="space-y-1">
                     <span className="text-[9px] font-bold uppercase tracking-wider text-text-3">Hooks</span>
@@ -258,7 +251,6 @@ export const PluginsPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Error */}
                 {plugin.error && (
                   <div className="mt-2 p-2 bg-severity-critical/10 border border-severity-critical/20 rounded-lg">
                     <p className="text-[10px] text-severity-critical font-mono">{plugin.error}</p>

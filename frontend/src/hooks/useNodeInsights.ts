@@ -24,11 +24,9 @@ export function useNodeInsights(nodeId: string | null) {
     }
   }, [nodeId, fetchInsights]);
 
-  // Safely auto-open Copilot when warning or critical insights are found
   useEffect(() => {
     if (!nodeId || nodeId === 'all' || loading || insights.length === 0) return;
 
-    // Find the first warning or critical insight
     const targetInsight = insights.find(
       (ins) => ins.severity === 'critical' || ins.severity === 'warning'
     );

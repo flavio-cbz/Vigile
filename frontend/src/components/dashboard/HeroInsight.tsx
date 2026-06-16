@@ -20,7 +20,6 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
   if (!insight) {
     return (
       <div className="w-full relative overflow-hidden rounded-xl border border-severity-ok/20 bg-gradient-to-br from-severity-ok/5 to-bg p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg select-none">
-        {/* Glow orb */}
         <div className="absolute -right-20 -bottom-20 w-60 h-60 bg-severity-ok/10 rounded-full filter blur-3xl pointer-events-none" />
 
         <div className="flex items-center gap-4 z-10">
@@ -49,7 +48,6 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
 
   return (
     <div className={`w-full relative overflow-hidden rounded-xl border p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg ${borderClass}`}>
-      {/* Glow orb */}
       <div className={`absolute -right-20 -bottom-20 w-60 h-60 rounded-full filter blur-3xl pointer-events-none ${glowBgClass}`} />
 
       <div className="flex items-start md:items-center gap-4 z-10 flex-1 min-w-0">

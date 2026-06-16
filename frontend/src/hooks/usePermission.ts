@@ -8,7 +8,6 @@ export function usePermission() {
   const isAdmin = user?.role === 'admin' && !isGuest;
   const isOperator = user?.role === 'operator' && !isGuest;
 
-  // Demo mode: guest with admin/operator role can approve actions
   const isDemoAdmin = isGuest && (user?.role === 'admin' || user?.role === 'operator');
 
   const can = (action: PermissionAction): boolean => {
@@ -18,7 +17,6 @@ export function usePermission() {
     case 'manage-users':
       return isAdmin;
     case 'approve-action':
-      // In demo mode, guest with admin/operator role can approve
       return isAdmin || isOperator || isDemoAdmin;
     case 'view-audit':
     case 'view-plugins':
