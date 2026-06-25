@@ -12,11 +12,13 @@ import asyncio
 import hashlib
 import json
 import logging
+import shutil
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 
 import httpx
-import minisign
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 
@@ -83,24 +85,45 @@ def verify_minisign(
     public_key: str,
 ) -> bool:
     """
-    Verify a minisign (Ed25519) signature using py-minisign>=0.13.0.
-
-    API:
-        import minisign
-        pk = minisign.PublicKey.from_base64(public_key)
-        sig = minisign.Signature.from_bytes(sig_content.encode())
-        pk.verify(data, sig)  # raises on invalid, returns None on success
+    Verify a minisign (Ed25519) signature using the minisign CLI.
+    Falls back to accepting the binary if no public key is configured (dev mode).
     """
     if not public_key:
         logger.warning("No WORKER_BINARY_PUBLIC_KEY configured — skipping signature verification")
         return True
+
+    if shutil.which("minisign") is None:
+        logger.error("minisign CLI not found — cannot verify signature")
+        return False
+
     try:
-        pk = minisign.PublicKey.from_base64(public_key)
-        sig = minisign.Signature.from_bytes(sig_content.encode())
-        pk.verify(binary_path.read_bytes(), sig)
-        return True
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            pub_file = tmp / "vigile.pub"
+            sig_file = tmp / "worker.sig"
+            pub_file.write_text(public_key, encoding="utf-8")
+            sig_file.write_text(sig_content, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "minisign",
+                    "-Vm",
+                    str(binary_path),
+                    "-P",
+                    str(pub_file),
+                    "-x",
+                    str(sig_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+            logger.error("Signature verification failed: %s", result.stderr or result.stdout)
+            return False
     except Exception as exc:
-        logger.error("Signature verification failed: %s", exc)
+        logger.error("Signature verification error: %s", exc)
         return False
 
 

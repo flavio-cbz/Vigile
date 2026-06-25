@@ -17,6 +17,20 @@ Le Master ne redistribue pas directement un binaire Worker embarqué. Il téléc
 | `data/vigile.minisign.pub` | Clé publique minisign (local, non commitée) |
 | `data/vigile.minisign.key` | Clé secrète minisign (local, non commitée, **garder secrète**) |
 
+## Prérequis
+
+Le Master utilise le CLI `minisign` pour vérifier les signatures des binaires. Assure-toi qu'il est installé sur le serveur Master :
+
+```bash
+# Debian/Ubuntu
+apt-get install -y minisign
+
+# macOS
+brew install minisign
+```
+
+En production via Docker, `minisign` est déjà installé dans `Dockerfile.master`.
+
 ## Configuration requise
 
 ### 1. Secret GitHub
