@@ -163,9 +163,7 @@ def verify_minisign(
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
-            pub_file = tmp / "vigile.pub"
             sig_file = tmp / "worker.sig"
-            pub_file.write_text(public_key, encoding="utf-8")
             sig_file.write_text(sig_content, encoding="utf-8")
 
             result = subprocess.run(
@@ -173,8 +171,8 @@ def verify_minisign(
                     "minisign",
                     "-Vm",
                     str(binary_path),
-                    "-p",
-                    str(pub_file),
+                    "-P",
+                    public_key,
                     "-x",
                     str(sig_file),
                 ],
