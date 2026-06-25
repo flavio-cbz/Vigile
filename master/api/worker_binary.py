@@ -64,7 +64,7 @@ def _validate_os_arch(os_name: str, arch: str) -> None:
 
 
 _GITHUB_RELEASE_RE = re.compile(
-    r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/releases/(?P<kind>latest|download/(?P<tag>[^/]+))/download/(?P<filename>.+)$"
+    r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/releases/(?P<kind>latest/download|download/(?P<tag>[^/]+))/(?P<filename>.+)$"
 )
 
 
@@ -79,7 +79,7 @@ async def _github_api_download(url: str, token: str, timeout: int) -> bytes:
     repo = match.group("repo")
     kind = match.group("kind")
     filename = match.group("filename")
-    if kind == "latest":
+    if kind == "latest/download":
         release_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     else:
         tag = match.group("tag")
