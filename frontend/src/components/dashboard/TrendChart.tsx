@@ -131,7 +131,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
         if (node.id === 'demo-node-05') {
           if (i >= 18) {
             status = 'critical';
-            details = 'Hors-ligne (Interruption)';
+            details = t('trend.outage');
           } else if (i === 12 || i === 13) {
             status = 'warning';
             details = 'Surcharge détectée : CPU: 88%';
@@ -196,16 +196,16 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
           const enrolled = node.enrolled_at || node.created_at / 1000;
           if (endTime < enrolled) {
             status = 'nodata';
-            details = 'Non configuré';
+            details = t('common.unknown');
           } else if (!node.online && (node.last_heartbeat === null || startTime > node.last_heartbeat)) {
             status = 'critical';
-            details = 'Hors-ligne (Interruption)';
+            details = t('trend.outage');
           } else if (!node.online) {
             status = 'critical';
-            details = 'Hors-ligne (Interruption)';
+            details = t('trend.outage');
           } else {
             status = 'nodata';
-            details = 'Aucune donnée reçue';
+            details = t('common.unknown');
           }
         }
       }
@@ -294,7 +294,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
             {t('swim.trends')}
           </h4>
           <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-            Suivi de l'uptime et journal des incidents de la flotte
+            {t('trend.subtitle')}
           </p>
         </div>
 
@@ -325,7 +325,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
           </div>
         ) : nodes.length === 0 ? (
           <div className="py-8 text-center text-xs text-text-3 italic">
-            Aucun serveur configuré.
+            {t('trend.empty')}
           </div>
         ) : (
           nodes.map((node) => {
@@ -347,12 +347,12 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                     />
                     <span className="font-bold text-xs text-text-1">{node.name}</span>
                     <span className="text-[10px] text-text-3 font-mono truncate max-w-[120px] sm:max-w-none">
-                      {node.hostname || 'no-hostname'}
+                      {node.hostname || t('trend.no_hostname')}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-text-3 uppercase tracking-wider">Uptime:</span>
+                    <span className="text-[10px] font-bold text-text-3 uppercase tracking-wider">{t('trend.uptime_label')}</span>
                     <span className={`text-xs font-mono font-bold ${
                       uptimePct === '100.0%' || uptimePct === '100%'
                         ? 'text-severity-ok'
@@ -393,10 +393,10 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
 
                   <div className="flex items-center justify-between text-[9px] text-text-3 font-semibold uppercase tracking-wider">
                     <span>
-                      {period === '24h' ? 'Il y a 24 heures' : 'Il y a 7 jours'}
+                      {period === '24h' ? t('trend.timeline_24h') : t('trend.timeline_7d')}
                     </span>
                     <span className="w-12 h-[1px] bg-border-strong/40 flex-1 mx-2" />
-                    <span>Maintenant</span>
+                    <span>{t('trend.timeline_now')}</span>
                   </div>
                 </div>
 
@@ -404,12 +404,12 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                   {nodeIncidents.length === 0 ? (
                     <div className="flex items-center gap-1.5 text-severity-ok font-medium">
                       <span className="w-1.5 h-1.5 rounded-full bg-severity-ok shrink-0" />
-                      <span>Aucun incident signalé sur la période. Fonctionnement nominal.</span>
+                      <span>{t('trend.all_clear')}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-1.5 text-severity-warning font-bold uppercase tracking-wider text-[9px]">
-                        <span>Journal des incidents ({nodeIncidents.length}) :</span>
+                        <span>{t('trend.incident_log', { count: nodeIncidents.length })}</span>
                       </div>
                       <div className="flex flex-col gap-1 max-h-24 overflow-y-auto pr-1">
                         {nodeIncidents.map((inc, incIdx) => {
@@ -419,7 +419,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                               <div className="flex items-center gap-2">
                                 <span className={`w-1 h-1 rounded-full shrink-0 ${isCrit ? 'bg-severity-critical animate-pulse' : 'bg-severity-warning'}`} />
                                 <span className={isCrit ? 'text-severity-critical font-bold' : 'text-severity-warning font-bold'}>
-                                  {isCrit ? 'Coupure' : 'Alerte'}
+                                  {isCrit ? t('trend.outage') : t('trend.alert')}
                                 </span>
                                 <span className="text-text-2">— {inc.details}</span>
                               </div>

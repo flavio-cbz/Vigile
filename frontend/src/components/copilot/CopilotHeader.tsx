@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocale } from '../../i18n';
 import { X, Sparkles, Server } from 'lucide-react';
 
 interface CopilotHeaderProps {
@@ -10,6 +11,7 @@ export const CopilotHeader: React.FC<CopilotHeaderProps> = ({
   nodeName,
   onClose,
 }) => {
+  const { t } = useLocale();
   return (
     <div className="h-12 border-b border-border flex items-center justify-between px-4 shrink-0 font-interface bg-surface select-none">
       <div className="flex items-center gap-2">
@@ -17,7 +19,7 @@ export const CopilotHeader: React.FC<CopilotHeaderProps> = ({
           <Sparkles className="w-3.5 h-3.5 text-accent animate-pulse" />
         </div>
         <span id="copilot-title" className="font-bold text-xs tracking-wider uppercase text-text-1">
-          Copilote IA
+          {t('copilot.title')}
         </span>
 
         {nodeName && (
@@ -31,7 +33,7 @@ export const CopilotHeader: React.FC<CopilotHeaderProps> = ({
       <button
         onClick={onClose}
         className="p-1 rounded hover:bg-surface-2 text-text-3 hover:text-text-1 cursor-pointer transition-colors"
-        title="Fermer le copilote"
+        title={t("copilot.close_tooltip")}
       >
         <X className="w-4 h-4" />
       </button>

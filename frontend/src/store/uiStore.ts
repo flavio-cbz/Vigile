@@ -78,7 +78,10 @@ export const useUiStore = create<UIState>((set) => ({
   openCopilot: (copilotContext) => set({ copilotOpen: true, copilotContext }),
   closeCopilot: () => set({ copilotOpen: false, copilotContext: null }),
 
-  activeNodeId: 'all',
-  setActiveNode: (activeNodeId) => set({ activeNodeId }),
+  activeNodeId: localStorage.getItem('vigile_active_node') || 'all',
+  setActiveNode: (activeNodeId) => {
+    localStorage.setItem('vigile_active_node', activeNodeId ?? 'all');
+    set({ activeNodeId });
+  },
 }));
 export type { ThemeKey };

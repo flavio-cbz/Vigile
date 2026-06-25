@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocale } from '../../i18n';
 
 interface TimeAgoProps {
   timestamp: string | number | null;
@@ -6,11 +7,12 @@ interface TimeAgoProps {
 }
 
 export const TimeAgo: React.FC<TimeAgoProps> = ({ timestamp, className = '' }) => {
+  const { t } = useLocale();
   const [timeAgo, setTimeAgo] = useState('');
 
   useEffect(() => {
     if (!timestamp) {
-      setTimeAgo('jamais');
+      setTimeAgo(t('common.never'));
       return;
     }
 
@@ -24,7 +26,7 @@ export const TimeAgo: React.FC<TimeAgoProps> = ({ timestamp, className = '' }) =
       }
 
       if (isNaN(parsedTime)) {
-        setTimeAgo('inconnu');
+        setTimeAgo(t('common.unknown'));
         return;
       }
 
@@ -32,25 +34,25 @@ export const TimeAgo: React.FC<TimeAgoProps> = ({ timestamp, className = '' }) =
       const seconds = Math.floor((now - parsedTime) / 1000);
 
       if (seconds < 5) {
-        setTimeAgo("à l'instant");
+        setTimeAgo(t('common.just_now'));
         return;
       }
       if (seconds < 60) {
-        setTimeAgo(`il y a ${seconds}s`);
+        setTimeAgo(t('common.ago_seconds', { n: seconds }));
         return;
       }
       const minutes = Math.floor(seconds / 60);
       if (minutes < 60) {
-        setTimeAgo(`il y a ${minutes}m`);
+        setTimeAgo(t('common.ago_minutes', { n: minutes }));
         return;
       }
       const hours = Math.floor(minutes / 60);
       if (hours < 24) {
-        setTimeAgo(`il y a ${hours}h`);
+        setTimeAgo(t('common.ago_hours', { n: hours }));
         return;
       }
       const days = Math.floor(hours / 24);
-      setTimeAgo(`il y a ${days}j`);
+      setTimeAgo(t('common.ago_days', { n: days }));
     };
 
     calculateTime();

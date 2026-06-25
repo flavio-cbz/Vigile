@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocale } from '../../i18n';
 
 type Severity = 'ok' | 'warning' | 'critical' | 'offline' | 'info';
 
@@ -8,6 +9,7 @@ interface SeverityTagProps {
 }
 
 export const SeverityTag: React.FC<SeverityTagProps> = ({ severity, className = '' }) => {
+  const { t } = useLocale();
   const getStyles = () => {
     switch (severity) {
       case 'critical':
@@ -27,15 +29,15 @@ export const SeverityTag: React.FC<SeverityTagProps> = ({ severity, className = 
   const getLabel = () => {
     switch (severity) {
       case 'critical':
-        return 'CRITIQUE';
+        return t('severity.critical');
       case 'warning':
-        return 'ATTENTION';
+        return t('severity.attention');
       case 'info':
-        return 'INFO';
+        return t('severity.info');
       case 'ok':
-        return 'NORMAL';
+        return t('severity.normal');
       case 'offline':
-        return 'HORS-LIGNE';
+        return t('severity.outage');
     }
   };
 

@@ -4,8 +4,14 @@ import { Server, Search, HardDrive, Cpu, Clock } from 'lucide-react';
 import { useNodeStore, type Node } from '../store/nodeStore';
 import { StatusDot } from '../components/primitives/StatusDot';
 import { EmptyState } from '../components/ui/EmptyState';
+import { KebabMenu } from '../components/ui/KebabMenu';
+import { ConfirmDeleteModal } from '../components/modals/ConfirmDeleteModal';
+import { RenameNodeModal } from '../components/modals/RenameNodeModal';
 import { useLocale } from '../i18n';
 import { usePageTitle } from '../hooks/usePageTitle';
+import { usePermission } from '../hooks/usePermission';
+import { useToastStore } from '../store/useToastStore';
+import { nodeMutations } from '../store/nodeMutations';
 import { clsx } from 'clsx';
 import { api } from '../hooks/useApi';
 import { formatOfflineDuration } from '../utils/formatTime';
@@ -18,7 +24,7 @@ const formatHeartbeatTime = (ts: number | null): string => {
   return `${hrs}h${mins}`;
 };
 
-const getOfflineMiniInsight = (metrics: any): string | null => {
+const getOfflineMiniInsight = (metrics: any, t: (k: string) => string): string | null => {
   if (!metrics || (metrics.cpu === undefined && metrics.mem === undefined)) {
     return null;
   }
@@ -33,19 +39,19 @@ const getOfflineMiniInsight = (metrics: any): string | null => {
 
   if (parts.length === 0) return null;
 
-  const base = `Dernière métrique connue : ${parts.join(', ')}`;
+  const base = t('servers.offline_last_metrics').replace('{parts}', parts.join(', '));
 
   if (mem !== null && mem >= 85 && cpu !== null && cpu >= 90) {
-    return `${base} — possible crash OOM ou surcharge sévère`;
+    return `${base} — ${t('servers.offline_oom_crash')}`;
   }
   if (mem !== null && mem >= 85) {
-    return `${base} — possible crash OOM`;
+    return `${base} — ${t('servers.offline_oom')}`;
   }
   if (cpu !== null && cpu >= 90) {
-    return `${base} — possible surcharge CPU / crash`;
+    return `${base} — ${t('servers.offline_cpu_crash')}`;
   }
   if (disk !== null && disk >= 90) {
-    return `${base} — disque presque saturé`;
+    return `${base} — ${t('servers.offline_disk_full')}`;
   }
   return base;
 };
@@ -63,12 +69,16 @@ const getResourceColor = (val: number, type: 'cpu' | 'mem' | 'disk') => {
 };
 
 export const ServersPage: React.FC = () => {
-  usePageTitle('Serveurs');
+  const { t } = useLocale();
+  usePageTitle(t('page_title.servers'));
   const { nodes, isLoading, fetchNodes } = useNodeStore();
   const [search, setSearch] = useState('');
   const [bulkStatus, setBulkStatus] = useState<Record<string, any>>({});
   const navigate = useNavigate();
-  const { t } = useLocale();
+  const { isAdmin } = usePermission();
+  const addToast = useToastStore((s) => s.addToast);
+  const [renameNode, setRenameNode] = useState<Node | null>(null);
+  const [deleteNode, setDeleteNode] = useState<Node | null>(null);
 
   const fetchBulkMetrics = async () => {
     try {
@@ -96,6 +106,8 @@ export const ServersPage: React.FC = () => {
     );
   });
 
+  const activeCount = nodes.length;
+
   const formatTime = (ts: number | null): string => {
     if (!ts) return '—';
     const seconds = Math.floor((Date.now() / 1000) - ts);
@@ -114,7 +126,7 @@ export const ServersPage: React.FC = () => {
             {t('nav.servers')}
           </h1>
           <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-            {nodes.length} serveur{nodes.length !== 1 ? 's' : ''} enregistré{nodes.length !== 1 ? 's' : ''}
+            {activeCount} serveur{activeCount !== 1 ? 's' : ''} actif{activeCount !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="relative w-full sm:w-64">
@@ -122,7 +134,7 @@ export const ServersPage: React.FC = () => {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher un serveur..."
+            placeholder={t('servers.search_placeholder')}
             className="w-full bg-surface border border-border-strong/20 rounded-lg pl-9 pr-3 py-2 text-xs text-text-1 placeholder:text-text-3 focus:outline-none focus:border-accent transition-colors"
           />
         </div>
@@ -143,10 +155,10 @@ export const ServersPage: React.FC = () => {
       {!isLoading && filtered.length === 0 && (
         <EmptyState
           icon={<Server className="w-12 h-12" />}
-          title={search ? 'Aucun serveur trouvé' : 'Aucun serveur'}
-          description={search ? 'Essayez de modifier votre recherche.' : 'Générez un token d\'invitation pour ajouter votre premier serveur.'}
+          title={search ? t('servers.empty_search_title') : t('servers.empty_title')}
+          description={search ? t('servers.empty_search_description') : t('servers.empty_description')}
           action={!search ? {
-            label: 'Ajouter un serveur',
+            label: t('servers.add_server'),
             onClick: () => navigate('/'),
           } : undefined}
         />
@@ -157,11 +169,14 @@ export const ServersPage: React.FC = () => {
           {filtered.map((node: Node) => {
             const metrics = bulkStatus[node.id];
             return (
-              <button
+              <div
                 key={node.id}
                 onClick={() => navigate(`/nodes/${node.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/nodes/${node.id}`); }}
                 className={clsx(
-                  "bg-surface-2 border rounded-xl p-4 text-left transition-all duration-200 cursor-pointer group text-start flex flex-col justify-between min-h-[200px] w-full",
+                  "bg-surface-2 border rounded-xl p-4 text-left transition-all duration-200 cursor-pointer group text-start flex flex-col justify-between min-h-[200px] w-full relative",
                   node.online
                     ? "border-border-strong/20 hover:border-accent/30 hover:bg-surface-2/80 card-glow-success"
                     : "border-severity-critical/20 hover:border-severity-critical/40 hover:bg-surface-2/80 card-glow-danger"
@@ -169,20 +184,44 @@ export const ServersPage: React.FC = () => {
               >
                 <div className="w-full">
                   <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <StatusDot state={node.state} />
                       <span className="text-sm font-bold text-text-1 break-all leading-tight flex-1 group-hover:text-accent transition-colors">
                         {node.hostname || node.name || node.id.substring(0, 8)}
                       </span>
                     </div>
-                    <span className={clsx(
-                      'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded shrink-0',
-                      node.online
-                        ? 'bg-severity-ok/10 text-severity-ok'
-                        : 'bg-severity-critical/10 text-severity-critical'
-                    )}>
-                      {node.online ? 'EN LIGNE' : 'HORS LIGNE'}
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={clsx(
+                        'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
+                        node.online
+                          ? 'bg-severity-ok/10 text-severity-ok'
+                          : 'bg-severity-critical/10 text-severity-critical'
+                      )}>
+                        {node.online ? t('servers.badge_online') : t('servers.badge_offline')}
+                      </span>
+                      <KebabMenu
+                        items={[
+                          {
+                            label: t('servers.menu.view_details'),
+                            onClick: () => navigate(`/nodes/${node.id}`),
+                          },
+                          {
+                            label: t('servers.menu.rename'),
+                            onClick: () => setRenameNode(node),
+                          },
+                          {
+                            label: t('servers.menu.settings'),
+                            onClick: () => navigate(`/nodes/${node.id}?tab=settings`),
+                          },
+                          {
+                            label: t('servers.menu.delete'),
+                            danger: true,
+                            hidden: !isAdmin,
+                            onClick: () => setDeleteNode(node),
+                          },
+                        ]}
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-1.5 text-[11px] text-text-2">
@@ -201,7 +240,7 @@ export const ServersPage: React.FC = () => {
                     {node.online && node.last_heartbeat && (
                       <div className="flex items-center gap-2">
                         <Clock className="w-3 h-3 text-text-3 shrink-0" />
-                        <span>Dernier contact : {formatTime(node.last_heartbeat)}</span>
+                        <span>{t('servers.last_contact', { time: formatTime(node.last_heartbeat) })}</span>
                       </div>
                     )}
                   </div>
@@ -210,7 +249,7 @@ export const ServersPage: React.FC = () => {
                     <div className="mt-4 pt-4 border-t border-border-strong/10 space-y-2.5">
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
-                          <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> CPU</span>
+                          <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> {t('card.cpu')}</span>
                           <span className="font-mono text-text-1">{(metrics && metrics.cpu !== null && metrics.cpu !== undefined) ? `${Math.round(metrics.cpu)}%` : '—'}</span>
                         </div>
                         <div className="progress-bar-track bg-surface-3">
@@ -222,7 +261,7 @@ export const ServersPage: React.FC = () => {
                       </div>
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
-                          <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> RAM</span>
+                          <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> {t('card.ram')}</span>
                           <span className="font-mono text-text-1">{(metrics && metrics.mem !== null && metrics.mem !== undefined) ? `${Math.round(metrics.mem)}%` : '—'}</span>
                         </div>
                         <div className="progress-bar-track bg-surface-3">
@@ -234,7 +273,7 @@ export const ServersPage: React.FC = () => {
                       </div>
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
-                          <span className="text-text-2 flex items-center gap-1"><HardDrive className="w-3 h-3 text-text-3" /> DISQUE</span>
+                          <span className="text-text-2 flex items-center gap-1"><HardDrive className="w-3 h-3 text-text-3" /> {t('card.disk')}</span>
                           <span className="font-mono text-text-1">{(metrics && metrics.disk !== null && metrics.disk !== undefined) ? `${Math.round(metrics.disk)}%` : '—'}</span>
                         </div>
                         <div className="progress-bar-track bg-surface-3">
@@ -252,18 +291,18 @@ export const ServersPage: React.FC = () => {
                       <div className="text-[11px] text-severity-critical font-medium space-y-1">
                         <div className="flex items-center gap-1.5 font-semibold">
                           <Clock className="w-3.5 h-3.5 shrink-0" />
-                          <span>Hors-ligne depuis {formatOfflineDuration(node.last_heartbeat)}</span>
+                          <span>{t('servers.offline_since', { duration: formatOfflineDuration(node.last_heartbeat) })}</span>
                         </div>
                         {node.last_heartbeat && (
                           <div className="text-[10px] text-text-3 font-mono pl-5">
-                            Dernier heartbeat à {formatHeartbeatTime(node.last_heartbeat)}
+                            {t('servers.last_heartbeat_at', { time: formatHeartbeatTime(node.last_heartbeat) })}
                           </div>
                         )}
                       </div>
                       {metrics && (metrics.cpu !== null || metrics.mem !== null) && (
                         <div className="p-2.5 rounded bg-severity-critical/5 border border-severity-critical/10 text-[10px] text-text-2 w-full whitespace-normal">
-                          <span className="font-semibold text-text-1 block mb-1">Diagnostic Hors-Ligne :</span>
-                          <span>{getOfflineMiniInsight(metrics)}</span>
+                          <span className="font-semibold text-text-1 block mb-1">{t('servers.offline_diagnostic')}</span>
+                          <span>{getOfflineMiniInsight(metrics, t)}</span>
                         </div>
                       )}
                     </div>
@@ -272,13 +311,42 @@ export const ServersPage: React.FC = () => {
 
                 <div className="mt-4 pt-3 border-t border-border-strong/10 w-full">
                   <span className="text-[9px] font-mono text-text-3">
-                    ID: {node.id.substring(0, 12)}…
+                    {t('common.id_prefix', { id: `${node.id.substring(0, 12)}…` })}
                   </span>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
+      )}
+
+      {renameNode && (
+        <RenameNodeModal
+          node={renameNode}
+          onClose={() => setRenameNode(null)}
+        />
+      )}
+
+      {deleteNode && (
+        <ConfirmDeleteModal
+          title={t('settings.confirm.revoke_title')}
+          message={t('settings.confirm.revoke_message')}
+          confirmWord={deleteNode.hostname || deleteNode.name}
+          confirmLabel={t('settings.confirm.revoke_action')}
+          onClose={() => setDeleteNode(null)}
+          onConfirm={async () => {
+            const id = deleteNode.id;
+            const name = deleteNode.hostname || deleteNode.name;
+            try {
+              await nodeMutations.deleteNode(id);
+              addToast('success', t('servers.toast.deleted'), name);
+              setDeleteNode(null);
+            } catch (err) {
+              addToast('error', t('settings.error'), err instanceof Error ? err.message : String(err));
+              throw err;
+            }
+          }}
+        />
       )}
     </div>
   );

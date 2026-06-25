@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { X, CheckCircle2, XCircle, Info, AlertTriangle } from 'lucide-react';
+import { useLocale } from '../../i18n';
 import { useToastStore, type ToastType, type Toast } from '../../store/useToastStore';
 
 const toastStyles = `
@@ -34,6 +35,7 @@ const typeToColors: Record<ToastType, string> = {
 };
 
 function ToastItem({ toast }: { toast: Toast }) {
+  const { t } = useLocale();
   const removeToast = useToastStore((s) => s.removeToast);
   const Icon = iconMap[toast.type];
   const colorClass = typeToColors[toast.type];
@@ -57,7 +59,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       <button
         onClick={() => removeToast(toast.id)}
         className="flex-shrink-0 text-text-3 hover:text-text-1 transition-colors duration-150 p-0.5 rounded hover:bg-surface-2 cursor-pointer"
-        aria-label="Fermer"
+        aria-label={t("ui.toast_close_aria")}
       >
         <X size={16} />
       </button>

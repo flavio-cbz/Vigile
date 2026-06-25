@@ -11,6 +11,7 @@ import { TimeAgo } from '../components/primitives/TimeAgo';
 import { Spinner } from '../components/primitives/Spinner';
 import { Check, X, RefreshCw, ChevronDown, Layers } from 'lucide-react';
 import { formatDateTime } from '../utils/formatTime';
+import { useLocale } from '../i18n';
 
 const ProposalRow: React.FC<{
   prop: ActionProposal;
@@ -29,6 +30,7 @@ const ProposalRow: React.FC<{
   setApprovingId,
   getStatusStyles,
 }) => {
+  const { t } = useLocale();
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -47,14 +49,14 @@ const ProposalRow: React.FC<{
             </div>
           )}
           <span className="text-text-3 text-[10px] font-mono">
-            Créé <TimeAgo timestamp={prop.created_at} />
+            {t('prop.created')} <TimeAgo timestamp={prop.created_at} />
           </span>
         </div>
 
         <h4 className="font-mono text-xs text-text-1 font-bold truncate">
-          Action : <span className="text-accent">{prop.action}</span>
+          {t('prop.action')} : <span className="text-accent">{prop.action}</span>
           {prop.params?.target && (
-            <> · Cible : <code className="text-text-2">{prop.params.target}</code></>
+            <> · {t('prop.target')} : <code className="text-text-2">{prop.params.target}</code></>
           )}
         </h4>
 
@@ -68,7 +70,7 @@ const ProposalRow: React.FC<{
               }}
               className="ml-1.5 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[10px]"
             >
-              {isExpanded ? 'Moins' : 'Plus'}
+              {isExpanded ? t('common.less') : t('common.more')}
             </button>
           )}
         </p>
@@ -88,7 +90,7 @@ const ProposalRow: React.FC<{
             className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[9px] font-bold border border-severity-critical/20 hover:border-severity-critical/50 hover:bg-severity-critical/10 text-severity-critical/80 hover:text-severity-critical rounded cursor-pointer disabled:opacity-50 transition-colors"
           >
             <X className="w-3 h-3" />
-            <span>Refuser</span>
+            <span>{t('prop.btn.reject')}</span>
           </button>
           <button
             onClick={() => setApprovingId(prop.id)}
@@ -96,7 +98,7 @@ const ProposalRow: React.FC<{
             className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[9px] font-bold bg-accent hover:bg-accent-hover text-text-1 rounded shadow cursor-pointer disabled:opacity-50 transition-colors"
           >
             <Check className="w-3 h-3" />
-            <span>Approuver</span>
+            <span>{t('prop.btn.approve')}</span>
           </button>
         </div>
       )}
@@ -132,7 +134,8 @@ const ProposalRow: React.FC<{
 };
 
 export const ProposalsPage: React.FC = () => {
-  usePageTitle('Propositions');
+  const { t } = useLocale();
+  usePageTitle(t('page_title.proposals'));
   const { nodes } = useNodeStore();
   const { can } = usePermission();
   const isOperator = can('approve-action');
@@ -215,10 +218,10 @@ export const ProposalsPage: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
-            Propositions d'Actions IA
+            {t('prop_page.title')}
           </h1>
           <p className="text-text-3 text-[10px] uppercase font-semibold tracking-wider mt-0.5 font-sans">
-            Historique complet des actions recommandées par le copilote
+            {t('prop_page.subtitle')}
           </p>
         </div>
         <button
@@ -232,7 +235,7 @@ export const ProposalsPage: React.FC = () => {
 
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg text-xs">
         <div className="flex items-center gap-1.5 relative">
-          <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">Statut :</span>
+          <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">{t('prop_page.status_label')}</span>
           <button
             onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
             className="bg-surface-2 border border-border rounded px-2.5 py-1 focus:outline-none text-text-2 font-semibold flex items-center gap-1.5 cursor-pointer hover:border-accent/40 transition-colors"
@@ -261,20 +264,20 @@ export const ProposalsPage: React.FC = () => {
         </div>
 
         <span className="text-[11px] text-text-2 font-mono font-semibold">
-          {proposals.length} proposition{proposals.length > 1 ? 's' : ''} trouvée{proposals.length > 1 ? 's' : ''}
+          {t('prop_page.count', { count: proposals.length })}
         </span>
       </div>
 
       {loading && proposals.length === 0 ? (
         <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
           <Spinner size="sm" />
-          <span>CONSULTATION DU GRAND LIVRE D'INTENTS...</span>
+          <span>{t('prop_page.loading')}</span>
         </div>
         ) : proposals.length === 0 ? (
           <EmptyState
             icon={<Layers className="w-12 h-12" />}
-            title="Aucune proposition"
-            description="Les propositions d'action apparaîtront ici après une conversation avec le copilote."
+            title={t('prop_page.empty_title')}
+            description={t('prop_page.empty_description')}
           />
         ) : (
         <div className="space-y-4">
@@ -303,17 +306,17 @@ export const ProposalsPage: React.FC = () => {
           <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">
             <div>
               <h3 className="text-sm font-bold text-text-1 font-interface uppercase tracking-wider">
-                Motif du rejet requis
+                {t('prop_page.reject_title')}
               </h3>
               <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-                Veuillez justifier le rejet de cette proposition d'action.
+                {t('prop_page.reject_description')}
               </p>
             </div>
 
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Ex: Risque d'interruption de service non planifiée..."
+              placeholder={t('dash.reject_reason_placeholder')}
               className="w-full h-24 bg-surface-2 border border-border focus:border-accent/40 rounded-lg p-3 text-xs text-text-1 placeholder:text-text-3 focus:outline-none resize-none font-sans"
               autoFocus
             />
@@ -327,7 +330,7 @@ export const ProposalsPage: React.FC = () => {
                 }}
                 className="px-4 py-2 border border-border hover:border-border-strong text-text-2 rounded-lg cursor-pointer transition-colors"
               >
-                Annuler
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -351,7 +354,7 @@ export const ProposalsPage: React.FC = () => {
                 }}
                 className="px-4 py-2 bg-severity-critical text-text-1 hover:bg-severity-critical/80 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                Confirmer le rejet
+                {t('prop_page.confirm_reject_action')}
               </button>
             </div>
           </div>
@@ -363,10 +366,10 @@ export const ProposalsPage: React.FC = () => {
           <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">
             <div>
               <h3 className="text-sm font-bold text-text-1 font-interface uppercase tracking-wider">
-                Confirmer l'approbation
+                {t('prop_page.confirm_approve_title')}
               </h3>
               <p className="text-text-3 text-xs mt-1.5 font-sans">
-                Êtes-vous sûr de vouloir approuver cette action ? Cette opération est irréversible.
+                {t('prop_page.confirm_approve_message')}
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -375,7 +378,7 @@ export const ProposalsPage: React.FC = () => {
                 onClick={() => setApprovingId(null)}
                 className="px-4 py-2 border border-border hover:border-border-strong text-text-2 rounded-lg cursor-pointer transition-colors"
               >
-                Annuler
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -386,7 +389,7 @@ export const ProposalsPage: React.FC = () => {
                 }}
                 className="px-4 py-2 bg-accent hover:bg-accent-hover text-text-1 rounded-lg cursor-pointer transition-all shadow"
               >
-                Confirmer l'approbation
+                {t('prop_page.confirm_approve_action')}
               </button>
             </div>
           </div>

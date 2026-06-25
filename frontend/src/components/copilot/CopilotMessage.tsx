@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message } from '../../store/chatStore';
 import { ProposalInline } from './ProposalInline';
+import { useLocale } from '../../i18n';
 import { Sparkles, User, Terminal } from 'lucide-react';
 
 interface CopilotMessageProps {
@@ -16,6 +17,7 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
   onRejectProposal,
   loadingProposal = false,
 }) => {
+  const { t } = useLocale();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -47,7 +49,7 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
       <div className="flex-1 min-w-0 space-y-3 font-sans text-xs">
         <div className="flex items-center gap-1.5 justify-between">
           <span className="font-bold text-[10px] tracking-wide text-text-1 font-interface">
-            {isUser ? 'VOUS' : 'COPILOTE IA'}
+            {isUser ? t('copilot.user_badge') : t('copilot.copilot_badge')}
           </span>
         </div>
 

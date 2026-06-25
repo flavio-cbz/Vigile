@@ -18,14 +18,17 @@ interface LayoutState {
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
-  isCopilotOpen: false,
+  isCopilotOpen: localStorage.getItem('vigile_copilot_open') === 'true',
   isSidebarOpen: false,
   isSidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
   isAddNodeModalOpen: false,
   pendingCount: 0,
   paletteOpen: false,
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  setCopilotOpen: (open) => set({ isCopilotOpen: open }),
+  setCopilotOpen: (open) => {
+    localStorage.setItem('vigile_copilot_open', String(open));
+    set({ isCopilotOpen: open });
+  },
   toggleCopilot: () => set((state) => ({ isCopilotOpen: !state.isCopilotOpen })),
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),

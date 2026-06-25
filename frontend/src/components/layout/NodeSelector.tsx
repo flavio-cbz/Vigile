@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useLocale } from '../../i18n';
 import { useNavigate } from 'react-router';
 import { useNodeStore } from '../../store/nodeStore';
 import { StatusDot } from '../primitives/StatusDot';
@@ -6,6 +7,7 @@ import { ChevronDown, Server } from 'lucide-react';
 
 export const NodeSelector: React.FC = () => {
   const { nodes, selectedNodeId, selectNode } = useNodeStore();
+  const { t } = useLocale();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -32,7 +34,7 @@ export const NodeSelector: React.FC = () => {
       >
         <Server className="w-3.5 h-3.5 text-accent opacity-85 transition-transform duration-200 group-hover:scale-105" />
         <span className="font-semibold tracking-wide uppercase font-mono text-[10px]">
-          {activeNode ? activeNode.name : 'TOUTE LA FLOTTE'}
+          {activeNode ? activeNode.name : t('node_selector.fleet_all')}
         </span>
         {activeNode && <StatusDot state={activeNode.state} className="ml-1" />}
         <ChevronDown className={`w-3.5 h-3.5 opacity-60 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
@@ -50,8 +52,8 @@ export const NodeSelector: React.FC = () => {
               selectedNodeId === 'all' ? 'text-accent font-bold bg-accent-muted/10' : 'text-text-2'
             }`}
           >
-            <span className="font-medium">Toute la flotte</span>
-            <span className="text-[9px] opacity-60 font-mono">{nodes.length} machines</span>
+            <span className="font-medium">{t('node_selector.fleet_label')}</span>
+            <span className="text-[9px] opacity-60 font-mono">{t('node_selector.machine_count', { count: nodes.length })}</span>
           </button>
 
           <div className="h-px bg-border-strong/30 my-1" />
@@ -74,13 +76,13 @@ export const NodeSelector: React.FC = () => {
                   <span className="truncate font-medium">{node.name}</span>
                 </div>
                 <span className="text-[9px] opacity-50 font-mono tracking-tighter truncate max-w-[80px]">
-                  {node.hostname || 'inconnu'}
+                  {node.hostname || t('node_selector.unknown')}
                 </span>
               </button>
             ))}
             {nodes.length === 0 && (
               <div className="px-4 py-4 text-center text-text-3 text-xs font-mono">
-                Aucune machine
+                {t('node_selector.empty')}
               </div>
             )}
           </div>

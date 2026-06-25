@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { useUiStore } from '../store/uiStore';
 import { useNodeInsights } from '../hooks/useNodeInsights';
 import { usePolling } from '../hooks/usePolling';
@@ -13,6 +13,7 @@ import { Badge } from '../components/primitives/Badge';
 import { api } from '../hooks/useApi';
 import { usePermission } from '../hooks/usePermission';
 import { usePageTitle } from '../hooks/usePageTitle';
+import { NodeSettingsTab } from '../components/dashboard/NodeSettingsTab';
 import {
   LineChart,
   Line,
@@ -33,8 +34,10 @@ import {
   Calendar,
 } from 'lucide-react';
 import { formatOfflineDuration } from '../utils/formatTime';
+import { useLocale } from '../i18n';
 
 const OfflineInsightCard: React.FC<{ insight: any; nodeId: string | undefined }> = ({ insight, nodeId }) => {
+  const { t } = useLocale();
   const { openCopilot } = useUiStore();
   const [tick, setTick] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -48,15 +51,14 @@ const OfflineInsightCard: React.FC<{ insight: any; nodeId: string | undefined }>
     return () => clearInterval(interval);
   }, [insight]);
 
-  // Compute headline and detail dynamically on render to avoid cascading state updates
   let headline = insight.headline;
   let detail = insight.detail;
   if (insight.raw?.last_heartbeat) {
     const hbTime = insight.raw.last_heartbeat;
     const durationStr = formatOfflineDuration(hbTime);
-    headline = `Hors-ligne depuis ${durationStr}`;
+    headline = t('node_detail.offline_headline', { duration: durationStr });
     const hbLabel = new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR');
-    detail = `Dernier contact le ${hbLabel}. Vérifiez la connectivité réseau.`;
+    detail = t('node_detail.offline_detail', { date: hbLabel });
   }
 
   return (
@@ -68,7 +70,7 @@ const OfflineInsightCard: React.FC<{ insight: any; nodeId: string | undefined }>
       <div className="flex items-center justify-between gap-2 shrink-0">
         <SeverityTag severity="offline" className="whitespace-nowrap" />
         <span className="text-[8px] font-extrabold font-interface tracking-widest text-text-3 uppercase whitespace-nowrap">
-          AI REPORT
+          {t('node_detail.ai_report_badge')}
         </span>
       </div>
 
@@ -86,7 +88,7 @@ const OfflineInsightCard: React.FC<{ insight: any; nodeId: string | undefined }>
               }}
               className="ml-1 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[9px]"
             >
-              {isExpanded ? 'Moins' : 'Plus'}
+              {isExpanded ? t('common.less') : t('common.more')}
             </button>
           )}
         </p>
@@ -106,7 +108,7 @@ const OfflineInsightCard: React.FC<{ insight: any; nodeId: string | undefined }>
           }
           className="text-[10px] font-extrabold font-interface text-text-2 hover:underline flex items-center gap-0.5 cursor-pointer"
         >
-          Diagnostiquer →
+          {t('card.analyze_ai')}
         </button>
       </div>
     </div>
@@ -114,7 +116,8 @@ const OfflineInsightCard: React.FC<{ insight: any; nodeId: string | undefined }>
 };
 
 export const NodeDetail: React.FC = () => {
-  usePageTitle('Détail du nœud');
+  const { t } = useLocale();
+  usePageTitle(t('page_title.node_detail'));
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -140,18 +143,25 @@ export const NodeDetail: React.FC = () => {
       severity: 'offline' as const,
       icon: '📡',
       headline: hbTime
-        ? `Hors-ligne — dernier contact ${hbLabel}`
-        : 'Hors-ligne — aucun heartbeat enregistré',
+        ? t('dash.insight_offline_headline', { time: hbLabel ?? '' })
+        : t('dash.insight_offline_headline_no_hb'),
       detail: hbTime
-        ? `Dernier heartbeat reçu le ${hbLabel}. Vérifiez la connectivité réseau.`
-        : 'Ce nœud n\'a jamais envoyé de heartbeat. Vérifiez l\'enrollment.',
+        ? t('dash.insight_offline_detail', { time: hbLabel ?? '' })
+        : t('dash.insight_offline_detail_no_hb'),
       raw: {
         last_heartbeat: hbTime
       }
     });
   }
 
-  const [activeTab, setActiveTab] = useState<'insights' | 'metrics' | 'services' | 'containers' | 'logs'>('insights');
+  const [activeTab, setActiveTab] = useState<'insights' | 'metrics' | 'services' | 'containers' | 'logs' | 'settings'>('insights');
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam && ['insights', 'metrics', 'services', 'containers', 'logs', 'settings'].includes(tabParam)) {
+      setActiveTab(tabParam as typeof activeTab);
+    }
+  }, [searchParams]);
   const [statsHistory, setStatsHistory] = useState<any[]>([]);
   const [loadingStats, setLoadingStats] = useState(false);
 
@@ -238,10 +248,10 @@ export const NodeDetail: React.FC = () => {
     try {
       const query = `?lines=${logsLimit}${logsService ? `&service=${logsService}` : ''}`;
       const data = await api<{ output: string }>(`/api/nodes/${id}/logs${query}`);
-      if (data) setLogs(data.output || 'Aucun log disponible pour cette sélection.');
+      if (data) setLogs(data.output || t('node_detail.logs_selection_empty'));
     } catch (err) {
       console.error('Failed to fetch logs:', err);
-      setLogs('Impossible de charger les logs du serveur.');
+      setLogs(t('node_detail.logs_load_error'));
     } finally {
       setLoadingLogs(false);
     }
@@ -303,7 +313,7 @@ export const NodeDetail: React.FC = () => {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs select-none">
         <Spinner size="md" />
-        <span>RECHERCHE DES INFORMATIONS DE CONSOLE...</span>
+        <span>{t('node_detail.loading')}</span>
       </div>
     );
   }
@@ -311,14 +321,14 @@ export const NodeDetail: React.FC = () => {
   if (!node) {
     return (
       <div className="max-w-xl mx-auto py-20 text-center select-none space-y-4">
-        <h1 className="font-serif text-2xl text-text-1">Machine introuvable</h1>
-        <p className="text-text-3 text-xs">Le serveur demandé n'existe pas ou sa clé a été révoquée.</p>
+        <h1 className="font-serif text-2xl text-text-1">{t('node_detail.not_found_title')}</h1>
+        <p className="text-text-3 text-xs">{t('node_detail.not_found_description')}</p>
         <button
           onClick={() => navigate('/')}
           className="inline-flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-2 border border-border text-xs rounded font-interface font-bold uppercase tracking-wider text-text-2 hover:text-text-1 transition-all cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Retour au Dashboard</span>
+          <span>{t('node_detail.back_to_dashboard')}</span>
         </button>
       </div>
     );
@@ -346,7 +356,7 @@ export const NodeDetail: React.FC = () => {
         className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface hover:bg-surface-2 border border-border text-[10px] rounded font-interface font-bold uppercase tracking-widest text-text-2 hover:text-text-1 cursor-pointer transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
-        <span>TABLEAU DE BORD</span>
+        <span>{t('node_detail.back_button')}</span>
       </button>
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-xl border border-border bg-surface relative overflow-hidden shadow">
@@ -365,12 +375,12 @@ export const NodeDetail: React.FC = () => {
 
             <div className="flex items-center gap-3 text-text-3 text-[10px] font-mono mt-1">
               <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3 opacity-60" /> Enregistré : <TimeAgo timestamp={node.enrolled_at} />
+                <Calendar className="w-3 h-3 opacity-60" /> {t('node_detail.enrolled_label')} <TimeAgo timestamp={node.enrolled_at} />
               </span>
               <span>·</span>
-              <span>OS : {node.os || 'Linux'} ({node.arch || 'amd64'})</span>
+              <span>{t('node_detail.os_label', { os: node.os || t('node_detail.os_default'), arch: node.arch || t('node_detail.arch_default') })}</span>
               <span>·</span>
-              <span>Hostname : {node.hostname || 'inconnu'}</span>
+              <span>{t('node_detail.hostname_label', { hostname: node.hostname || t('common.unknown') })}</span>
             </div>
           </div>
         </div>
@@ -390,11 +400,12 @@ export const NodeDetail: React.FC = () => {
 
       <div className="border-b border-border font-interface select-none shrink-0 flex overflow-x-auto no-scrollbar gap-4">
         {[
-          { id: 'insights', label: 'Analyses IA', count: displayInsights.length },
-          { id: 'metrics', label: 'Métriques' },
-          { id: 'services', label: `Services (${loadingServices ? '•' : services.length})` },
-          { id: 'containers', label: `Docker (${loadingContainers ? '•' : containers.length})` },
-          { id: 'logs', label: 'Logs' },
+          { id: 'insights', label: t('node_detail.tab.insights'), count: displayInsights.length },
+          { id: 'metrics', label: t('node_detail.tab.metrics') },
+          { id: 'services', label: t('node_detail.tab.services', { count: loadingServices ? '•' : services.length }) },
+          { id: 'containers', label: t('node_detail.tab.containers', { count: loadingContainers ? '•' : containers.length }) },
+          { id: 'logs', label: t('node_detail.tab.logs') },
+          { id: 'settings', label: t('node_detail.tab.settings') },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -422,13 +433,13 @@ export const NodeDetail: React.FC = () => {
           <div className="space-y-4">
             <div className="flex justify-between items-center px-1">
               <h3 className="text-xs font-interface font-bold uppercase tracking-widest text-text-3">
-                Insights IA trouvés sur cette machine
+                {t('node_detail.insights_section_title')}
               </h3>
               <button
                 onClick={refreshInsights}
                 disabled={loadingInsights}
                 className="p-1 rounded hover:bg-surface-2 text-text-3 hover:text-text-1 cursor-pointer transition-colors"
-                title="Rafraîchir les analyses"
+                title={t('node_detail.refresh_insights')}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingInsights ? 'animate-spin' : ''}`} />
               </button>
@@ -437,14 +448,14 @@ export const NodeDetail: React.FC = () => {
             {loadingInsights && displayInsights.length === 0 ? (
               <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-3">
                 <Spinner size="sm" />
-                <span>RÉCUPÉRATION DES RAPPORTS DE DIAGNOSTIC...</span>
+                <span>{t('node_detail.insights_loading')}</span>
               </div>
             ) : displayInsights.length === 0 ? (
               <div className="py-20 border border-dashed border-border rounded-xl bg-surface/30 text-center select-none text-text-3 space-y-2 max-w-lg mx-auto">
                 <Sparkles className="w-8 h-8 mx-auto text-severity-ok opacity-45" />
-                <h4 className="font-interface text-xs font-bold uppercase tracking-wider text-text-2">Séquence parfaite</h4>
+                <h4 className="font-interface text-xs font-bold uppercase tracking-wider text-text-2">{t('node_detail.insights_empty_title')}</h4>
                 <p className="text-[10px] leading-relaxed max-w-xs mx-auto text-text-3">
-                  Aucun diagnostic ou anomalie sur la machine. Les metrics de performance sont stables.
+                  {t('node_detail.insights_empty_description')}
                 </p>
               </div>
             ) : (
@@ -468,7 +479,7 @@ export const NodeDetail: React.FC = () => {
                       <div className="flex items-center justify-between gap-2 shrink-0">
                         <SeverityTag severity={ins.severity} className="whitespace-nowrap" />
                         <span className="text-[8px] font-extrabold font-interface tracking-widest text-text-3 uppercase whitespace-nowrap">
-                          AI REPORT
+                          {t('node_detail.ai_report_badge')}
                         </span>
                       </div>
 
@@ -495,7 +506,7 @@ export const NodeDetail: React.FC = () => {
                           }
                           className="text-[10px] font-extrabold font-interface text-accent hover:underline flex items-center gap-0.5 cursor-pointer"
                         >
-                          Diagnostiquer →
+                          {t('card.analyze_ai')}
                         </button>
                       </div>
                     </div>
@@ -509,21 +520,21 @@ export const NodeDetail: React.FC = () => {
         {activeTab === 'metrics' && (
           <div className="space-y-6">
             <h3 className="text-xs font-interface font-bold uppercase tracking-widest text-text-3 px-1">
-              Historique d'activité (Dernière heure)
+              {t('node_detail.metrics_title')}
             </h3>
             {loadingStats && statsHistory.length === 0 ? (
               <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
                 <Spinner size="sm" />
-                <span>CHARGEMENT DES HISTOGRAMMES DE SÉCURITÉ...</span>
+                <span>{t('node_detail.metrics_loading')}</span>
               </div>
             ) : statsHistory.length === 0 ? (
-              <div className="py-20 text-center text-text-3">Aucune métrique historique disponible.</div>
+              <div className="py-20 text-center text-text-3">{t('node_detail.metrics_empty')}</div>
             ) : (
               <div className="grid gap-6 md:grid-cols-3">
                 {/* CPU chart */}
                 <div className="p-4 border border-border rounded-xl bg-surface flex flex-col gap-2">
                   <div className="flex items-center gap-2 text-text-1 font-interface font-bold text-xs uppercase tracking-wide">
-                    <Cpu className="w-4 h-4 text-accent" /> Charge Processeur (%)
+                    <Cpu className="w-4 h-4 text-accent" /> {t('node_detail.chart_cpu')}
                   </div>
                   <div className="h-48 w-full mt-2">
                     <ResponsiveContainer width="100%" height="100%">
@@ -541,7 +552,7 @@ export const NodeDetail: React.FC = () => {
                 {/* Memory chart */}
                 <div className="p-4 border border-border rounded-xl bg-surface flex flex-col gap-2">
                   <div className="flex items-center gap-2 text-text-1 font-interface font-bold text-xs uppercase tracking-wide">
-                    <Database className="w-4 h-4 text-severity-warning" /> Charge Mémoire (%)
+                    <Database className="w-4 h-4 text-severity-warning" /> {t('node_detail.chart_ram')}
                   </div>
                   <div className="h-48 w-full mt-2">
                     <ResponsiveContainer width="100%" height="100%">
@@ -559,7 +570,7 @@ export const NodeDetail: React.FC = () => {
                 {/* Disk chart */}
                 <div className="p-4 border border-border rounded-xl bg-surface flex flex-col gap-2">
                   <div className="flex items-center gap-2 text-text-1 font-interface font-bold text-xs uppercase tracking-wide">
-                    <Layers className="w-4 h-4 text-severity-info" /> Stockage Disque (%)
+                    <Layers className="w-4 h-4 text-severity-info" /> {t('node_detail.chart_disk')}
                   </div>
                   <div className="h-48 w-full mt-2">
                     <ResponsiveContainer width="100%" height="100%">
@@ -585,7 +596,7 @@ export const NodeDetail: React.FC = () => {
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
                 <input
                   type="text"
-                  placeholder="Rechercher un service systemd..."
+                  placeholder={t('node_detail.services_search_placeholder')}
                   value={serviceSearch}
                   onChange={(e) => setServiceSearch(e.target.value)}
                   className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded pl-10 pr-3.5 py-1.5 text-xs text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
@@ -598,10 +609,10 @@ export const NodeDetail: React.FC = () => {
                   onChange={(e) => setServiceFilter(e.target.value)}
                   className="bg-surface-2 border border-border rounded px-3 py-1.5 focus:outline-none text-text-2 font-semibold"
                 >
-                  <option value="">Tous les états</option>
-                  <option value="running">En cours d'exécution</option>
-                  <option value="failed">En panne (failed)</option>
-                  <option value="other">Autre</option>
+                  <option value="">{t('node_detail.services_filter_all')}</option>
+                  <option value="running">{t('node_detail.services_filter_running')}</option>
+                  <option value="failed">{t('node_detail.services_filter_failed')}</option>
+                  <option value="other">{t('node_detail.services_filter_other')}</option>
                 </select>
                 <button
                   onClick={fetchServicesList}
@@ -616,21 +627,21 @@ export const NodeDetail: React.FC = () => {
             {loadingServices && services.length === 0 ? (
               <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
                 <Spinner size="sm" />
-                <span>CONSULTATION DE LA LISTE SYSTEMD...</span>
+                <span>{t('node_detail.services_loading')}</span>
               </div>
             ) : filteredServices.length === 0 ? (
               <div className="py-12 text-center text-text-3 text-xs bg-surface/20 border border-border rounded-lg">
-                Aucun service ne correspond aux critères.
+                {t('node_detail.services_empty')}
               </div>
             ) : (
               <div className="border border-border rounded-xl bg-surface overflow-hidden shadow">
                 <table className="w-full text-left border-collapse text-xs font-sans">
                   <thead>
                     <tr className="bg-surface-2/45 border-b border-border text-[9px] font-extrabold font-interface tracking-widest text-text-3 uppercase">
-                      <th className="px-5 py-3">Nom du Service</th>
-                      <th className="px-5 py-3">État actuel</th>
-                      <th className="px-5 py-3">Statut technique</th>
-                      {isAdminOrOperator && <th className="px-5 py-3 text-right">Contrôle</th>}
+                      <th className="px-5 py-3">{t('node_detail.services_table_name')}</th>
+                      <th className="px-5 py-3">{t('node_detail.services_table_state')}</th>
+                      <th className="px-5 py-3">{t('node_detail.services_table_status')}</th>
+                      {isAdminOrOperator && <th className="px-5 py-3 text-right">{t('node_detail.services_table_control')}</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -651,7 +662,7 @@ export const NodeDetail: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-5 py-3.5 font-mono text-[10px] text-text-3 truncate max-w-[200px]" title={srv.status}>
-                          {srv.status || 'aucun détail'}
+                          {srv.status || t('node_detail.services_no_details')}
                         </td>
                         {isAdminOrOperator && (
                           <td className="px-5 py-3.5 text-right font-interface">
@@ -659,9 +670,9 @@ export const NodeDetail: React.FC = () => {
                               onClick={() => handleRestartService(srv.name)}
                               disabled={restartingService !== null || !isAdmin}
                               className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer disabled:opacity-50 transition-all duration-150"
-                              title={isAdmin ? "Redémarrer le service" : "Droits administrateur requis"}
+                              title={isAdmin ? t('node_detail.restart_service_title') : t('node_detail.admin_required')}
                             >
-                              {restartingService === srv.name ? 'Redémarrage...' : 'Restart'}
+                              {restartingService === srv.name ? t('card.restarting') : t('card.restart')}
                             </button>
                           </td>
                         )}
@@ -681,7 +692,7 @@ export const NodeDetail: React.FC = () => {
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
                 <input
                   type="text"
-                  placeholder="Rechercher par nom ou image Docker..."
+                  placeholder={t('node_detail.containers_search_placeholder')}
                   value={containerSearch}
                   onChange={(e) => setContainerSearch(e.target.value)}
                   className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded pl-10 pr-3.5 py-1.5 text-xs text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
@@ -700,22 +711,22 @@ export const NodeDetail: React.FC = () => {
             {loadingContainers && containers.length === 0 ? (
               <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
                 <Spinner size="sm" />
-                <span>DIAGNOSTIC DE L'SOCKET DOCKER...</span>
+                <span>{t('node_detail.containers_loading')}</span>
               </div>
             ) : filteredContainers.length === 0 ? (
               <div className="py-12 text-center text-text-3 text-xs bg-surface/20 border border-border rounded-lg">
-                Aucun conteneur docker détecté ou actif.
+                {t('node_detail.containers_empty')}
               </div>
             ) : (
               <div className="border border-border rounded-xl bg-surface overflow-hidden shadow">
                 <table className="w-full text-left border-collapse text-xs font-sans">
                   <thead>
                     <tr className="bg-surface-2/45 border-b border-border text-[9px] font-extrabold font-interface tracking-widest text-text-3 uppercase">
-                      <th className="px-5 py-3">Conteneur</th>
-                      <th className="px-5 py-3">Image source</th>
-                      <th className="px-5 py-3">Statut Docker</th>
-                      <th className="px-5 py-3">Routage Ports</th>
-                      {isAdminOrOperator && <th className="px-5 py-3 text-right">Contrôle</th>}
+                      <th className="px-5 py-3">{t('node_detail.containers_table_name')}</th>
+                      <th className="px-5 py-3">{t('node_detail.containers_table_image')}</th>
+                      <th className="px-5 py-3">{t('node_detail.containers_table_status')}</th>
+                      <th className="px-5 py-3">{t('node_detail.containers_table_ports')}</th>
+                      {isAdminOrOperator && <th className="px-5 py-3 text-right">{t('node_detail.containers_table_control')}</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -737,7 +748,7 @@ export const NodeDetail: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-5 py-3.5 font-mono text-[9.5px] text-text-3 truncate max-w-[160px]" title={Array.isArray(cnt.ports) ? cnt.ports.join(', ') : String(cnt.ports || '')}>
-                          {Array.isArray(cnt.ports) ? cnt.ports.join(', ') : (cnt.ports || 'aucun')}
+                          {Array.isArray(cnt.ports) ? cnt.ports.join(', ') : (cnt.ports || t('node_detail.containers_no_ports'))}
                         </td>
                         {isAdminOrOperator && (
                           <td className="px-5 py-3.5 text-right font-interface">
@@ -745,9 +756,9 @@ export const NodeDetail: React.FC = () => {
                               onClick={() => handleRestartContainer(cnt.id)}
                               disabled={restartingContainer !== null || !isAdmin}
                               className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer disabled:opacity-50 transition-all duration-150"
-                              title={isAdmin ? "Redémarrer le conteneur" : "Droits administrateur requis"}
+                              title={isAdmin ? t('node_detail.restart_container_title') : t('node_detail.admin_required')}
                             >
-                              {restartingContainer === cnt.id ? 'Redémarrage...' : 'Restart'}
+                              {restartingContainer === cnt.id ? t('card.restarting') : t('card.restart')}
                             </button>
                           </td>
                         )}
@@ -765,13 +776,13 @@ export const NodeDetail: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg font-interface text-xs select-none">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">Cible :</span>
+                  <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">{t('node_detail.logs_target_label')}</span>
                   <select
                     value={logsService}
                     onChange={(e) => setLogsService(e.target.value)}
                     className="bg-surface-2 border border-border rounded px-2.5 py-1 focus:outline-none text-text-2 font-semibold"
                   >
-                    <option value="">Système global (journalctl)</option>
+                    <option value="">{t('node_detail.logs_target_global')}</option>
                     {services.map((srv) => (
                       <option key={srv.name} value={srv.name}>{srv.name}</option>
                     ))}
@@ -779,15 +790,15 @@ export const NodeDetail: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">Lignes :</span>
+                  <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">{t('node_detail.logs_lines_label')}</span>
                   <select
                     value={logsLimit}
                     onChange={(e) => setLogsLimit(Number(e.target.value))}
                     className="bg-surface-2 border border-border rounded px-2.5 py-1 focus:outline-none text-text-2 font-semibold"
                   >
-                    <option value="50">50 lignes</option>
-                    <option value="100">100 lignes</option>
-                    <option value="250">250 lignes</option>
+                    <option value="50">{t('node_detail.logs_lines_50')}</option>
+                    <option value="100">{t('node_detail.logs_lines_100')}</option>
+                    <option value="250">{t('node_detail.logs_lines_250')}</option>
                   </select>
                 </div>
 
@@ -798,7 +809,7 @@ export const NodeDetail: React.FC = () => {
                     onChange={(e) => setLogsAutoScroll(e.target.checked)}
                     className="rounded bg-surface-2 border-border accent-accent"
                   />
-                  <span>Défilement automatique</span>
+                  <span>{t('node_detail.logs_auto_scroll')}</span>
                 </label>
               </div>
 
@@ -821,10 +832,14 @@ export const NodeDetail: React.FC = () => {
                 ref={logsConsoleRef}
                 className="font-mono text-[10.5px] leading-relaxed p-5 bg-black text-text-2 border border-border rounded-lg h-[460px] overflow-y-auto whitespace-pre-wrap select-text scrollbar-thin shadow-inner"
               >
-                {logs || 'Aucune ligne de journalisation n\'a pu être collectée.'}
+                {logs || t('node_detail.logs_empty')}
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'settings' && node && (
+          <NodeSettingsTab node={node} />
         )}
       </div>
     </div>

@@ -24,6 +24,7 @@ import { api } from '../hooks/useApi';
 import { Spinner } from '../components/primitives/Spinner';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { formatActorName } from '../utils/formatActor';
+import { useLocale } from '../i18n';
 
 interface ContainerItem {
   id: string;
@@ -52,7 +53,8 @@ const getTopInsight = (insights?: InsightItem[] | null): InsightItem | null => {
 };
 
 export const Dashboard: React.FC = () => {
-  usePageTitle('Tableau de bord');
+  const { t } = useLocale();
+  usePageTitle(t('page_title.dashboard'));
   const navigate = useNavigate();
   const { nodes, isLoading: loadingNodes, fetchNodes } = useNodeStore();
   const { openCopilot } = useUiStore();
@@ -229,11 +231,11 @@ export const Dashboard: React.FC = () => {
           severity: 'offline' as const,
           icon: '📡',
           headline: hbTime
-            ? `Hors-ligne — dernier contact ${hbLabel}`
-            : 'Hors-ligne — aucun heartbeat enregistré',
+            ? t('dash.insight_offline_headline', { time: hbLabel ?? '' })
+            : t('dash.insight_offline_headline_no_hb'),
           detail: hbTime
-            ? `Dernier heartbeat reçu le ${hbLabel}. Vérifiez la connectivité réseau.`
-            : 'Ce nœud n\'a jamais envoyé de heartbeat. Vérifiez l\'enrollment.',
+            ? t('dash.insight_offline_detail', { time: hbLabel ?? '' })
+            : t('dash.insight_offline_detail_no_hb'),
           raw: {
             last_heartbeat: hbTime,
           },
@@ -275,7 +277,7 @@ export const Dashboard: React.FC = () => {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs select-none">
         <Spinner size="md" />
-        <span>CONSTITUTION DE LA SÉQUENCE D'HUD...</span>
+        <span>{t('dash.loading_hud')}</span>
       </div>
     );
   }
@@ -289,10 +291,10 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="space-y-1.5">
             <h2 className="text-base font-bold font-interface text-text-1 uppercase tracking-wider">
-              Démarrer
+              {t('dash.empty_title')}
             </h2>
             <p className="text-xs text-text-2 leading-relaxed max-w-sm mx-auto">
-              Connectez votre premier serveur pour commencer la supervision.
+              {t('dash.empty_description')}
             </p>
           </div>
           <button
@@ -301,7 +303,7 @@ export const Dashboard: React.FC = () => {
             className="btn btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-interface font-semibold cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            Ajouter un serveur
+            {t('dash.empty_action')}
           </button>
         </div>
       </div>
@@ -314,7 +316,7 @@ export const Dashboard: React.FC = () => {
 
       {insightsLoading ? (
         <SwimLane
-          title="Insights IA"
+          title={t('swim.insights')}
           icon={Sparkles}
           layout="grid"
         >
@@ -334,7 +336,7 @@ export const Dashboard: React.FC = () => {
         </SwimLane>
       ) : allInsightsList.length > 0 ? (
         <SwimLane
-          title="Insights IA"
+          title={t('swim.insights')}
           icon={Sparkles}
           layout="grid"
           subtitle={stableMetricsCount > 0 ? `• ${stableMetricsCount} métrique${stableMetricsCount > 1 ? 's' : ''} stable${stableMetricsCount > 1 ? 's' : ''} sur la flotte` : undefined}
@@ -360,14 +362,14 @@ export const Dashboard: React.FC = () => {
           <div className="flex items-center gap-2 text-xs text-success bg-success/5 border border-success/15 rounded-lg py-2.5 px-4 w-fit">
             <span className="text-sm">✓</span>
             <span className="font-interface font-medium">
-              {stableMetricsCount} métriques stables sur la flotte (fonctionnement nominal)
+              {t('dash.stable_metrics', { count: stableMetricsCount })}
             </span>
           </div>
         </div>
       ) : null}
 
       <SwimLane
-        title="Vos serveurs"
+        title={t('dash.your_servers')}
         icon={ServerIcon}
         isLoading={nodes.length === 0}
         layout="grid"
@@ -401,7 +403,7 @@ export const Dashboard: React.FC = () => {
 
       {proposals.length > 0 && (
         <SwimLane
-          title="Actions proposées"
+          title={t('dash.proposed_actions')}
           icon={CheckSquare}
           className="border-t border-border/30 pt-6 mt-6"
           layout="grid"
@@ -412,7 +414,7 @@ export const Dashboard: React.FC = () => {
               <ProposalCard
                 key={prop.id}
                 proposal={prop}
-                nodeName={node ? node.name : 'Système'}
+                nodeName={node ? node.name : t('common.system')}
                 onApprove={handleApproveProposal}
                 onReject={async (id) => handleRejectInit(id)}
                 loading={loadingProposalId === prop.id}
@@ -423,7 +425,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       <SwimLane
-        title="Conteneurs"
+        title={t('dash.containers')}
         icon={Layers}
         isLoading={loadingContainers && containers.length === 0}
         className="border-t border-border/30 pt-6 mt-6"
@@ -445,7 +447,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <Activity className="text-accent w-4.5 h-4.5" />
               <h3 className="text-sm font-bold text-text-1 tracking-wide uppercase">
-                Activité Récente
+                {t('swim.activity')}
               </h3>
             </div>
           </div>
@@ -469,7 +471,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       <SwimLane
-        title="État de la flotte"
+        title={t('dash.fleet_status')}
         icon={Grid3x3}
         layout="grid"
         className="border-t border-border-strong pt-6 mt-6"
@@ -491,7 +493,7 @@ export const Dashboard: React.FC = () => {
           onClick={() => setShowChart(!showChart)}
           className="text-xs text-accent hover:underline font-interface font-semibold cursor-pointer transition-colors"
         >
-          {showChart ? 'Vue grille' : 'Voir les tendances'}
+          {showChart ? t('dash.toggle_grid') : t('dash.toggle_trends')}
         </button>
       </div>
 
@@ -500,17 +502,17 @@ export const Dashboard: React.FC = () => {
           <div className="w-full max-w-md p-6 bg-surface border border-border rounded-xl shadow-2xl space-y-4">
             <div>
               <h3 className="text-sm font-bold text-text-1 font-interface uppercase tracking-wider">
-                Motif du rejet requis
+                {t('dash.reject_reason_title')}
               </h3>
               <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-                Veuillez justifier le rejet de cette proposition d'action.
+                {t('dash.reject_reason_description')}
               </p>
             </div>
 
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Ex: Risque d'interruption de service non planifiée..."
+              placeholder={t('dash.reject_reason_placeholder')}
               className="w-full h-24 bg-surface-2 border border-border focus:border-accent/40 rounded-lg p-3 text-xs text-text-1 placeholder:text-text-3 focus:outline-none resize-none font-sans"
               autoFocus
             />
@@ -524,7 +526,7 @@ export const Dashboard: React.FC = () => {
                 }}
                 className="px-4 py-2 border border-border hover:border-border-strong text-text-2 rounded-lg cursor-pointer transition-colors"
               >
-                Annuler
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -548,7 +550,7 @@ export const Dashboard: React.FC = () => {
                 }}
                 className="px-4 py-2 bg-severity-critical text-text-1 hover:bg-severity-critical/80 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                Confirmer le rejet
+                {t('dash.reject_confirm')}
               </button>
             </div>
           </div>

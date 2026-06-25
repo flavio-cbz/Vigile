@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useLocale } from '../../i18n';
 import { ArrowUp } from 'lucide-react';
 
 interface CopilotInputProps {
@@ -7,6 +8,7 @@ interface CopilotInputProps {
 }
 
 export const CopilotInput: React.FC<CopilotInputProps> = ({ onSend, disabled = false }) => {
+  const { t } = useLocale();
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -39,7 +41,7 @@ export const CopilotInput: React.FC<CopilotInputProps> = ({ onSend, disabled = f
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Poser une question ou demander un diagnostic..."
+          placeholder={t('copilot.input_placeholder')}
           disabled={disabled}
           className="w-full bg-transparent text-text-1 text-xs px-3.5 py-2.5 focus:outline-none resize-none max-h-32 min-h-[36px] placeholder:text-text-3 font-normal"
         />

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocale } from '../../i18n';
 
 type BadgeSeverity = 'ok' | 'warning' | 'critical' | 'offline' | 'pending' | 'info';
 
@@ -9,6 +10,7 @@ interface BadgeProps {
 }
 
 export const Badge: React.FC<BadgeProps> = ({ severity, label, className = '' }) => {
+  const { t } = useLocale();
   const getStyles = () => {
     switch (severity) {
       case 'ok':
@@ -31,17 +33,17 @@ export const Badge: React.FC<BadgeProps> = ({ severity, label, className = '' })
     if (label) return label;
     switch (severity) {
       case 'ok':
-        return 'STABLE';
+        return t('card.stable');
       case 'warning':
-        return 'ATTENTION';
+        return t('card.attention');
       case 'critical':
-        return 'CRITIQUE';
+        return t('card.critical');
       case 'offline':
-        return 'HORS-LIGNE';
+        return t('card.outage');
       case 'info':
-        return 'INFO';
+        return t('card.info');
       case 'pending':
-        return 'EN ATTENTE';
+        return t('card.pending');
     }
   };
 

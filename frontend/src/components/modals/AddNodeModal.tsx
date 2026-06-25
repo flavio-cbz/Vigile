@@ -310,7 +310,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
                   'whitespace-pre-wrap break-all select-all',
                   expired ? 'opacity-50' : '',
                 ].join(' ')}
-                aria-label="Commande de déploiement"
+                aria-label={t('add_node.deploy_command_aria')}
               >
                 {joinData.curl_command}
               </pre>

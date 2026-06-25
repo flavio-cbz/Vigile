@@ -24,6 +24,7 @@ import { useLocale } from '../../i18n';
 
 export const Sidebar: React.FC = () => {
   const { isAdmin, isOperator } = usePermission();
+  const { t } = useLocale();
   const copilotOpen = useUiStore((state) => state.copilotOpen);
   const user = useAuthStore((state) => state.user);
   const {
@@ -83,10 +84,10 @@ export const Sidebar: React.FC = () => {
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
-              {srv?.name || 'Serveur'}
+              {srv?.name || t('sidebar.server')}
             </div>
             <div className="text-[9px] font-mono text-text-3 truncate">
-              {srv?.hostname || 'Connecté'}
+              {srv?.hostname || t('sidebar.connected')}
             </div>
           </div>
         )}
@@ -170,7 +171,7 @@ export const Sidebar: React.FC = () => {
             </span>
           )}
           {!collapsed && item.dot && !isActive && (
-            <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-[0_0_4px_var(--color-accent-glow)]" title="Nouvelle activité" />
+            <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-[0_0_4px_var(--color-accent-glow)]" title={t("sidebar.new_activity")} />
           )}
           {collapsed && item.badge !== undefined && (
             <span className="absolute -top-1 -right-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-severity-warning text-white leading-none min-w-[14px] text-center shadow-md">
@@ -178,7 +179,7 @@ export const Sidebar: React.FC = () => {
             </span>
           )}
           {collapsed && item.dot && !isActive && (
-            <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-surface shadow-[0_0_4px_var(--color-accent-glow)]" title="Nouvelle activité" />
+            <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-accent border-2 border-surface shadow-[0_0_4px_var(--color-accent-glow)]" title={t("sidebar.new_activity")} />
           )}
 
           {/* Floating CSS Tooltip when collapsed */}
@@ -196,7 +197,7 @@ export const Sidebar: React.FC = () => {
         <div>
           {!collapsed && (
             <div className="text-[9px] font-bold text-text-3 uppercase tracking-widest px-4 pb-1.5 font-mono">
-              Navigation
+              {t('sidebar.navigation')}
             </div>
           )}
           <div className={`flex flex-col gap-1 ${collapsed ? 'items-center' : ''}`}>
@@ -262,7 +263,7 @@ export const Sidebar: React.FC = () => {
               <div className="w-7 h-7 rounded-md border border-accent/25 bg-accent-muted/15 flex items-center justify-center shadow-[0_0_8px_var(--color-accent-glow)] shrink-0">
                 <ShieldAlert className="w-3.5 h-3.5 text-accent" />
               </div>
-              <span className="font-bold text-xs uppercase tracking-widest font-mono">Vigile</span>
+              <span className="font-bold text-xs uppercase tracking-widest font-mono">{t('sidebar.brand')}</span>
             </Link>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -279,7 +280,7 @@ export const Sidebar: React.FC = () => {
             to="/settings"
             onClick={handleNavClick}
             className="p-3 border-t border-border-strong/30 shrink-0 block hover:bg-surface-hover/30 transition-colors duration-150"
-            title="Mon Profil & Paramètres"
+            title={t('sidebar.profile_settings')}
           >
             <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-surface-2/20 border border-border-strong/10">
               <div className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 ${
@@ -295,14 +296,14 @@ export const Sidebar: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
-                  {user?.username || 'Utilisateur'}
+                  {user?.username || t('sidebar.default_username')}
                 </div>
                 <div className={`text-[8px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
                   isAdmin
                     ? 'text-accent border-accent/20 bg-accent-muted/5'
                     : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
                 }`}>
-                  {user?.role || 'visiteur'}
+                  {user?.role || t('sidebar.default_role')}
                 </div>
               </div>
             </div>
@@ -334,7 +335,7 @@ export const Sidebar: React.FC = () => {
             </div>
             {!collapsed && (
               <span className="font-bold text-xs xl:text-sm uppercase tracking-widest font-mono">
-                Vigile
+                {t('sidebar.brand')}
               </span>
             )}
           </Link>
@@ -352,7 +353,7 @@ export const Sidebar: React.FC = () => {
           className={`border-t border-border-strong/30 shrink-0 block hover:bg-surface-hover/30 transition-colors duration-150 group relative ${
             collapsed ? 'p-2.5' : 'p-3 xl:p-4'
           }`}
-          title={collapsed ? undefined : "Mon Profil & Paramètres"}
+          title={collapsed ? undefined : t("sidebar.profile_settings")}
         >
           <div className={`flex items-center gap-2.5 xl:gap-3 rounded-lg ${
             collapsed ? 'justify-center' : 'px-2 py-1.5 bg-surface-2/20 border border-border-strong/10'
@@ -374,14 +375,14 @@ export const Sidebar: React.FC = () => {
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] xl:text-[12.5px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
-                  {user?.username || 'Utilisateur'}
+                  {user?.username || t('sidebar.default_username')}
                 </div>
                 <div className={`text-[8px] xl:text-[9.5px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
                   isAdmin
                     ? 'text-accent border-accent/20 bg-accent-muted/5'
                     : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
                 }`}>
-                  {user?.role || 'visiteur'}
+                  {user?.role || t('sidebar.default_role')}
                 </div>
               </div>
             )}
@@ -390,7 +391,7 @@ export const Sidebar: React.FC = () => {
           {/* Floating CSS Tooltip when collapsed */}
           {collapsed && (
             <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 rounded bg-surface-2 border border-border-strong/70 text-text-1 text-[10px] font-medium tracking-wide whitespace-nowrap shadow-lg pointer-events-none opacity-0 translate-x-[-4px] group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-150 z-50 uppercase font-mono">
-              {user?.username || 'Utilisateur'} ({user?.role || 'visiteur'})
+              {user?.username || t("sidebar.default_username")} ({user?.role || t("sidebar.default_role")})
             </div>
           )}
         </Link>
@@ -400,7 +401,7 @@ export const Sidebar: React.FC = () => {
       <button
         onClick={toggleSidebarCollapse}
         className="absolute top-7 right-0 translate-x-1/2 z-50 w-6 h-6 rounded-full border border-border-strong/80 bg-surface-2/95 backdrop-blur-md flex items-center justify-center text-text-3 hover:text-text-1 hover:border-accent/40 shadow-[0_2px_8px_rgba(0,0,0,0.3)] hover:scale-105 cursor-pointer transition-all duration-200"
-        title={collapsed ? 'Étendre la sidebar' : 'Réduire la sidebar'}
+        title={collapsed ? t('sidebar.toggle_expand') : t('sidebar.toggle_collapse')}
       >
         {collapsed ? (
           <ChevronsRight className="w-3 h-3 text-accent" />

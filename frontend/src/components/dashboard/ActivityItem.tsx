@@ -36,6 +36,7 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
   details,
   nodeId,
 }) => {
+  const { t } = useLocale();
   const actUpper = action.toUpperCase();
 
   const getActionIcon = () => {
@@ -89,55 +90,47 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
   const getCleanActionLabel = () => {
     switch (actUpper) {
       case 'USER_LOGIN':
-        return 'Connexion';
+        return t('activity.user_login');
       case 'USER_LOGOUT':
-        return 'Déconnexion';
+        return t('activity.user_logout');
       case 'USER_CHANGE_PASSWORD':
-        return 'MDP Modifié';
+        return t('activity.user_change_password');
       case 'REFRESH_THEFT_DETECTED':
-        return 'Vol de Token détecté';
+        return t('activity.refresh_theft');
       case 'PROPOSAL_APPROVED':
-        return 'Proposition acceptée';
+        return t('activity.proposal_approved');
       case 'PROPOSAL_REJECTED':
-        return 'Proposition rejetée';
+        return t('activity.proposal_rejected');
       case 'GENERATE_JOIN_TOKEN':
-        return 'Token d\'enrôlement';
+        return t('activity.generate_token');
       case 'REVOKE_NODE':
-        return 'Serveur révoqué';
+        return t('activity.revoke_node');
       case 'NODE_ENROLLED':
-        return 'Nouveau serveur enrôlé';
+        return t('activity.node_enrolled');
       case 'NODE_RECONNECTED':
-        return 'Serveur reconnecté';
+        return t('activity.node_reconnected');
       case 'NODE_LOST':
-        return 'Serveur HORS-LIGNE';
+        return t('activity.node_lost');
       case 'NODE_STALE':
-        return 'Serveur inactif (Stale)';
+        return t('activity.node_stale');
       case 'RESTART_SERVICE':
-        return 'Service redémarré';
       case 'STOP_SERVICE':
-        return 'Service stoppé';
       case 'START_SERVICE':
-        return 'Service démarré';
+        return t('activity.update_config');
       case 'RESTART_CONTAINER':
-        return 'Conteneur redémarré';
       case 'STOP_CONTAINER':
-        return 'Conteneur stoppé';
       case 'START_CONTAINER':
-        return 'Conteneur démarré';
+        return t('activity.generic_action');
       case 'UPLOAD_PLUGIN':
-        return 'Plugin téléversé';
       case 'CONFIGURE_PLUGIN':
-        return 'Plugin configuré';
       case 'TOGGLE_PLUGIN':
-        return 'Plugin activé/désactivé';
       case 'DELETE_PLUGIN':
-        return 'Plugin supprimé';
+        return t('activity.generic_action');
       default:
         return action.replace(/_/g, ' ');
     }
   };
 
-  const { t } = useLocale();
   const friendlyText = formatAuditText(
     { action, actor, user_id: userId || actor, details },
     t
@@ -155,14 +148,14 @@ export const ActivityItem: React.FC<ActivityItemProps> = ({
               {getCleanActionLabel()}
             </span>
             <span className="text-text-3 text-[10px]">
-              par {actor || 'système'}
+              {t('activity.by_actor', { actor: actor || t('activity.by_system') })}
             </span>
             {nodeId && (
               <span
                 className="inline-block text-[8.5px] font-bold tracking-wide uppercase bg-surface-3 px-1.5 py-0.5 rounded border border-border text-text-3 font-interface"
                 title={nodeId}
               >
-                Node: {nodeId.substring(0, 8)}…
+                {t('activity.node_id', { id: nodeId.substring(0, 8) })}
               </span>
             )}
           </div>

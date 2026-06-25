@@ -1,19 +1,20 @@
+import { t as translate } from '../i18n';
+
 /**
  * Formats a heartbeat timestamp into a human-readable duration since the node went offline.
  * e.g., "3h42", "42m", "2j 5h"
  */
 export const formatOfflineDuration = (timestamp: number | null | undefined): string => {
   if (!timestamp) {
-    return 'inconnu';
+    return translate('common.unknown');
   }
 
-  // If Unix timestamp is in seconds, convert to milliseconds
   const parsedTime = timestamp < 9999999999 ? timestamp * 1000 : timestamp;
   const now = Date.now();
   const diffMs = now - parsedTime;
 
   if (diffMs <= 0) {
-    return "à l'instant";
+    return translate('common.just_now');
   }
 
   const seconds = Math.floor(diffMs / 1000);
@@ -43,7 +44,7 @@ export const formatOfflineDuration = (timestamp: number | null | undefined): str
  */
 export const formatDateTime = (timestamp: number | null | undefined): string => {
   if (!timestamp) {
-    return 'inconnu';
+    return translate('common.unknown');
   }
   const parsedTime = timestamp < 9999999999 ? timestamp * 1000 : timestamp;
   const date = new Date(parsedTime);

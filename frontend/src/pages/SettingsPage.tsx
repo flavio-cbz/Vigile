@@ -49,10 +49,10 @@ interface SystemSettingsResponse {
 }
 
 export const SettingsPage: React.FC = () => {
-  usePageTitle('Paramètres');
+  const { t, locale, setLocale } = useLocale();
+  usePageTitle(t('page_title.settings'));
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useUiStore();
-  const { locale, setLocale } = useLocale();
   const availableThemes = Object.keys(themes) as ThemeKey[];
 
   const [activeTab, setActiveTab] = useState<'profile' | 'system'>('profile');
@@ -98,10 +98,11 @@ export const SettingsPage: React.FC = () => {
         })
       });
       if (data) {
-        setLlmFeedback({ type: 'success', msg: data.message || 'La configuration LLM est valide.' });
+        setLlmFeedback({ type: 'success', msg: data.message || t('settings.llm_valid') });
       }
-    } catch (err: Error) {
-      setLlmFeedback({ type: 'error', msg: err.message || 'Une erreur de test est survenue.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('settings.llm_test_error');
+      setLlmFeedback({ type: 'error', msg: message });
     } finally {
       setLlmTesting(false);
     }
@@ -123,10 +124,11 @@ export const SettingsPage: React.FC = () => {
       });
       if (data) {
         setSystemSettings(data);
-        setLlmFeedback({ type: 'success', msg: 'Les paramètres LLM ont été enregistrés et appliqués.' });
+        setLlmFeedback({ type: 'success', msg: t('settings.llm_saved') });
       }
-    } catch (err: Error) {
-      setLlmFeedback({ type: 'error', msg: err.message || "Erreur lors de l'enregistrement." });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('settings.llm_save_error');
+      setLlmFeedback({ type: 'error', msg: message });
     } finally {
       setLlmSaving(false);
     }
@@ -141,8 +143,9 @@ export const SettingsPage: React.FC = () => {
       if (data) {
         setSystemSettings(data);
       }
-    } catch (err: Error) {
-      setSystemError(err.message || "Impossible de charger les paramètres système.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('settings.load_error');
+      setSystemError(message);
     } finally {
       setSystemLoading(false);
     }
@@ -159,12 +162,12 @@ export const SettingsPage: React.FC = () => {
     setPasswordFeedback(null);
 
     if (newPassword.length < 8) {
-      setPasswordFeedback({ type: 'error', msg: 'Le nouveau mot de passe doit faire au moins 8 caractères.' });
+      setPasswordFeedback({ type: 'error', msg: t('settings.password_minlength') });
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setPasswordFeedback({ type: 'error', msg: 'La confirmation du mot de passe ne correspond pas.' });
+      setPasswordFeedback({ type: 'error', msg: t('settings.password_mismatch') });
       return;
     }
 
@@ -178,15 +181,16 @@ export const SettingsPage: React.FC = () => {
         })
       });
 
-      setPasswordFeedback({ type: 'success', msg: 'Votre mot de passe a été mis à jour. Déconnexion automatique...' });
+      setPasswordFeedback({ type: 'success', msg: t('settings.password_updated') });
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => {
         logout();
       }, 2000);
-    } catch (err: Error) {
-      setPasswordFeedback({ type: 'error', msg: err.message || 'Mot de passe actuel invalide.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('settings.password_invalid');
+      setPasswordFeedback({ type: 'error', msg: message });
     } finally {
       setPasswordLoading(false);
     }
@@ -212,10 +216,10 @@ export const SettingsPage: React.FC = () => {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in font-interface">
       <div>
         <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
-          Paramètres du Système
+          {t('settings.system_title')}
         </h1>
         <p className="text-text-3 text-[10px] uppercase font-semibold tracking-wider mt-0.5 font-sans">
-          Gérez votre profil utilisateur et supervisez la configuration du serveur Master
+          {t('settings.system_subtitle')}
         </p>
       </div>
 
@@ -228,7 +232,7 @@ export const SettingsPage: React.FC = () => {
               : 'border-transparent text-text-2 hover:text-text-1'
           }`}
         >
-          Profil & Apparence
+          {t('settings.profile_appearance')}
         </button>
         {can('view-settings') && (
           <button
@@ -239,14 +243,14 @@ export const SettingsPage: React.FC = () => {
                 : 'border-transparent text-text-2 hover:text-text-1'
             }`}
           >
-            Configuration Master
+            {t('settings.master_config')}
           </button>
         )}
       </div>
 
       {!can('view-settings') && (
         <p className="text-[9px] text-text-3 mt-2 font-interface">
-          La configuration système est réservée aux administrateurs et opérateurs.
+          {t('settings.master_config_locked')}
         </p>
       )}
 
@@ -257,7 +261,7 @@ export const SettingsPage: React.FC = () => {
               <div className="p-5 border border-border rounded-xl bg-surface shadow">
                 <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider mb-4 flex items-center gap-2">
                   <User className="w-4 h-4 text-accent" />
-                  <span>Votre Profil</span>
+                  <span>{t('settings.your_profile')}</span>
                 </h3>
 
                 <div className="flex items-center gap-3 p-3 bg-surface-2 border border-border rounded">
@@ -266,21 +270,21 @@ export const SettingsPage: React.FC = () => {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-text-1 truncate">{user?.username}</p>
-                    <p className="text-[9px] font-mono text-accent uppercase tracking-wider mt-0.5">Rôle : {user?.role}</p>
+                    <p className="text-[9px] font-mono text-accent uppercase tracking-wider mt-0.5">{t('sidebar.role_label', { role: user?.role || '' })}</p>
                   </div>
                 </div>
 
                 <div className="mt-4 space-y-2.5 text-xs font-sans">
                   <div className="flex justify-between items-center py-1.5 border-b border-border/40">
-                    <span className="text-text-3 font-medium">Identifiant unique</span>
+                    <span className="text-text-3 font-medium">{t('settings.user_id')}</span>
                     <span className="font-mono text-text-2 select-all break-all text-right ml-2 text-[10.5px]" title={user?.user_id}>
                       {user?.user_id?.substring(0, 8)}…
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-1.5">
-                    <span className="text-text-3 font-medium">Mode démo</span>
+                    <span className="text-text-3 font-medium">{t('settings.demo_mode')}</span>
                     <span className="font-bold text-text-2">
-                      {user?.username === 'guest' ? 'ACTIVÉ' : 'DÉSACTIVÉ'}
+                      {user?.username === 'guest' ? t('settings.enabled') : t('settings.disabled')}
                     </span>
                   </div>
                 </div>
@@ -289,12 +293,12 @@ export const SettingsPage: React.FC = () => {
               <div className="p-5 border border-border rounded-xl bg-surface shadow">
                 <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider mb-4 flex items-center gap-2">
                   <Palette className="w-4 h-4 text-accent" />
-                  <span>Personnalisation Visuelle</span>
+                  <span>{t('settings.visual_customization')}</span>
                 </h3>
 
                 <div className="space-y-3 font-sans">
                   <label className="block text-[10px] font-bold text-text-3 uppercase tracking-wider">
-                    Thème Actif
+                    {t('settings.active_theme')}
                   </label>
                   <div className="grid grid-cols-2 gap-2 font-interface">
                     {availableThemes.map((t) => (
@@ -331,7 +335,7 @@ export const SettingsPage: React.FC = () => {
                   <div className="border-t border-border/40 my-4" />
 
                   <label className="block text-[10px] font-bold text-text-3 uppercase tracking-wider mb-1.5 font-interface">
-                    Langue de l'interface
+                    {t('settings.language')}
                   </label>
                   <div className="flex gap-2 font-interface">
                     <button
@@ -342,7 +346,7 @@ export const SettingsPage: React.FC = () => {
                           : 'border-border bg-surface text-text-3 hover:text-text-2 hover:bg-surface-2'
                       }`}
                     >
-                      Français (FR)
+                      {t('settings.lang_fr_full')}
                     </button>
                     <button
                       onClick={() => setLocale('en')}
@@ -352,7 +356,7 @@ export const SettingsPage: React.FC = () => {
                           : 'border-border bg-surface text-text-3 hover:text-text-2 hover:bg-surface-2'
                       }`}
                     >
-                      English (EN)
+                      {t('settings.lang_en_full')}
                     </button>
                   </div>
                 </div>
@@ -363,7 +367,7 @@ export const SettingsPage: React.FC = () => {
               <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4">
                 <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2">
                   <Key className="w-4 h-4 text-accent" />
-                  <span>Modifier mon mot de passe</span>
+                  <span>{t('settings.change_password')}</span>
                 </h3>
 
                 {passwordFeedback && (
@@ -378,13 +382,13 @@ export const SettingsPage: React.FC = () => {
 
                 {user?.username === 'guest' ? (
                   <div className="p-4 border border-dashed border-border bg-surface-2 rounded text-xs text-text-3 font-sans leading-relaxed">
-                    La modification de sécurité est verrouillée pour le compte de démonstration (`guest`).
+                    {t('settings.password_locked')}
                   </div>
                 ) : (
                   <form onSubmit={handlePasswordChange} className="space-y-4 font-sans text-xs">
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-extrabold text-text-3 uppercase tracking-wider font-interface">
-                        Mot de passe actuel
+                        {t('settings.current_password')}
                       </label>
                       <input
                         type="password"
@@ -392,7 +396,7 @@ export const SettingsPage: React.FC = () => {
                         disabled={passwordLoading}
                         value={oldPassword}
                         onChange={(e) => setOldPassword(e.target.value)}
-                        placeholder="Mot de passe actuel..."
+                        placeholder={`${t('settings.current_password')}...`}
                         className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
                       />
                     </div>
@@ -400,7 +404,7 @@ export const SettingsPage: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <label className="block text-[10px] font-extrabold text-text-3 uppercase tracking-wider font-interface">
-                          Nouveau mot de passe
+                          {t('settings.new_password')}
                         </label>
                         <input
                           type="password"
@@ -408,13 +412,13 @@ export const SettingsPage: React.FC = () => {
                           disabled={passwordLoading}
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="Min. 8 caractères"
+                          placeholder={t('settings.new_password_placeholder')}
                           className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
                         />
                       </div>
                       <div className="space-y-1.5">
                         <label className="block text-[10px] font-extrabold text-text-3 uppercase tracking-wider font-interface">
-                          Confirmer
+                          {t('settings.confirm')}
                         </label>
                         <input
                           type="password"
@@ -422,7 +426,7 @@ export const SettingsPage: React.FC = () => {
                           disabled={passwordLoading}
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="Saisissez à nouveau"
+                          placeholder={t('settings.confirm_password_placeholder')}
                           className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
                         />
                       </div>
@@ -438,7 +442,7 @@ export const SettingsPage: React.FC = () => {
                       ) : (
                         <Lock className="w-3.5 h-3.5" />
                       )}
-                      <span>Enregistrer</span>
+                      <span>{t('settings.save_password')}</span>
                     </button>
                   </form>
                 )}
@@ -452,7 +456,7 @@ export const SettingsPage: React.FC = () => {
             {systemLoading && (
               <div className="flex flex-col items-center justify-center py-12 gap-3 text-text-3 text-xs">
                 <Spinner size="sm" />
-                <span>RÉCUPÉRATION DE L'HISTORIQUE SYSTEM...</span>
+                <span>{t('settings.history_loading')}</span>
               </div>
             )}
 
@@ -468,7 +472,7 @@ export const SettingsPage: React.FC = () => {
                 <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4">
                   <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2 border-b border-border pb-2 font-interface">
                     <Cpu className="w-4 h-4 text-accent" />
-                    <span>Configuration Copilot IA</span>
+                    <span>{t('settings.copilot_config')}</span>
                   </h3>
 
                   {llmFeedback && (
@@ -485,7 +489,7 @@ export const SettingsPage: React.FC = () => {
                     <div className="p-3.5 rounded border border-warning/20 bg-warning-subtle text-xs text-warning leading-relaxed flex items-start gap-2.5">
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                       <span>
-                        La modification LLM est désactivée pour le compte de démonstration (`guest`).
+                        {t('settings.llm_locked')}
                       </span>
                     </div>
                   ) : null}
@@ -493,7 +497,7 @@ export const SettingsPage: React.FC = () => {
                   <form onSubmit={handleSaveLlmSettings} className="space-y-4 text-xs">
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-extrabold text-text-3 uppercase tracking-wider font-interface">
-                        Modèle de Langage
+                        {t('settings.llm_model')}
                       </label>
                       <input
                         type="text"
@@ -501,14 +505,14 @@ export const SettingsPage: React.FC = () => {
                         disabled={llmSaving || llmTesting || user?.username === 'guest' || !isAdmin}
                         value={llmModel}
                         onChange={(e) => setLlmModel(e.target.value)}
-                        placeholder="Ex: gpt-4o-mini"
+                        placeholder={t('settings.llm_model_placeholder')}
                         className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 font-mono focus:outline-none placeholder:text-text-3"
                       />
                     </div>
 
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-extrabold text-text-3 uppercase tracking-wider font-interface">
-                        URL Endpoint API
+                        {t('settings.llm_endpoint')}
                       </label>
                       <input
                         type="text"
@@ -516,14 +520,14 @@ export const SettingsPage: React.FC = () => {
                         disabled={llmSaving || llmTesting || user?.username === 'guest' || !isAdmin}
                         value={llmBaseUrl}
                         onChange={(e) => setLlmBaseUrl(e.target.value)}
-                        placeholder="Ex: https://api.openai.com/v1"
+                        placeholder={t('settings.llm_endpoint_placeholder')}
                         className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 font-mono focus:outline-none placeholder:text-text-3"
                       />
                     </div>
 
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-extrabold text-text-3 uppercase tracking-wider font-interface">
-                        Clé API
+                        {t('settings.llm_api_key')}
                       </label>
                       <div className="relative">
                         <input
@@ -532,7 +536,7 @@ export const SettingsPage: React.FC = () => {
                           disabled={llmSaving || llmTesting || user?.username === 'guest' || !isAdmin}
                           value={llmApiKey}
                           onChange={(e) => setLlmApiKey(e.target.value)}
-                          placeholder="Clé secrète d'authentification..."
+                          placeholder={t('settings.llm_api_key_placeholder')}
                           className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 pr-10 text-text-1 font-mono focus:outline-none placeholder:text-text-3"
                         />
                         <button
@@ -558,7 +562,7 @@ export const SettingsPage: React.FC = () => {
                         ) : (
                           <RefreshCw className="w-3.5 h-3.5" />
                         )}
-                        <span>Tester la connexion</span>
+                        <span>{t('settings.llm_test')}</span>
                       </button>
 
                       <button
@@ -571,7 +575,7 @@ export const SettingsPage: React.FC = () => {
                         ) : (
                           <Lock className="w-3.5 h-3.5" />
                         )}
-                        <span>Enregistrer</span>
+                        <span>{t('settings.save_password')}</span>
                       </button>
                     </div>
                   </form>
@@ -580,25 +584,25 @@ export const SettingsPage: React.FC = () => {
                 <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4">
                   <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2 border-b border-border pb-2 font-interface">
                     <ShieldCheck className="w-4 h-4 text-accent" />
-                    <span>Sessions & Sécurité</span>
+                    <span>{t('settings.sessions_security')}</span>
                   </h3>
                   <div className="space-y-3 text-xs">
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">Enforcer le HTTPS</span>
+                      <span className="text-text-3">{t('settings.enforce_https')}</span>
                       <span className={`font-bold ${systemSettings.enforce_https ? 'text-severity-ok' : 'text-severity-warning'}`}>
-                        {systemSettings.enforce_https ? 'ACTIF' : 'INACTIF'}
+                        {systemSettings.enforce_https ? t('settings.active') : t('settings.inactive')}
                       </span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">Signature JWT</span>
+                      <span className="text-text-3">{t('settings.jwt_signature')}</span>
                       <span className="font-mono text-text-1 font-semibold">{systemSettings.jwt_algorithm}</span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">TTL Access Token</span>
+                      <span className="text-text-3">{t('settings.access_ttl')}</span>
                       <span className="font-mono text-text-1 font-semibold">{formatDuration(systemSettings.jwt_access_token_ttl)}</span>
                     </div>
                     <div className="flex justify-between items-center py-1">
-                      <span className="text-text-3">TTL Refresh Token</span>
+                      <span className="text-text-3">{t('settings.refresh_ttl')}</span>
                       <span className="font-mono text-text-1 font-semibold">{formatDuration(systemSettings.jwt_refresh_token_ttl)}</span>
                     </div>
                   </div>
@@ -607,35 +611,35 @@ export const SettingsPage: React.FC = () => {
                 <div className="p-5 border border-border rounded-xl bg-surface shadow space-y-4 md:col-span-2">
                   <h3 className="text-xs font-bold text-text-1 uppercase tracking-wider flex items-center gap-2 border-b border-border pb-2 font-interface">
                     <Database className="w-4 h-4 text-accent" />
-                    <span>Spécifications Techniques Master</span>
+                    <span>{t('settings.master_specs')}</span>
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-xs">
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">Hôte d'Écoute</span>
+                      <span className="text-text-3">{t('settings.listen_host')}</span>
                       <span className="font-mono text-text-1 font-semibold">{systemSettings.host}</span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">Port d'Écoute</span>
+                      <span className="text-text-3">{t('settings.listen_port')}</span>
                       <span className="font-mono text-text-1 font-semibold">{systemSettings.port}</span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">Mode Débogage</span>
+                      <span className="text-text-3">{t('settings.debug_mode')}</span>
                       <span className={`font-semibold ${systemSettings.debug ? 'text-severity-warning' : 'text-severity-ok'}`}>
-                        {systemSettings.debug ? 'ACTIF (debug)' : 'DESACTIVÉ'}
+                        {systemSettings.debug ? t('settings.debug_active') : t('settings.inactive')}
                       </span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border/40">
-                      <span className="text-text-3">Uptime Heartbeat</span>
+                      <span className="text-text-3">{t('settings.heartbeat_uptime')}</span>
                       <span className="font-mono text-text-1 font-semibold">{systemSettings.heartbeat_interval}s</span>
                     </div>
                     <div className="flex justify-between items-start py-1 border-b border-border/40 sm:col-span-2">
-                      <span className="text-text-3 shrink-0 mr-4">Database SQLite</span>
+                      <span className="text-text-3 shrink-0 mr-4">{t('settings.sqlite_db')}</span>
                       <span className="font-mono text-text-2 break-all text-right font-medium select-all" title={systemSettings.database_path}>
                         {systemSettings.database_path || '—'}
                       </span>
                     </div>
                     <div className="flex justify-between items-start py-1 sm:col-span-2">
-                      <span className="text-text-3 shrink-0 mr-4">Master URL externe</span>
+                      <span className="text-text-3 shrink-0 mr-4">{t('settings.external_url')}</span>
                       <span className="font-mono text-text-2 break-all text-right font-medium select-all" title={systemSettings.master_url}>
                         {systemSettings.master_url || '—'}
                       </span>

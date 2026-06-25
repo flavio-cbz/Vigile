@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { LoginForm } from '../components/auth/LoginForm';
 import { ShieldAlert, KeyRound, Loader2, Cpu, Activity, Terminal as TerminalIcon } from 'lucide-react';
 import { api } from '../hooks/useApi';
+import { useLocale } from '../i18n';
 
 const ParticleCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -111,6 +112,7 @@ const ParticleCanvas: React.FC = () => {
 };
 
 const BootLogs: React.FC = () => {
+  const { t } = useLocale();
   const [logs, setLogs] = useState<string[]>([]);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -156,7 +158,7 @@ const BootLogs: React.FC = () => {
     <div className="font-mono text-[11px] text-text-3 leading-relaxed p-4 bg-black/40 border border-border rounded-lg h-44 overflow-hidden flex flex-col justify-end relative shadow-inner">
       <div className="absolute top-2 left-3 flex items-center gap-1.5 text-[8px] text-text-3 uppercase tracking-wider font-semibold pointer-events-none select-none">
         <TerminalIcon className="w-3 h-3 text-accent animate-pulse" />
-        <span>Vigile System Kernel logs</span>
+        <span>{t('login.boot_logs_title')}</span>
       </div>
       <div ref={ref} className="overflow-y-auto max-h-[140px] space-y-1 pr-1 no-scrollbar">
         {logs.map((log, i) => {
@@ -171,6 +173,7 @@ const BootLogs: React.FC = () => {
 };
 
 export const LoginPage: React.FC = () => {
+  const { t } = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
   const loginStore = useAuthStore((state) => state.login);
@@ -200,7 +203,7 @@ export const LoginPage: React.FC = () => {
       });
 
       if (!data) {
-        throw new Error('Identifiant ou mot de passe invalide.');
+        throw new Error(t('login.error_invalid'));
       }
       const { access_token, refresh_token } = data;
 
@@ -229,7 +232,7 @@ export const LoginPage: React.FC = () => {
       }
 
       if (!meData) {
-        throw new Error('Erreur de validation de la session.');
+        throw new Error(t('login.error_session_validation'));
       }
 
       loginStore(access_token, refresh_token, {
@@ -250,12 +253,12 @@ export const LoginPage: React.FC = () => {
     if (isLoading) return;
 
     if (newPassword !== confirmPassword) {
-      setError('Les mots de passe ne correspondent pas.');
+      setError(t('login.error_password_mismatch'));
       return;
     }
 
     if (newPassword.length < 8) {
-      setError('Le mot de passe doit faire au moins 8 caractères.');
+      setError(t('login.error_password_minlength'));
       return;
     }
 
@@ -306,7 +309,7 @@ export const LoginPage: React.FC = () => {
           <div>
             <div className="font-serif text-lg font-bold text-text-1 tracking-wide">Vigile</div>
             <div className="text-[8px] font-extrabold text-accent uppercase tracking-widest mt-0.5 font-interface">
-              Homelab supervision console
+              {t('login.brand_subtitle')}
             </div>
           </div>
         </div>
@@ -314,34 +317,34 @@ export const LoginPage: React.FC = () => {
         <div className="z-10 max-w-lg my-auto space-y-8 animate-fade-in">
           <div>
             <span className="text-[9px] font-extrabold text-accent uppercase tracking-widest bg-accent-muted px-2 py-0.5 border border-accent/15 rounded font-interface">
-              Accès Opérationnel Sécurisé
+              {t('login.badge_secure_access')}
             </span>
             <h1 className="font-serif text-3xl font-bold text-text-1 tracking-wide mt-3 leading-snug">
-              Supervision visuelle intuitive et copilote IA autonome.
+              {t('login.hero_title')}
             </h1>
             <p className="text-xs text-text-2 mt-3 leading-relaxed font-sans">
-              Vigile repense le monitoring de homelab : les métriques complexes sont résumées en diagnostics humains immédiats, assistées d'une IA capable de corriger les dysfonctionnements sous votre contrôle strict.
+              {t('login.hero_description')}
             </p>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title="La chaîne d'audit SHA-256 empêche toute modification non autorisée">
+            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title={t('login.feature_audit_tooltip')}>
               <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
-                <Activity className="w-2.5 h-2.5 text-accent" /> Chaîne d'Audit
+                <Activity className="w-2.5 h-2.5 text-accent" /> {t('login.feature_audit')}
               </span>
-              <span className="text-xs font-bold text-severity-ok font-interface" title="Toutes les données sont infalsifiables et horodatées">INFALSIFIABLE</span>
+              <span className="text-xs font-bold text-severity-ok font-interface" title="Toutes les données sont infalsifiables et horodatées">{t('login.feature_audit_value')}</span>
             </div>
-            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title="Chiffrement de clés Ed25519 + AES pour une sécurité maximale">
+            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title={t('login.feature_encryption_tooltip')}>
               <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
-                <Cpu className="w-2.5 h-2.5 text-accent" /> Chiffrement
+                <Cpu className="w-2.5 h-2.5 text-accent" /> {t('login.feature_encryption')}
               </span>
-              <span className="text-xs font-bold text-text-1 font-interface font-mono" title="Chiffrement asymmetric Ed25519 avec AES-256-GCM">Ed25519-AES</span>
+              <span className="text-xs font-bold text-text-1 font-interface font-mono" title="Chiffrement asymmetric Ed25519 avec AES-256-GCM">{t('login.feature_encryption_value')}</span>
             </div>
-            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title="WebSocket natif sans bibliothèque tierce, conforme à la RFC 6455">
+            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title={t('login.feature_websocket_tooltip')}>
               <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
-                <TerminalIcon className="w-2.5 h-2.5 text-accent" /> WebSocket
+                <TerminalIcon className="w-2.5 h-2.5 text-accent" /> {t('login.feature_websocket')}
               </span>
-              <span className="text-xs font-bold text-accent font-interface" title="WebSocket natif sans bibliothèque tierce (RFC 6455)">RFC 6455 PURE</span>
+              <span className="text-xs font-bold text-accent font-interface" title="WebSocket natif sans bibliothèque tierce (RFC 6455)">{t('login.feature_websocket_value')}</span>
             </div>
           </div>
         </div>
@@ -364,10 +367,10 @@ export const LoginPage: React.FC = () => {
               <ShieldAlert className="w-6 h-6 text-accent animate-pulse" />
             </div>
             <h2 className="font-serif text-xl font-bold text-text-1 tracking-wide">
-              {mustChangePassword ? 'Nouveau mot de passe' : 'Connexion'}
+              {mustChangePassword ? t('login.form_title_change_password') : t('login.form_title')}
             </h2>
             <p className="text-[9px] font-extrabold text-accent uppercase tracking-widest mt-1.5 font-interface">
-              Console Vigile
+              {t('login.form_subtitle')}
             </p>
           </div>
 
@@ -384,12 +387,12 @@ export const LoginPage: React.FC = () => {
             <form onSubmit={handlePasswordChange} className="space-y-4 font-sans text-xs">
               <div className="mb-4 text-xs text-severity-warning bg-severity-warning/10 border border-severity-warning/20 p-3.5 rounded-lg font-medium flex items-start gap-2 leading-relaxed">
                 <div className="w-1.5 h-1.5 rounded-full bg-severity-warning mt-1.5 animate-pulse shrink-0" />
-                <span>Pour des raisons de sécurité, vous devez changer votre mot de passe administrateur lors de votre première connexion.</span>
+                <span>{t('login.must_change_password_message')}</span>
               </div>
 
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-extrabold text-text-2 uppercase tracking-wider font-interface" htmlFor="newPassword">
-                  Nouveau mot de passe
+                  {t('login.new_password_label')}
                 </label>
                 <input
                   id="newPassword"
@@ -398,7 +401,7 @@ export const LoginPage: React.FC = () => {
                   disabled={isLoading}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min. 8 caractères"
+                  placeholder={t('login.new_password_placeholder')}
                   className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
                   autoFocus
                 />
@@ -406,7 +409,7 @@ export const LoginPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-extrabold text-text-2 uppercase tracking-wider font-interface" htmlFor="confirmPassword">
-                  Confirmer le mot de passe
+                  {t('login.confirm_password_label')}
                 </label>
                 <input
                   id="confirmPassword"
@@ -415,7 +418,7 @@ export const LoginPage: React.FC = () => {
                   disabled={isLoading}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Saisissez à nouveau"
+                  placeholder={t('login.confirm_password_placeholder')}
                   className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
                 />
               </div>
@@ -430,7 +433,7 @@ export const LoginPage: React.FC = () => {
                   }}
                   className="flex-1 border border-border hover:border-border-strong px-4 py-2 text-[10px] font-bold font-interface uppercase tracking-wider rounded cursor-pointer transition-colors"
                 >
-                  Retour
+                  {t('login.cancel_button')}
                 </button>
                 <button
                   type="submit"
@@ -442,7 +445,7 @@ export const LoginPage: React.FC = () => {
                   ) : (
                     <>
                       <KeyRound className="w-3.5 h-3.5" />
-                      <span>Valider</span>
+                      <span>{t('login.validate_button')}</span>
                     </>
                   )}
                 </button>
@@ -451,7 +454,7 @@ export const LoginPage: React.FC = () => {
           )}
 
           <div className="text-center text-[8px] text-text-3 mt-8 select-none tracking-widest font-mono">
-            VIGILE KERNEL CONSOLE: v0.2.0-sprint3
+            {t('login.footer_version')}
           </div>
         </div>
       </div>

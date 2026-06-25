@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface EmptyStateProps {
-  icon: React.ReactNode;
+  icon: React.ReactElement;
   title: string;
   description: string;
   action?: {
@@ -24,11 +24,14 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     <div className={`card ${compact ? 'py-6 px-4' : 'py-16 px-8'} ${className}`}>
       <div className="flex flex-col items-center justify-center text-center">
         <div className={`text-ink-muted opacity-45 ${compact ? 'mb-2.5' : 'mb-5'}`}>
-          {React.isValidElement(icon)
-            ? React.cloneElement(icon as React.ReactElement<{ className?: string }>, {
-                className: `${icon.props.className ?? ''} ${compact ? 'w-7 h-7' : 'w-12 h-12'}`,
-              })
-            : icon}
+          {(() => {
+            if (!React.isValidElement(icon)) return icon;
+            const el = icon as React.ReactElement<{ className?: string }>;
+            const existing = (el.props.className ?? '') as string;
+            return React.cloneElement(el, {
+              className: `${existing} ${compact ? 'w-7 h-7' : 'w-12 h-12'}`,
+            });
+          })()}
         </div>
         <h3 className={`text-ink-primary font-bold ${compact ? 'text-xs mb-1' : 'text-sm mb-2'}`}>
           {title}

@@ -25,9 +25,9 @@ interface AuditEntry {
 }
 
 export const AuditPage: React.FC = () => {
-  usePageTitle('Audit');
-  const { isAdmin } = usePermission();
   const { t } = useLocale();
+  usePageTitle(t('page_title.audit'));
+  const { isAdmin } = usePermission();
 
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,16 +72,17 @@ export const AuditPage: React.FC = () => {
       const data = await api<any>('/api/admin/audit-verify');
       if (data) {
         setVerifyResult(data);
-        useToastStore.getState().addToast('success', 'Intégrité vérifiée', 'La chaîne de hash est valide');
+        useToastStore.getState().addToast('success', t('audit.verify_success_title'), t('audit.verify_success_msg'));
       }
-    } catch (err: Error) {
+    } catch (err) {
       console.error('Chain verification error:', err);
+      const message = err instanceof Error ? err.message : "Impossible d'effectuer l'audit d'intégrité.";
       setVerifyResult({
         valid: false,
         total_entries: 0,
-        error: err.message || "Impossible d'effectuer l'audit d'intégrité.",
+        error: message,
       });
-      useToastStore.getState().addToast('error', 'Échec de vérification', 'Incohérence détectée dans la chaîne');
+      useToastStore.getState().addToast('error', t('audit.verify_failed_title'), t('audit.verify_failed_msg'));
     } finally {
       setVerifying(false);
     }
@@ -92,10 +93,10 @@ export const AuditPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
-            Registre d'Audit Cryptographique
+            {t('audit.page_title')}
           </h1>
           <p className="text-text-3 text-[10px] uppercase font-semibold tracking-wider mt-0.5 font-sans">
-            Grand livre des transactions sécurisé par une chaîne SHA-256
+            {t('audit.page_subtitle')}
           </p>
         </div>
 
@@ -110,11 +111,11 @@ export const AuditPage: React.FC = () => {
             ) : (
               <Shield className="w-4 h-4 text-text-1" />
             )}
-            <span>Vérifier l'intégrité</span>
+            <span>{t('audit.verify_button')}</span>
           </button>
         ) : (
           <div className="px-4 py-2 border border-dashed border-border rounded text-[10px] text-text-3 font-normal font-sans italic shrink-0">
-            Audit d'intégrité réservé aux administrateurs
+            {t('audit.verify_admin_only')}
           </div>
         )}
       </div>
@@ -150,7 +151,7 @@ export const AuditPage: React.FC = () => {
             onClick={() => setVerifyResult(null)}
             className="text-[10px] text-text-3 hover:text-text-1 font-bold font-interface uppercase"
           >
-            Masquer
+            {t('audit.hide')}
           </button>
         </div>
       )}
@@ -159,23 +160,23 @@ export const AuditPage: React.FC = () => {
         {loading && entries.length === 0 ? (
           <div className="py-20 text-center text-text-3 flex flex-col items-center justify-center gap-2">
             <Spinner size="sm" />
-            <span>INTERROGATION DU GRAND LIVRE D'AUDIT...</span>
+            <span>{t('audit.loading')}</span>
           </div>
         ) : entries.length === 0 ? (
           <div className="py-16 text-center text-text-3 border border-dashed border-border rounded-xl bg-surface/25 text-xs font-sans">
-            Aucun log d'audit disponible dans le système.
+            {t('audit.empty')}
           </div>
         ) : (
           <div className="border border-border rounded-xl bg-surface overflow-hidden shadow">
             <table className="w-full text-left border-collapse text-xs font-sans">
               <thead>
                 <tr className="bg-surface-2/45 border-b border-border text-[9px] font-extrabold font-interface tracking-widest text-text-3 uppercase sticky top-0 z-10">
-                  <th className="px-5 py-3 w-16">Séquence</th>
-                  <th className="px-5 py-3 w-32">Date</th>
-                  <th className="px-5 py-3 w-28">Auteur</th>
-                  <th className="px-5 py-3 w-40">Action executée</th>
-                  <th className="px-5 py-3">Cible et Détails</th>
-                  <th className="px-5 py-3 w-44 text-right">Signature Hash SHA-256</th>
+                  <th className="px-5 py-3 w-16">{t('audit.col_seq')}</th>
+                  <th className="px-5 py-3 w-32">{t('audit.col_date')}</th>
+                  <th className="px-5 py-3 w-28">{t('audit.col_actor')}</th>
+                  <th className="px-5 py-3 w-40">{t('audit.col_action')}</th>
+                  <th className="px-5 py-3">{t('audit.col_target')}</th>
+                  <th className="px-5 py-3 w-44 text-right">{t('audit.col_hash')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -202,7 +203,7 @@ export const AuditPage: React.FC = () => {
                       </p>
                       {entry.node_id && (
                         <span className="inline-block mt-0.5 text-[8.5px] font-bold tracking-wide uppercase bg-surface-3 px-1.5 py-0 rounded border border-border text-text-3 font-interface">
-                          Node: {entry.node_id.substring(0, 8)}…
+                          {t('activity.node_id', { id: entry.node_id.substring(0, 8) })}
                         </span>
                       )}
                     </td>
@@ -223,17 +224,17 @@ export const AuditPage: React.FC = () => {
               disabled={offset === 0}
               className="px-3 py-1.5 border border-border rounded bg-surface hover:bg-surface-2 text-text-2 hover:text-text-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              Précédent
+              {t('audit.prev')}
             </button>
             <span className="text-text-3 font-semibold">
-              Page {Math.floor(offset / limit) + 1} sur {Math.ceil(total / limit)} ({total} entrées)
+              {t('audit.page_info', { page: Math.floor(offset / limit) + 1, total: Math.ceil(total / limit), count: total })}
             </span>
             <button
               onClick={() => setOffset(offset + limit)}
               disabled={offset + limit >= total}
               className="px-3 py-1.5 border border-border rounded bg-surface hover:bg-surface-2 text-text-2 hover:text-text-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              Suivant
+              {t('audit.next')}
             </button>
           </div>
         )}

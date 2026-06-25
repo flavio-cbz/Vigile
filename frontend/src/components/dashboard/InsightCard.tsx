@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { InsightItem } from '../../store/uiStore';
+import { useLocale } from '../../i18n';
 import { InsightText } from '../primitives/InsightText';
 import { SeverityTag } from '../primitives/SeverityTag';
 import { Sparkles } from 'lucide-react';
@@ -17,6 +18,7 @@ export const InsightCard: React.FC<InsightCardProps> = ({
   nodeName,
   onDiagnose,
 }) => {
+  const { t } = useLocale();
   const [tick, setTick] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -29,15 +31,14 @@ export const InsightCard: React.FC<InsightCardProps> = ({
     return () => clearInterval(interval);
   }, [insight]);
 
-  // Compute headline and detail dynamically on render to avoid cascading state updates
   let headline = insight.headline;
   let detail = insight.detail;
   if (insight.type === 'offline' && insight.raw?.last_heartbeat) {
     const hbTime = insight.raw.last_heartbeat;
     const durationStr = formatOfflineDuration(hbTime);
-    headline = `Hors-ligne depuis ${durationStr}`;
-    const hbLabel = new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR');
-    detail = `Dernier contact le ${hbLabel}. Vérifiez la connectivité réseau.`;
+    headline = t('node_detail.offline_headline', { duration: durationStr });
+    const hbLabel = new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString();
+    detail = t('node_detail.offline_detail', { date: hbLabel });
   }
 
   let cardStatusClass = "card-accent";
@@ -99,7 +100,7 @@ export const InsightCard: React.FC<InsightCardProps> = ({
               }}
               className="ml-1.5 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[11px]"
             >
-              {isExpanded ? 'Moins' : 'Plus'}
+              {isExpanded ? t('common.less') : t('common.more')}
             </button>
           )}
         </p>
@@ -111,7 +112,7 @@ export const InsightCard: React.FC<InsightCardProps> = ({
         </span>
 
         <span className={`text-xs font-bold font-interface group-hover:underline flex items-center gap-0.5 ${actionText} shrink-0 whitespace-nowrap`}>
-          Diagnostiquer →
+          {t('insight_card.diagnose')}
         </span>
       </div>
     </div>

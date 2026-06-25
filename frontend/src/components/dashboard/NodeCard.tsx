@@ -4,6 +4,7 @@ import type { InsightItem } from '../../store/uiStore';
 import { StatusDot } from '../primitives/StatusDot';
 import { InsightText } from '../primitives/InsightText';
 import { MetricPill } from '../primitives/MetricPill';
+import { useLocale } from '../../i18n';
 import { ExternalLink, Terminal } from 'lucide-react';
 
 interface NodeCardProps {
@@ -24,6 +25,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
   metrics,
   onClick,
 }) => {
+  const { t } = useLocale();
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -49,7 +51,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
         {topInsight ? (
           <div className="space-y-0.5">
             <span className="text-[10px] font-extrabold font-interface tracking-widest text-accent uppercase">
-              Insight IA
+              {t('node_card.ai_insight')}
             </span>
             <InsightText size="sm" className={`block leading-snug ${isExpanded ? '' : 'line-clamp-2'}`}>
               {topInsight.headline}
@@ -61,7 +63,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
                   }}
                   className="ml-1 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[10px]"
                 >
-                  {isExpanded ? 'Moins' : 'Plus'}
+                  {isExpanded ? t('common.less') : t('common.more')}
                 </button>
               )}
             </InsightText>
@@ -69,10 +71,10 @@ export const NodeCard: React.FC<NodeCardProps> = ({
         ) : (
           <div className="space-y-0.5 opacity-80">
             <span className="text-[10px] font-extrabold font-interface tracking-widest text-text-3 uppercase">
-              Statut Node
+              {t('node_card.node_status')}
             </span>
             <InsightText size="sm" className="block line-clamp-1 italic text-text-2 font-normal">
-              {node.online ? 'Activité normale' : 'Hors-ligne ou indisponible'}
+              {node.online ? t('node_card.normal') : t('node_card.offline_unavailable')}
             </InsightText>
           </div>
         )}
@@ -88,7 +90,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
           />
         ) : (
           <span className="text-xs text-text-3 font-mono">
-            {node.hostname || 'pas d\'IP'}
+            {node.hostname || t('node_card.no_ip')}
           </span>
         )}
 

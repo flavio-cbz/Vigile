@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useLocale } from '../../i18n';
 import { Bell, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useNodeStore } from '../../store/nodeStore';
 import { useUiStore } from '../../store/uiStore';
 import { TimeAgo } from '../primitives/TimeAgo';
 
 export const NotifBell: React.FC = () => {
+  const { t } = useLocale();
   const { nodes } = useNodeStore();
   const { openCopilot } = useUiStore();
 
@@ -67,10 +69,10 @@ export const NotifBell: React.FC = () => {
       {isOpen && (
         <div className="absolute right-0 mt-2 w-80 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_rgba(0,0,0,0.5)] py-2 z-50 animate-fade-in text-xs">
           <div className="px-4 py-2 flex items-center justify-between border-b border-border-strong/30">
-            <span className="font-bold tracking-wider uppercase text-text-3 font-mono text-[10px]">Notifications</span>
+            <span className="font-bold tracking-wider uppercase text-text-3 font-mono text-[10px]">{t('notif.title')}</span>
             {count > 0 && (
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-severity-critical/15 text-severity-critical font-bold">
-                {count} ACTIONS
+                {count}
               </span>
             )}
           </div>
@@ -81,10 +83,10 @@ export const NotifBell: React.FC = () => {
                 <AlertTriangle className="w-4 h-4 text-severity-critical shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-text-1 truncate">
-                    Machine hors-ligne
+                    {t('notif.node_offline_title')}
                   </p>
                   <p className="text-text-2 text-[10px] mt-0.5 leading-relaxed truncate">
-                    Le serveur <strong className="text-text-1 font-semibold">{node.name}</strong> ne répond plus.
+                    {t('notif.node_offline_body', { name: node.name })}
                   </p>
                   <div className="mt-1">
                     <TimeAgo timestamp={node.last_heartbeat} />
@@ -105,10 +107,10 @@ export const NotifBell: React.FC = () => {
                 <AlertTriangle className="w-4 h-4 text-severity-warning shrink-0 mt-0.5 animate-pulse" />
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-text-1 truncate">
-                    Proposition en attente
+                    {t('notif.proposal_pending_title')}
                   </p>
                   <p className="text-text-2 text-[10px] mt-0.5 leading-relaxed line-clamp-2">
-                    Action : <code className="text-accent font-mono text-[9px]">{prop.action}</code>
+                    {t('prop.action')} : <code className="text-accent font-mono text-[9px]">{prop.action}</code>
                     <br />
                     {prop.reasoning}
                   </p>
@@ -122,9 +124,9 @@ export const NotifBell: React.FC = () => {
             {count === 0 && (
               <div className="p-8 text-center text-text-3 flex flex-col items-center gap-2">
                 <ShieldCheck className="w-8 h-8 text-severity-ok opacity-40" />
-                <span className="font-bold tracking-wide uppercase text-[9px] font-mono">Tout est sous contrôle</span>
+                <span className="font-bold tracking-wide uppercase text-[9px] font-mono">{t('notif.all_clear_title')}</span>
                 <span className="text-[10px] text-text-3 font-normal max-w-[180px] mx-auto leading-relaxed">
-                  Aucun incident réseau et aucune action en attente.
+                  {t('notif.all_clear_body')}
                 </span>
               </div>
             )}

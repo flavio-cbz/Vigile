@@ -59,7 +59,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
       );
       if (onRefresh) onRefresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Impossible de redémarrer le conteneur.';
+      const message = err instanceof Error ? err.message : t('settings.error');
       useToastStore.getState().addToast('error', 'Erreur', message);
     } finally {
       setIsRestarting(false);
@@ -72,28 +72,28 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
         return (
           <span className="badge badge-success flex items-center gap-1">
             <Play size={8} className="fill-current" />
-            EN COURS
+            {t('container.status.running')}
           </span>
         );
       case 'restarting':
         return (
           <span className="badge badge-warning flex items-center gap-1">
             <RefreshCw size={8} className="animate-spin" />
-            REDÉMARRAGE
+            {t('container.status.restarting')}
           </span>
         );
       case 'paused':
         return (
           <span className="badge badge-warning flex items-center gap-1">
             <Pause size={8} className="fill-current" />
-            EN PAUSE
+            {t('container.status.paused')}
           </span>
         );
       case 'dead':
         return (
           <span className="badge badge-danger flex items-center gap-1 animate-pulse">
             <AlertTriangle size={8} />
-            DÉFAILLANT
+            {t('container.status.failed')}
           </span>
         );
       case 'stopped':
@@ -101,7 +101,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
         return (
           <span className="badge badge-subtle flex items-center gap-1">
             <Square size={8} className="fill-current" />
-            ARRÊTÉ
+            {t('container.status.exited')}
           </span>
         );
     }
@@ -138,7 +138,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
 
       <div className="my-2 min-w-0">
         <div className={`text-xs text-ink-secondary ${isExpanded ? 'break-all whitespace-normal' : 'truncate'}`} title={container.image}>
-          Image: {container.image}
+          {t('container.image', { image: container.image })}
           {container.image.length > 30 && (
             <button
               onClick={(e) => {
@@ -147,7 +147,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
               }}
               className="ml-1 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[10px]"
             >
-              {isExpanded ? 'Moins' : 'Plus'}
+              {isExpanded ? t('common.less') : t('common.more')}
             </button>
           )}
         </div>
@@ -158,14 +158,14 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
 
       <div className="border-t border-border/40 pt-2 flex items-center justify-between mt-auto">
         <span className="text-xs text-ink-muted truncate font-mono">
-          ID: {container.id.substring(0, 12)}
+          {t('container.id', { id: container.id.substring(0, 12) })}
         </span>
         {isAdmin && (
           <button
             onClick={handleRestart}
             disabled={isRestartDisabled}
             className="btn btn-secondary text-xs py-1 px-2 border-border/50 text-ink-secondary hover:text-ink-primary flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            aria-label="Restart container"
+            aria-label={t("container.restart_aria")}
           >
             <RefreshCw size={10} className={isRestarting ? 'animate-spin text-accent-primary' : ''} />
             {isRestarting ? t('card.restarting') : t('card.restart')}

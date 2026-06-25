@@ -5,10 +5,12 @@ import { useNodeStore } from '../../store/nodeStore';
 import { CopilotHeader } from './CopilotHeader';
 import { CopilotMessage } from './CopilotMessage';
 import { CopilotInput } from './CopilotInput';
+import { useLocale } from '../../i18n';
 import { Spinner } from '../primitives/Spinner';
 import { MessageSquare } from 'lucide-react';
 
 export const CopilotPanel: React.FC = () => {
+  const { t } = useLocale();
   const { copilotOpen, copilotContext, closeCopilot } = useUiStore();
   const { nodes } = useNodeStore();
   const {
@@ -161,7 +163,7 @@ export const CopilotPanel: React.FC = () => {
       }`}
     >
       <span id="copilot-desc" className="sr-only">
-        Panneau d'assistant virtuel Vigile pour vous aider à diagnostiquer et administrer votre flotte de serveurs.
+        {t('copilot.aria_description')}
       </span>
       <CopilotHeader nodeName={targetNode?.name} onClose={closeCopilot} />
 
@@ -169,16 +171,16 @@ export const CopilotPanel: React.FC = () => {
         {loadingSession ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs">
             <Spinner size="sm" />
-            <span>INITIALISATION DES SYSTÈMES...</span>
+            <span>{t('copilot.initializing')}</span>
           </div>
         ) : messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-text-3 font-sans gap-2 my-auto select-none">
             <MessageSquare className="w-8 h-8 opacity-30 text-accent animate-pulse" />
             <span className="font-bold text-[10px] tracking-wider uppercase font-interface">
-              Aucune conversation en cours
+              {t('copilot.empty_title')}
             </span>
             <span className="text-[10.5px] max-w-[200px] leading-relaxed font-normal">
-              Posez une question sur l'état de vos nodes, ou demandez un diagnostic.
+              {t('copilot.empty_description')}
             </span>
           </div>
         ) : (

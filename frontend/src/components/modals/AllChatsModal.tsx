@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocale } from '../../i18n';
 import { useNavigate } from 'react-router';
 import { X, MessageSquareCode, Trash2 } from 'lucide-react';
 import { useNodeStore } from '../../store/nodeStore';
@@ -26,6 +27,7 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
   onClose,
   onSessionDeleted,
 }) => {
+  const { t } = useLocale();
   const navigate = useNavigate();
   const nodes = useNodeStore((s) => s.nodes);
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -33,12 +35,12 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
 
   const getNodeName = (nodeId: string): string => {
     const node = nodes.find((n) => n.id === nodeId);
-    return node ? node.name : `Serveur (${nodeId.substring(0, 8)})`;
+    return node ? node.name : t('proposal_modal.node_short', { id: nodeId.substring(0, 8) });
   };
 
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Voulez-vous vraiment supprimer cette conversation ?')) return;
+    if (!confirm(t('all_chats.delete_confirm'))) return;
 
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`, {
@@ -50,12 +52,13 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
 
       if (res.ok) {
         onSessionDeleted(sessionId);
+        addToast('success', t('all_chats.toast_deleted'), '');
       } else {
-        addToast('error', 'Erreur', 'Impossible de supprimer la session.');
+        addToast('error', t('settings.error'), t('all_chats.toast_error'));
       }
     } catch (e) {
       console.error(e);
-      addToast('error', 'Erreur', 'Erreur lors de la communication.');
+      addToast('error', t('settings.error'), t('all_chats.toast_error'));
     }
   };
 
@@ -72,17 +75,17 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
         <div className="shrink-0 border-b border-border-custom/50 pb-3">
           <h3 className="text-sm font-bold text-ink uppercase tracking-wider flex items-center gap-2">
             <MessageSquareCode className="w-4 h-4 text-accent-custom" />
-            <span>Historique des conversations</span>
+            <span>{t('all_chats.title')}</span>
           </h3>
           <p className="text-[0.625rem] text-ink-muted mt-0.5">
-            Consultez et gérez l'intégralité de vos sessions de chat sauvegardées.
+            {t('all_chats.subtitle')}
           </p>
         </div>
 
         <div className="flex-grow overflow-y-auto space-y-2 pr-1 scrollbar-thin">
           {chatSessions.length === 0 ? (
             <p className="text-xs text-ink-muted italic py-8 text-center">
-              Aucune conversation enregistrée.
+              {t('all_chats.empty')}
             </p>
           ) : (
             chatSessions.map((session) => (
@@ -100,10 +103,10 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
                   </div>
                   <div className="flex items-center gap-2 text-[0.5rem] text-ink-muted uppercase tracking-wider font-semibold mt-1">
                     <span className="bg-surface border border-border-strong px-1.5 py-0.2 rounded">
-                      {session.node_id ? getNodeName(session.node_id) : 'Global'}
+                      {session.node_id ? getNodeName(session.node_id) : t('all_chats.scope_global')}
                     </span>
                     <span>
-                      Mis à jour :{' '}
+                      {t('all_chats.updated_at')}{' '}
                       {new Date(session.updated_at * 1000).toLocaleString('fr-FR')}
                     </span>
                   </div>
@@ -112,7 +115,7 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
                 <button
                   onClick={(e) => handleDeleteSession(session.id, e)}
                   className="p-1.5 rounded hover:bg-red-soft/20 text-ink-muted hover:text-red-custom shrink-0 transition-colors cursor-pointer"
-                  title="Supprimer la session"
+                  title={t("all_chats.delete_title")}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -126,7 +129,7 @@ export const AllChatsModal: React.FC<AllChatsModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-lg border border-border-strong text-ink text-[0.6875rem] font-bold cursor-pointer hover:bg-surface-hover"
           >
-            Fermer
+            {t('all_chats.close')}
           </button>
         </div>
       </div>

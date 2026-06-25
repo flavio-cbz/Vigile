@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { useLocale } from '../../i18n';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -22,7 +23,7 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
   icon: Icon,
   subtitle,
   onSeeAll,
-  seeAllLabel = "Voir tout",
+  seeAllLabel,
   children,
   isLoading = false,
   skeletonCount = 4,
@@ -31,6 +32,8 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
   layout = 'carousel',
   gridClassName = '',
 }) => {
+  const { t } = useLocale();
+  const resolvedSeeAllLabel = seeAllLabel ?? t('dash.view_all');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -100,7 +103,7 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
             onClick={onSeeAll}
             className="text-xs font-semibold text-accent-primary hover:text-accent-hover transition-colors duration-150 cursor-pointer"
           >
-            {seeAllLabel} →
+            {resolvedSeeAllLabel} →
           </button>
         )}
       </div>
@@ -127,7 +130,7 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
             <button
               onClick={() => handleScroll('left')}
               className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-surface-1/90 backdrop-blur-sm border border-border hover:bg-surface-2 hover:border-border-hover text-ink-primary items-center justify-center shadow-lg transition-all duration-200"
-              aria-label="Scroll left"
+              aria-label={t("swim.scroll_left")}
             >
               <ChevronLeft size={18} />
             </button>
@@ -160,7 +163,7 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
             <button
               onClick={() => handleScroll('right')}
               className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-surface-1/90 backdrop-blur-sm border border-border hover:bg-surface-2 hover:border-border-hover text-ink-primary items-center justify-center shadow-lg transition-all duration-200"
-              aria-label="Scroll right"
+              aria-label={t("swim.scroll_right")}
             >
               <ChevronRight size={18} />
             </button>

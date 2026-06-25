@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocale } from '../../i18n';
 import { InsightText } from '../primitives/InsightText';
 import { SeverityTag } from '../primitives/SeverityTag';
 import { Sparkles, ShieldCheck } from 'lucide-react';
@@ -17,6 +18,7 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
   onDiagnose,
   connectedCount,
 }) => {
+  const { t } = useLocale();
   if (!insight) {
     return (
       <div className="w-full relative overflow-hidden rounded-xl border border-severity-ok/20 bg-gradient-to-br from-severity-ok/5 to-bg p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg select-none">
@@ -30,11 +32,11 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
             <SeverityTag severity="ok" />
             <div className="mt-1">
               <InsightText className="text-text-1">
-                {connectedCount} machine{connectedCount > 1 ? 's' : ''} connectée{connectedCount > 1 ? 's' : ''} — tout est calme
+                {t('hero_insight.calm_status', { count: connectedCount })}
               </InsightText>
             </div>
             <p className="text-text-2 text-xs font-medium font-sans mt-0.5">
-              Aucune anomalie détectée sur votre homelab. Vigile veille sur votre infrastructure.
+              {t('hero_insight.calm_description')}
             </p>
           </div>
         </div>
@@ -82,7 +84,7 @@ export const HeroInsight: React.FC<HeroInsightProps> = ({
           className="flex items-center gap-2 px-4 py-2 text-xs font-bold font-interface tracking-wider uppercase bg-accent hover:bg-accent-hover text-text-1 rounded shadow-lg shadow-accent/20 cursor-pointer hover:shadow-accent/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Diagnostiquer</span>
+          <span>{t('hero_insight.diagnose')}</span>
         </button>
       </div>
     </div>

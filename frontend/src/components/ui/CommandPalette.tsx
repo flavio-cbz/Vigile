@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useLocale } from '../../i18n';
 import { useUiStore } from '../../store/uiStore';
 import {
   LayoutDashboard,
@@ -21,6 +22,7 @@ interface CommandItem {
 }
 
 export const CommandPalette: React.FC = () => {
+  const { t } = useLocale();
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,12 +34,12 @@ export const CommandPalette: React.FC = () => {
 
   const commands: CommandItem[] = useMemo(
     () => [
-      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, action: () => navigate('/') },
-      { id: 'proposals', label: 'Propositions', icon: CheckSquare, action: () => navigate('/proposals') },
-      { id: 'audit', label: 'Audit', icon: Activity, action: () => navigate('/audit') },
-      { id: 'plugins', label: 'Plugins', icon: Puzzle, action: () => navigate('/plugins') },
-      { id: 'chat', label: 'Chat IA', icon: MessageSquareCode, action: () => navigate('/chat') },
-      { id: 'copilot', label: 'Basculer le Copilot', icon: Bot, action: () => openCopilot({ trigger: 'manual' }) },
+      { id: 'dashboard', label: t('ui.cmd_dashboard'), icon: LayoutDashboard, action: () => navigate('/') },
+      { id: 'proposals', label: t('ui.cmd_proposals'), icon: CheckSquare, action: () => navigate('/proposals') },
+      { id: 'audit', label: t('ui.cmd_audit'), icon: Activity, action: () => navigate('/audit') },
+      { id: 'plugins', label: t('ui.cmd_plugins'), icon: Puzzle, action: () => navigate('/plugins') },
+      { id: 'chat', label: t('ui.cmd_chat'), icon: MessageSquareCode, action: () => navigate('/chat') },
+      { id: 'copilot', label: t('ui.cmd_toggle_copilot'), icon: Bot, action: () => openCopilot({ trigger: 'manual' }) },
     ],
     [navigate, openCopilot],
   );
@@ -129,7 +131,7 @@ export const CommandPalette: React.FC = () => {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Tapez une commande..."
+            placeholder={t('ui.command_placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 bg-transparent border-none outline-none py-4 text-sm text-ink placeholder-ink-dim font-mono"
@@ -143,7 +145,7 @@ export const CommandPalette: React.FC = () => {
         <div className="max-h-80 overflow-y-auto py-2">
           {filteredCommands.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-ink-muted font-mono">
-              Aucune commande trouvée
+              {t('ui.command_no_results')}
             </div>
           ) : (
             filteredCommands.map((cmd, index) => {

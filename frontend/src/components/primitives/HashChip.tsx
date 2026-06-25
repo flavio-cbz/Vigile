@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocale } from '../../i18n';
 import { Check, Copy } from 'lucide-react';
 
 interface HashChipProps {
@@ -7,6 +8,7 @@ interface HashChipProps {
 }
 
 export const HashChip: React.FC<HashChipProps> = ({ hash, className = '' }) => {
+  const { t } = useLocale();
   const [copied, setCopied] = useState(false);
 
   if (!hash) return null;
@@ -27,7 +29,7 @@ export const HashChip: React.FC<HashChipProps> = ({ hash, className = '' }) => {
     <button
       onClick={handleCopy}
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-3 border border-border hover:border-accent/40 text-[10px] font-mono text-text-2 hover:text-text-1 cursor-pointer transition-colors whitespace-nowrap ${className}`}
-      title="Cliquer pour copier le hash"
+      title={t("ui.hash_copy_title")}
     >
       <span>{displayHash}</span>
       {copied ? (

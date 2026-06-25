@@ -6,10 +6,12 @@ import { useLayoutStore } from '../../store/layoutStore';
 import { useNodeStore } from '../../store/nodeStore';
 import { NodeSelector } from './NodeSelector';
 import { NotifBell } from './NotifBell';
+import { useLocale } from '../../i18n';
 import { LogOut, Settings, ShieldAlert, User, Compass, Palette, Search } from 'lucide-react';
 import { themes } from '../../design/themes';
 
 export const TopBar: React.FC = () => {
+  const { t } = useLocale();
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useUiStore();
   const { nodes } = useNodeStore();
@@ -31,12 +33,12 @@ export const TopBar: React.FC = () => {
 
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path === '/') return 'TABLEAU DE BORD';
-    if (path.startsWith('/nodes/')) return 'DÉTAIL DU NODE';
-    if (path === '/proposals') return 'PROPOSITIONS D\'ACTIONS';
-    if (path === '/audit') return 'REGISTRE D\'AUDIT';
-    if (path === '/settings') return 'CONFIGURATION DU SYSTÈME';
-    return 'VIGILE';
+    if (path === '/') return t('page_title.dashboard').toUpperCase();
+    if (path.startsWith('/nodes/')) return t('page_title.node_detail').toUpperCase();
+    if (path === '/proposals') return t('prop_page.title').toUpperCase();
+    if (path === '/audit') return t('page_title.audit').toUpperCase();
+    if (path === '/settings') return t('settings.system_title').toUpperCase();
+    return t('topbar.console');
   };
 
   const handleLogout = () => {
@@ -61,7 +63,7 @@ export const TopBar: React.FC = () => {
 
         <div className="hidden sm:flex items-center gap-2">
           <span className="text-[10px] xl:text-[11.5px] font-extrabold tracking-widest text-text-3 uppercase font-mono">
-            CONSOLE
+            {t('topbar.console')}
           </span>
           <span className="text-[10px] xl:text-[11.5px] text-text-3 font-mono">/</span>
           <span className="text-[10px] xl:text-[11.5px] font-bold tracking-wider text-accent/90 uppercase font-mono">
@@ -76,7 +78,7 @@ export const TopBar: React.FC = () => {
           className="hidden md:flex items-center gap-2 px-3 py-1.5 xl:px-4 xl:py-2 rounded-md bg-surface-2/45 border border-border-strong/45 hover:border-accent/50 text-text-2 hover:text-text-1 text-[10px] xl:text-[11.5px] font-medium transition-all duration-200 cursor-pointer shadow-inner"
         >
           <Search className="w-3.5 h-3.5 xl:w-4.5 xl:h-4.5 text-text-3" />
-          <span>Rechercher...</span>
+          <span>{t('topbar.search_placeholder')}</span>
         </button>
 
         <div className="w-px h-4 bg-border-strong/50 hidden md:block" />
@@ -94,7 +96,7 @@ export const TopBar: React.FC = () => {
             className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
               location.pathname === '/' ? 'text-accent bg-accent-muted/15' : ''
             }`}
-            title="Dashboard"
+            title={t("ui.cmd_dashboard")}
           >
             <Compass className="w-4 h-4 xl:w-5 h-5 transition-transform duration-200 hover:rotate-12" />
           </Link>
@@ -103,7 +105,7 @@ export const TopBar: React.FC = () => {
             className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
               location.pathname === '/audit' ? 'text-accent bg-accent-muted/15' : ''
             }`}
-            title="Registre d'audit"
+            title={t("ui.cmd_audit")}
           >
             <ShieldAlert className="w-4 h-4 xl:w-5 h-5" />
           </Link>
@@ -112,7 +114,7 @@ export const TopBar: React.FC = () => {
             className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
               location.pathname === '/settings' ? 'text-accent bg-accent-muted/15' : ''
             }`}
-            title="Paramètres"
+            title={t("ui.cmd_plugins")}
           >
             <Settings className="w-4 h-4 xl:w-5 h-5 transition-transform duration-300 hover:rotate-45" />
           </Link>
@@ -135,16 +137,16 @@ export const TopBar: React.FC = () => {
           {isMenuOpen && (
             <div className="absolute right-0 mt-2 w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_rgba(0,0,0,0.5)] py-1.5 z-50 animate-fade-in text-xs">
               <div className="px-4 py-2.5 border-b border-border-strong/30">
-                <p className="font-bold text-text-1 truncate">{user?.username || 'Utilisateur'}</p>
+                <p className="font-bold text-text-1 truncate">{user?.username || t('sidebar.default_username')}</p>
                 <p className="text-[9px] font-mono text-accent uppercase tracking-wider mt-0.5 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                  Rôle : {user?.role || 'operator'}
+                  {t('sidebar.role_label', { role: user?.role || 'operator' })}
                 </p>
               </div>
 
               <div className="px-4 py-2.5 border-b border-border-strong/30">
                 <p className="text-[10px] font-bold text-text-3 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Palette className="w-3.5 h-3.5 text-accent" /> Thème Visuel
+                  <Palette className="w-3.5 h-3.5 text-accent" /> {t('topbar.theme_menu')}
                 </p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {Object.keys(themes).map((t) => {
@@ -178,7 +180,7 @@ export const TopBar: React.FC = () => {
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-text-2 hover:text-text-1 hover:bg-surface-3/40 transition-colors"
               >
                 <Settings className="w-3.5 h-3.5 text-text-3" />
-                <span>Configuration</span>
+                <span>{t('topbar.settings_menu')}</span>
               </button>
 
               <div className="h-px bg-border-strong/30 my-1" />
@@ -188,7 +190,7 @@ export const TopBar: React.FC = () => {
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-severity-critical hover:bg-severity-critical/10 transition-colors font-semibold"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span>Déconnexion</span>
+                <span>{t('topbar.logout')}</span>
               </button>
             </div>
           )}

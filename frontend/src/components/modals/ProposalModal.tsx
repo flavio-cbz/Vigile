@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocale } from '../../i18n';
 import { X, Terminal } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useNodeStore } from '../../store/nodeStore';
@@ -33,6 +34,7 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
   onClose,
   onProposalUpdated,
 }) => {
+  const { t } = useLocale();
   const accessToken = useAuthStore((s) => s.accessToken);
   const nodes = useNodeStore((s) => s.nodes);
   const addToast = useToastStore((s) => s.addToast);
@@ -42,7 +44,7 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
 
   const getNodeName = (nodeId: string) => {
     const node = nodes.find(n => n.id === nodeId);
-    return node ? node.name : `Serveur (${nodeId.substring(0, 8)})`;
+    return node ? node.name : t('proposal_modal.node_short', { id: nodeId.substring(0, 8) });
   };
 
   const formatEpoch = (epoch: number) => {
@@ -58,16 +60,16 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
         }
       });
       if (res.ok) {
-        addToast('success', 'Proposition approuvée', 'L\'action sera exécutée.');
+        addToast('success', t('proposal_modal.toast_approved'), '');
         onProposalUpdated(proposalId, 'APPROVED');
         onClose();
       } else {
         const data = await res.json();
-        addToast('error', 'Erreur', data.detail || "Erreur lors de l'approbation");
+        addToast('error', t('settings.error'), data.detail || t('proposal_modal.toast_error'));
       }
     } catch (e) {
       console.error(e);
-      addToast('error', 'Erreur', 'Une erreur de communication est survenue.');
+      addToast('error', t('settings.error'), t('chat.error_communication'));
     }
   };
 
@@ -80,19 +82,19 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`
         },
-        body: JSON.stringify({ reason: rejectionReason || "Rejeté par l'opérateur" })
+        body: JSON.stringify({ reason: rejectionReason || t('proposal_modal.rejected_by_operator') })
       });
       if (res.ok) {
-        addToast('success', 'Proposition rejetée', '');
+        addToast('success', t('proposal_modal.toast_rejected'), '');
         onProposalUpdated(proposal.id, 'REJECTED');
         onClose();
       } else {
         const data = await res.json();
-        addToast('error', 'Erreur', data.detail || "Erreur lors du rejet");
+        addToast('error', t('settings.error'), data.detail || t('proposal_modal.toast_error'));
       }
     } catch (e) {
       console.error(e);
-      addToast('error', 'Erreur', 'Une erreur de communication est survenue.');
+      addToast('error', t('settings.error'), t('chat.error_communication'));
     }
   };
 
@@ -119,21 +121,21 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
               proposal.risk_level === 'MEDIUM' ? 'border-amber-border bg-amber-soft/20 text-amber-custom' :
               'border-green-border bg-green-soft/20 text-green-custom'
             }`}>
-              Risque: {proposal.risk_level}
+              {t('prop.risk')}: {proposal.risk_level}
             </span>
             <span className="text-xs font-bold text-ink-muted">
-              Serveur associé : {getNodeName(proposal.node_id)}
+              {t('proposal_modal.associated_node')} {getNodeName(proposal.node_id)}
             </span>
           </div>
           <h3 className="text-sm font-bold text-ink uppercase tracking-wider flex items-center gap-2 mt-2">
             <Terminal className="w-4 h-4 text-accent-custom" />
-            <span>Détails de la proposition d'action</span>
+            <span>{t('proposal_modal.title')}</span>
           </h3>
         </div>
 
         <div className="space-y-3">
           <div className="space-y-1">
-            <span className="text-[0.5625rem] font-bold text-ink-muted uppercase tracking-wider">Action / Commande</span>
+            <span className="text-[0.5625rem] font-bold text-ink-muted uppercase tracking-wider">{t('proposal_modal.action_label')}</span>
             <div className="p-3 rounded-lg bg-bg border border-border-strong font-mono text-[0.625rem] text-ink overflow-x-auto whitespace-pre-wrap shadow-inner max-h-48">
               {proposal.action}
             </div>
@@ -141,7 +143,7 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
 
           {proposal.reasoning && (
             <div className="space-y-1">
-              <span className="text-[0.5625rem] font-bold text-ink-muted uppercase tracking-wider">Justification IA</span>
+              <span className="text-[0.5625rem] font-bold text-ink-muted uppercase tracking-wider">{t('proposal_modal.justification')}</span>
               <p className="text-[0.6875rem] text-ink-dim leading-relaxed bg-surface/30 p-2.5 rounded border border-border-custom/50">
                 {proposal.reasoning}
               </p>
@@ -150,20 +152,20 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
 
           <div className="grid grid-cols-2 gap-3 text-[0.625rem] border-t border-b border-border-custom/40 py-2.5">
             <div>
-              <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">Créé par</span>
+              <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">{t('proposal_modal.created_by')}</span>
               <span className="font-semibold text-ink">{proposal.created_by}</span>
             </div>
             <div>
-              <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">Date de création</span>
+              <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">{t('proposal_modal.created_at')}</span>
               <span className="font-semibold text-ink">{formatEpoch(proposal.created_at)}</span>
             </div>
             <div>
-              <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">Statut actuel</span>
+              <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">{t('proposal_modal.current_status')}</span>
               <span className="font-semibold text-ink uppercase">{proposal.status}</span>
             </div>
             {proposal.executed_at && (
               <div>
-                <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">Exécuté le</span>
+                <span className="text-ink-muted font-bold block uppercase tracking-wider text-[0.5rem] mb-0.5">{t('proposal_modal.executed_at')}</span>
                 <span className="font-semibold text-ink">{formatEpoch(proposal.executed_at)}</span>
               </div>
             )}
@@ -171,14 +173,14 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
 
           {proposal.rejection_reason && (
             <div className="p-2.5 bg-red-soft/10 border border-red-border/30 rounded-lg text-[0.625rem] text-red-custom">
-              <span className="font-bold block uppercase tracking-wider text-[0.5rem] mb-1">Motif de rejet</span>
+              <span className="font-bold block uppercase tracking-wider text-[0.5rem] mb-1">{t('proposal_modal.rejection_reason')}</span>
               {proposal.rejection_reason}
             </div>
           )}
 
           {proposal.result_json && (
             <div className="space-y-1">
-              <span className="text-[0.5625rem] font-bold text-ink-muted uppercase tracking-wider">Résultat d'exécution</span>
+              <span className="text-[0.5625rem] font-bold text-ink-muted uppercase tracking-wider">{t('proposal_modal.execution_result')}</span>
               <pre className="p-3 rounded-lg bg-bg border border-border-strong font-mono text-[0.5625rem] text-ink overflow-x-auto whitespace-pre shadow-inner max-h-36">
                 {proposal.result_json}
               </pre>
@@ -188,7 +190,7 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
 
         <div className="flex justify-between items-center pt-3 border-t border-border-custom/50">
           <div className="text-[0.5625rem] font-mono text-ink-muted">
-            UUID: {proposal.id}
+            {t('proposal_modal.uuid', { id: proposal.id })}
           </div>
 
           <div className="flex gap-2">
@@ -200,21 +202,21 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
                     required
                     value={rejectionReason}
                     onChange={(e) => setRejectionReason(e.target.value)}
-                    placeholder="Spécifiez la raison du rejet..."
+                    placeholder={t('proposal_modal.rejection_placeholder')}
                     className="bg-bg border border-red-border text-xs rounded px-2.5 py-1.5 text-ink w-60 focus:outline-hidden"
                   />
                   <button
                     type="submit"
                     className="px-3.5 py-1.5 rounded-lg bg-red-custom text-bg text-[0.625rem] font-bold hover:bg-red-custom/90 cursor-pointer"
                   >
-                    Valider rejet
+                    {t('proposal_modal.validate_reject')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsRejectingState(false)}
                     className="px-3.5 py-1.5 rounded-lg border border-border-strong text-ink text-[0.625rem] font-bold cursor-pointer"
                   >
-                    Annuler
+                    {t('modal.cancel')}
                   </button>
                 </form>
               ) : (
@@ -223,13 +225,13 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
                     onClick={() => setIsRejectingState(true)}
                     className="px-4 py-2 rounded-lg border border-red-border hover:bg-red-soft/20 text-red-custom text-[0.6875rem] font-bold cursor-pointer transition-colors"
                   >
-                    Rejeter
+                    {t('proposal_modal.reject')}
                   </button>
                   <button
                     onClick={() => handleApproveProposal(proposal.id)}
                     className="px-4 py-2 rounded-lg bg-accent-soft border border-accent-border text-accent-custom hover:bg-accent-custom hover:text-bg text-[0.6875rem] font-bold cursor-pointer transition-all duration-150 shadow-sm"
                   >
-                    Approuver et Exécuter
+                    {t('proposal_modal.approve_execute')}
                   </button>
                 </>
               )
@@ -238,7 +240,7 @@ export const ProposalModal: React.FC<ProposalModalProps> = ({
                 onClick={handleClose}
                 className="px-4 py-2 rounded-lg border border-border-strong text-ink text-[0.6875rem] font-bold cursor-pointer hover:bg-surface-hover"
               >
-                Fermer
+                {t('proposal_modal.close')}
               </button>
             )}
           </div>

@@ -1,4 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from 'react';
+import { t } from '../../i18n';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -40,11 +41,11 @@ export class ErrorBoundary extends Component<Props, State> {
           <AlertTriangle className="w-8 h-8 text-danger" />
           <div>
             <p className="text-sm font-semibold text-ink-primary">
-              Une erreur est survenue
+              {t('error_boundary.title')}
             </p>
             <p className="text-xs text-ink-secondary mt-1">
               {this.state.error?.message ||
-                "Ce composant n'a pas pu être chargé."}
+                t('error_boundary.description')}
             </p>
           </div>
           {this.props.onRetry && (
@@ -53,7 +54,7 @@ export class ErrorBoundary extends Component<Props, State> {
               className="btn btn-secondary text-xs py-1 px-3"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              Réessayer
+              {t('error_boundary.retry')}
             </button>
           )}
         </div>

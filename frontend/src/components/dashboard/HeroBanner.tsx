@@ -36,7 +36,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
               {t('add_node.title')}
             </h2>
             <p className="text-xs text-ink-secondary">
-              Configurez votre premier serveur pour démarrer la supervision.
+              {t('hero.add_first')}
             </p>
           </div>
         </div>
@@ -44,7 +44,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
           onClick={() => window.location.href = '/servers'}
           className="mt-3 px-3 py-1.5 text-[10px] font-bold font-interface uppercase tracking-wider bg-accent/10 border border-accent/20 text-accent rounded hover:bg-accent/20 transition-colors cursor-pointer"
         >
-          Ajouter un serveur
+          {t('hero.add_action')}
         </button>
       </div>
     );
@@ -79,8 +79,8 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
       gradient: 'var(--gradient-hero-crit)',
       border: 'border-danger/30',
       icon: <AlertOctagon className="w-8 h-8 text-danger animate-pulse-subtle" />,
-      title: "Tous les serveurs sont hors ligne",
-      desc: "Aucune communication active de la flotte de workers.",
+      title: t("hero.all_offline_title"),
+      desc: t("hero.all_offline_description"),
     },
   };
 
@@ -111,7 +111,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
           </span>
         ) : (
           <span className="text-[11px] font-mono text-ink-secondary">
-            En attente de mise à jour...
+            {t('hero.waiting_update')}
           </span>
         )}
       </div>

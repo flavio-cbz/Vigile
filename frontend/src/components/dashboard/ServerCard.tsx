@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocale } from '../../i18n';
 import { Server, WifiOff, AlertTriangle } from 'lucide-react';
 import type { Node } from '../../store/nodeStore';
 import type { InsightItem } from '../../store/uiStore';
@@ -18,6 +19,7 @@ interface ServerCardProps {
 }
 
 export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsight, onClick }) => {
+  const { t } = useLocale();
   const [isExpanded, setIsExpanded] = useState(false);
   const isOnline = node.online;
   const isLoading = metrics?.loading;
@@ -50,7 +52,7 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
           {isOnline && topInsight && (
             <span
               className="inline-flex shrink-0 cursor-help"
-              title={`${topInsight.severity === 'critical' ? 'Critique' : topInsight.severity === 'warning' ? 'Attention' : 'Info'}: ${topInsight.headline}`}
+              title={`${topInsight.severity === 'critical' ? t('severity.critical') : topInsight.severity === 'warning' ? t('severity.attention') : t('severity.info')}: ${topInsight.headline}`}
             >
               <AlertTriangle
                 size={13}
@@ -67,7 +69,7 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
             className={`w-2 h-2 rounded-full ${isOnline ? 'bg-success shadow-[0_0_8px_var(--color-success)]' : 'bg-ink-muted'}`}
           />
           <span className="text-xs font-medium text-ink-secondary">
-            {isOnline ? 'ONLINE' : 'OFFLINE'}
+            {isOnline ? t('server_card.online') : t('server_card.offline')}
           </span>
         </div>
       </div>
@@ -85,8 +87,8 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
                 topInsight.severity === 'critical' ? 'text-severity-critical' :
                 topInsight.severity === 'warning' ? 'text-severity-warning' : 'text-severity-info'
               }`}>
-                {topInsight.severity === 'critical' ? 'Insight Critique' :
-                 topInsight.severity === 'warning' ? 'Insight Attention' : 'Insight Info'}
+                {topInsight.severity === 'critical' ? t('server_card.insight_critical') :
+                 topInsight.severity === 'warning' ? t('server_card.insight_attention') : t('server_card.insight_info')}
               </span>
               <p className={`text-xs text-text-1 font-medium leading-relaxed ${isExpanded ? '' : 'line-clamp-2'}`} title={topInsight.headline}>
                 {topInsight.headline}
@@ -98,7 +100,7 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
                     }}
                     className="ml-1 text-accent hover:text-accent-hover font-bold inline-block cursor-pointer hover:underline text-[10px]"
                   >
-                    {isExpanded ? 'Moins' : 'Plus'}
+                    {isExpanded ? t('common.less') : t('common.more')}
                   </button>
                 )}
               </p>
@@ -106,10 +108,10 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
           ) : (
             <div className="space-y-0.5 text-left">
               <span className="text-[10px] font-extrabold font-interface tracking-wider text-severity-ok uppercase">
-                Statut
+                {t('server_card.status')}
               </span>
               <p className="text-xs text-text-2 italic font-medium">
-                Fonctionnement nominal
+                {t('server_card.nominal')}
               </p>
             </div>
           )
@@ -117,11 +119,16 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
           <div className="flex flex-col items-center justify-center py-1 gap-1">
             <WifiOff size={16} className="text-ink-muted animate-pulse" />
             <span className="text-xs text-severity-critical font-semibold text-center leading-tight">
-              Hors-ligne depuis {formatOfflineDuration(node.last_heartbeat)}
+               {formatOfflineDuration(node.last_heartbeat)}
             </span>
             {node.last_heartbeat && (
               <span className="text-[9px] text-ink-muted font-mono text-center">
-                Dernier contact : {new Date(node.last_heartbeat < 9999999999 ? node.last_heartbeat * 1000 : node.last_heartbeat).toLocaleDateString('fr-FR')} à {new Date(node.last_heartbeat < 9999999999 ? node.last_heartbeat * 1000 : node.last_heartbeat).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                {(() => {
+                  const d = new Date(node.last_heartbeat < 9999999999 ? node.last_heartbeat * 1000 : node.last_heartbeat);
+                  const date = d.toLocaleDateString();
+                  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  return t('servers.last_contact', { time: `${date} ${time}` });
+                })()}
               </span>
             )}
           </div>
@@ -132,31 +139,31 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
         {!isOnline ? (
           <>
             <span className="text-[9px] font-extrabold tracking-wider text-ink-muted uppercase">
-              Réseau
+              {t('server_card.network')}
             </span>
             <span className="text-severity-critical group-hover:underline">
-              Analyser →
+              {t('server_card.analyze')}
             </span>
           </>
         ) : topInsight ? (
           <>
             <span className="text-[9px] font-extrabold tracking-wider text-ink-muted uppercase">
-              Action
+              {t('server_card.action')}
             </span>
             <span className={`group-hover:underline ${
               topInsight.severity === 'critical' ? 'text-severity-critical' :
               topInsight.severity === 'warning' ? 'text-severity-warning' : 'text-severity-info'
             }`}>
-              Diagnostiquer →
+              {t('server_card.diagnose')}
             </span>
           </>
         ) : (
           <>
             <span className="text-[9px] font-extrabold tracking-wider text-ink-muted uppercase">
-              Système
+              {t('server_card.system')}
             </span>
             <span className="text-accent-primary group-hover:text-accent-hover transition-colors group-hover:underline">
-              Détails →
+              {t('server_card.details')}
             </span>
           </>
         )}

@@ -27,9 +27,9 @@ interface PluginListResponse {
 }
 
 export const PluginsPage: React.FC = () => {
-  usePageTitle('Plugins');
-  const { isAdmin } = usePermission();
   const { t } = useLocale();
+  usePageTitle(t('page_title.plugins'));
+  const { isAdmin } = usePermission();
   const addToast = useToastStore((s) => s.addToast);
 
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -69,10 +69,10 @@ export const PluginsPage: React.FC = () => {
         setLoadedNames((prev) =>
           res.loaded ? [...prev, pluginId] : prev.filter((n) => n !== pluginId)
         );
-        addToast('success', 'Plugin', res.loaded ? 'Plugin activé.' : 'Plugin désactivé.');
+        addToast('success', t('plugins.title'), res.loaded ? t('plugins.activated') : t('plugins.deactivated'));
       }
-    } catch (err: Error) {
-      addToast('error', 'Erreur', err.message || 'Impossible de basculer le plugin.');
+    } catch (err: unknown) {
+      addToast('error', t('settings.error'), err instanceof Error ? err.message : t('plugins.toggle_error'));
     } finally {
       setToggling(null);
     }
@@ -99,10 +99,10 @@ export const PluginsPage: React.FC = () => {
         throw new Error(err.detail || 'Upload failed');
       }
 
-      addToast('success', 'Plugin', `Plugin "${file.name}" uploadé avec succès.`);
+      addToast('success', t('plugins.title'), t('plugins.uploaded', { name: file.name }));
       await fetchPlugins();
-    } catch (err: Error) {
-      addToast('error', 'Erreur', err.message || 'Échec de l\'upload du plugin.');
+    } catch (err: unknown) {
+      addToast('error', t('settings.error'), (err instanceof Error ? err.message : t('plugins.upload_failed')));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -118,7 +118,7 @@ export const PluginsPage: React.FC = () => {
             {t('nav.plugins')}
           </h1>
           <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-            {plugins.length} plugin{plugins.length !== 1 ? 's' : ''} · {loadedNames.length} chargé{loadedNames.length !== 1 ? 's' : ''}
+            {t('plugins.count', { total: plugins.length, loaded: loadedNames.length })}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -128,7 +128,7 @@ export const PluginsPage: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-surface border border-border-strong/20 rounded-lg text-text-2 hover:text-text-1 hover:border-accent/30 transition-colors disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={clsx('w-3 h-3', loading && 'animate-spin')} />
-            Actualiser
+            {t('plugins.refresh')}
           </button>
           {isAdmin && (
             <>
@@ -145,7 +145,7 @@ export const PluginsPage: React.FC = () => {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-accent hover:bg-accent-hover text-text-1 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
               >
                 {uploading ? <Spinner size="sm" /> : <Upload className="w-3 h-3" />}
-                Upload
+                {t("plugins.upload")}
               </button>
             </>
           )}
@@ -167,10 +167,10 @@ export const PluginsPage: React.FC = () => {
       {!loading && plugins.length === 0 && (
         <EmptyState
           icon={<Package className="w-12 h-12" />}
-          title="Aucun plugin"
-          description="Le répertoire des plugins est vide. Téléchargez un plugin Python pour commencer."
+          title={t("plugins.empty_title")}
+          description={t("plugins.empty_description")}
           action={isAdmin ? {
-            label: 'Uploader un plugin',
+            label: t('plugins.upload_action'),
             onClick: () => fileInputRef.current?.click(),
           } : undefined}
         />
@@ -207,7 +207,7 @@ export const PluginsPage: React.FC = () => {
                         'text-[9px] font-mono font-bold uppercase',
                         isLoaded ? 'text-severity-ok' : 'text-text-3'
                       )}>
-                        {isLoaded ? 'Chargé' : 'Déchargé'}
+                        {isLoaded ? t('plugins.loaded') : t('plugins.unloaded')}
                       </span>
                     </div>
                   </div>
@@ -216,7 +216,7 @@ export const PluginsPage: React.FC = () => {
                       onClick={() => handleToggle(plugin.name)}
                       disabled={toggling === plugin.name}
                       className="shrink-0 p-1 rounded hover:bg-surface-3 transition-colors cursor-pointer disabled:opacity-50"
-                      title={isLoaded ? 'Désactiver' : 'Activer'}
+                      title={isLoaded ? t('plugins.deactivate') : t('plugins.activate')}
                     >
                       {toggling === plugin.name ? (
                         <Spinner size="sm" />
@@ -237,7 +237,7 @@ export const PluginsPage: React.FC = () => {
 
                 {plugin.hooks && plugin.hooks.length > 0 && (
                   <div className="space-y-1">
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-text-3">Hooks</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-text-3">{t('plugins.hooks_label')}</span>
                     <div className="flex flex-wrap gap-1">
                       {plugin.hooks.map((hook) => (
                         <span
