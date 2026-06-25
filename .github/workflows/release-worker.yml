@@ -9,6 +9,9 @@ on:
         description: "Tag to release (e.g., v0.6.0)"
         required: true
 
+permissions:
+  contents: write
+
 env:
   SOURCE_DATE_EPOCH: "1"
 
