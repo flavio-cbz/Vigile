@@ -110,6 +110,23 @@ export const en = {
   "settings.theme": "Visual Theme",
   "settings.save": "Save Changes",
 
+  // Node settings tab
+  "settings.general": "General",
+  "settings.field.name": "Name",
+  "settings.field.group": "Group",
+  "settings.token_section": "Enrollment token",
+  "settings.regenerate": "Regenerate command",
+  "settings.regenerate.copied": "Copied",
+  "settings.danger_zone": "Danger zone",
+  "settings.disable": "Disable",
+  "settings.enable": "Enable",
+  "settings.revoke": "Revoke permanently",
+  "settings.confirm.revoke_title": "Revoke permanently",
+  "settings.confirm.revoke_message": "This action is irreversible. The server will not be able to reconnect and all its metrics will be deleted.",
+  "settings.confirm.revoke_action": "Revoke",
+  "settings.saved": "Saved",
+  "settings.error": "Error",
+
   // Plugins
   "plugins.title": "Plugins Directory",
   "plugins.status.active": "Active",
@@ -125,6 +142,11 @@ export const en = {
   "add_node.waiting": "⏳ Waiting for Worker connection...",
   "add_node.token_created": "Enrollment token generated. Execute this command on your server:",
   "add_node.success": "Server successfully connected!",
+  "add_node.token_expired": "Expired",
+  "add_node.token_expired_msg": "This token has expired. Generate a new one:",
+  "add_node.expires_in_title": "Time remaining before token expires",
+  "add_node.refresh": "Refresh",
+  "add_node.warning_privileges": "Run this command on the target server with root privileges. Token expires in {time}.",
 
   // Error States
   "error.network": "Network error communicating with the API.",

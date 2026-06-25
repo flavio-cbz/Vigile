@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Server as ServerIcon, Layers, Sparkles, Activity, CheckSquare } from 'lucide-react';
+import { Server as ServerIcon, Layers, Sparkles, Activity, CheckSquare, Grid3x3, Plus } from 'lucide-react';
 
 import { useNodeStore } from '../store/nodeStore';
 import { useUiStore } from '../store/uiStore';
 import type { ActionProposal, InsightItem } from '../store/uiStore';
 import { useInsightsStore } from '../store/insightsStore';
 import { useChatStore } from '../store/chatStore';
+import { useLayoutStore } from '../store/layoutStore';
 
 import { HeroBanner } from '../components/dashboard/HeroBanner';
 import { SwimLane } from '../components/dashboard/SwimLane';
@@ -16,6 +17,7 @@ import { InsightCard } from '../components/dashboard/InsightCard';
 import { ProposalCard } from '../components/dashboard/ProposalCard';
 import { ActivityItem } from '../components/dashboard/ActivityItem';
 import { TrendChart } from '../components/dashboard/TrendChart';
+import { FleetGrid } from '../components/dashboard/FleetGrid';
 
 import { usePolling } from '../hooks/usePolling';
 import { api } from '../hooks/useApi';
@@ -74,6 +76,7 @@ export const Dashboard: React.FC = () => {
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
   const [rejectingProposalId, setRejectingProposalId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [showChart, setShowChart] = useState(false);
 
   const fetchBulkMetrics = async () => {
     try {
@@ -170,7 +173,6 @@ export const Dashboard: React.FC = () => {
         fetchProposalsList(),
         fetchRecentActivity(),
       ]);
-      setLoadingDashboard(false);
 
       const currentNodes = useNodeStore.getState().nodes;
       const onlineNodes = currentNodes.filter(n => n.online && n.id);
@@ -180,6 +182,7 @@ export const Dashboard: React.FC = () => {
         );
       }
       setInsightsLoading(false);
+      setLoadingDashboard(false);
     };
 
     loadAll();
@@ -273,6 +276,34 @@ export const Dashboard: React.FC = () => {
       <div className="h-full flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs select-none">
         <Spinner size="md" />
         <span>CONSTITUTION DE LA SÉQUENCE D'HUD...</span>
+      </div>
+    );
+  }
+
+  if (nodes.length === 0) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center select-none animate-fade-in">
+        <div className="card max-w-md w-full py-12 px-8 text-center flex flex-col items-center gap-5">
+          <div className="w-14 h-14 rounded-xl bg-accent-muted/15 border border-accent/30 flex items-center justify-center shadow-[0_0_18px_var(--color-accent-glow)]">
+            <ServerIcon className="w-7 h-7 text-accent" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-base font-bold font-interface text-text-1 uppercase tracking-wider">
+              Démarrer
+            </h2>
+            <p className="text-xs text-text-2 leading-relaxed max-w-sm mx-auto">
+              Connectez votre premier serveur pour commencer la supervision.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => useLayoutStore.getState().setAddNodeModalOpen(true)}
+            className="btn btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-interface font-semibold cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Ajouter un serveur
+          </button>
+        </div>
       </div>
     );
   }
@@ -437,8 +468,31 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      <div className="pt-4 border-t border-border-strong">
-        <TrendChart nodes={nodes} />
+      <SwimLane
+        title="État de la flotte"
+        icon={Grid3x3}
+        layout="grid"
+        className="border-t border-border-strong pt-6 mt-6"
+      >
+        {!showChart ? (
+          <FleetGrid
+            nodes={nodes}
+            bulkStatus={bulkStatus}
+            insightsByNode={insightsByNode}
+            onNodeClick={(id) => navigate(`/nodes/${id}`)}
+          />
+        ) : (
+          <TrendChart nodes={nodes} />
+        )}
+      </SwimLane>
+      <div className="flex justify-end px-4 md:px-12 -mt-4">
+        <button
+          type="button"
+          onClick={() => setShowChart(!showChart)}
+          className="text-xs text-accent hover:underline font-interface font-semibold cursor-pointer transition-colors"
+        >
+          {showChart ? 'Vue grille' : 'Voir les tendances'}
+        </button>
       </div>
 
       {rejectingProposalId && (

@@ -1,5 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Copy, Check, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  X,
+  Plus,
+  Copy,
+  Check,
+  RefreshCw,
+  Terminal,
+  Clock,
+  AlertTriangle,
+} from 'lucide-react';
 import { useNodeStore, type Node } from '../../store/nodeStore';
 import { useToastStore } from '../../store/useToastStore';
 import { api } from '../../hooks/useApi';
@@ -9,57 +18,75 @@ interface AddNodeModalProps {
   onClose: () => void;
 }
 
+interface JoinResponse {
+  node_id: string;
+  token: string;
+  curl_command: string;
+  expires_in: number;
+}
+
+const REFRESH_THRESHOLD_SEC = 30;
+const POLL_INTERVAL_MS = 5000;
+const ENROLLMENT_AUTO_CLOSE_MS = 2500;
+const COPY_FEEDBACK_MS = 2000;
+const TICK_INTERVAL_MS = 1000;
+
+
 export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
   const { t } = useLocale();
   const [nodeName, setNodeName] = useState('');
-  const [ipPrefix, setIpPrefix] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [joinData, setJoinData] = useState<{ node_id: string; token: string; curl_command: string } | null>(null);
+  const [joinData, setJoinData] = useState<JoinResponse | null>(null);
   const [enrollError, setEnrollError] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [isEnrolled, setIsEnrolled] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pendingName, setPendingName] = useState<string | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
 
   const addToast = useToastStore((s) => s.addToast);
 
-  const handleCopy = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(key);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const handleGenerateJoin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nodeName.trim()) return;
-
+  // ---- Token generation ----
+  const generate = useCallback(async () => {
+    if (!nodeName.trim() || isGenerating) return;
     setIsGenerating(true);
     setEnrollError(null);
-    setJoinData(null);
-
     try {
-      const data = await api<{ node_id: string; token: string; curl_command: string }>(
-        '/api/nodes/generate-join',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            name: nodeName,
-            ip_prefix: ipPrefix || null,
-          }),
-        },
-      );
-
+      const data = await api<JoinResponse>('/api/nodes/generate-join', {
+        method: 'POST',
+        body: JSON.stringify({ name: nodeName }),
+      });
       if (data) {
         setJoinData(data);
+        setSecondsLeft(Math.max(0, Math.floor(data.expires_in)));
+        setPendingName(nodeName);
         setNodeName('');
-        setIpPrefix('');
-        useNodeStore.getState().fetchNodes(); // Refresh list to see the PENDING node
+        useNodeStore.getState().fetchNodes();
       }
     } catch (err) {
       setEnrollError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsGenerating(false);
     }
+  }, [nodeName, isGenerating]);
+
+  const handleGenerateJoin = (e: React.FormEvent) => {
+    e.preventDefault();
+    void generate();
   };
 
+  // ---- Countdown ticker ----
+  useEffect(() => {
+    if (!joinData || secondsLeft === null) return;
+    if (secondsLeft <= 0) return;
+    const id = window.setInterval(() => {
+      setSecondsLeft((prev) => (prev === null ? null : Math.max(0, prev - 1)));
+    }, TICK_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [joinData, secondsLeft]);
+
+  // ---- Enrollment polling (unchanged behavior) ----
   useEffect(() => {
     if (!joinData || !joinData.node_id || isEnrolled) return;
 
@@ -73,30 +100,114 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
             clearInterval(intervalId);
             addToast('success', t('add_node.success'), t('add_node.success'));
             useNodeStore.getState().fetchNodes();
-            setTimeout(() => {
+            closeTimerRef.current = window.setTimeout(() => {
               onClose();
-            }, 2500);
+            }, ENROLLMENT_AUTO_CLOSE_MS);
           }
         }
       } catch (err) {
         console.error('Error polling node enrollment:', err);
       }
-    }, 5000);
+    }, POLL_INTERVAL_MS);
 
-    return () => {
-      clearInterval(intervalId);
-    };
+    return () => clearInterval(intervalId);
   }, [joinData, addToast, onClose, isEnrolled, t]);
 
+  // ---- Cleanup ----
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  // ---- Clipboard copy ----
+  const handleCopy = useCallback(async () => {
+    if (!joinData?.curl_command) return;
+    try {
+      await navigator.clipboard.writeText(joinData.curl_command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+    } catch {
+      // Clipboard can fail in non-secure contexts; fall back to a hidden textarea.
+      const ta = document.createElement('textarea');
+      ta.value = joinData.curl_command;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+      } catch {
+        // give up silently
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  }, [joinData]);
+
+  // ---- Manual refresh: re-issue token with the same name ----
+  const handleRefresh = useCallback(async () => {
+    if (!joinData || refreshing) return;
+    setRefreshing(true);
+    setEnrollError(null);
+    try {
+      // nodeName is cleared after first submit, so re-use the name we cached
+      // in pendingName. We never display the raw token — only the derived
+      // command goes to the clipboard.
+      const refreshName = pendingName || `${t('add_node.title')}-${Date.now()}`;
+      const data = await api<JoinResponse>('/api/nodes/generate-join', {
+        method: 'POST',
+        body: JSON.stringify({ name: refreshName }),
+      });
+      if (data) {
+        setJoinData(data);
+        setSecondsLeft(Math.max(0, Math.floor(data.expires_in)));
+        setIsEnrolled(false);
+      }
+    } catch (err) {
+      setEnrollError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [joinData, pendingName, refreshing, t]);
+
+  // ---- Derived UI flags ----
+  const expired = joinData !== null && secondsLeft !== null && secondsLeft <= 0;
+  const expiringSoon = joinData !== null
+    && secondsLeft !== null
+    && secondsLeft > 0
+    && secondsLeft <= REFRESH_THRESHOLD_SEC;
+
+  const countdownLabel = useMemo(() => {
+    if (secondsLeft === null) return '';
+    if (secondsLeft <= 0) return t('add_node.token_expired');
+    const m = Math.floor(secondsLeft / 60);
+    const s = secondsLeft % 60;
+    if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+    return `${s}s`;
+  }, [secondsLeft, t]);
+
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
-      <div className="w-full max-w-md bg-surface-0 border border-border p-6 rounded-xl shadow-2xl space-y-5 animate-fade-up relative">
+    <div
+      className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl bg-surface-0 border border-border p-6 rounded-xl shadow-2xl space-y-5 animate-fade-up relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-ink-muted hover:text-ink cursor-pointer"
+          aria-label="Fermer"
         >
           <X className="w-4 h-4" />
         </button>
+
         <div>
           <h3 className="text-sm font-bold text-ink-primary uppercase tracking-wider flex items-center gap-2">
             <Plus className="w-4 h-4 text-accent-primary" />
@@ -132,32 +243,20 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
                 onChange={(e) => setNodeName(e.target.value)}
                 placeholder={t('add_node.name_placeholder')}
                 className="input"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-[0.5625rem] font-bold text-ink-secondary uppercase tracking-wider">
-                Restriction préfixe IP (Optionnel)
-              </label>
-              <input
-                type="text"
-                value={ipPrefix}
-                onChange={(e) => setIpPrefix(e.target.value)}
-                placeholder="ex. 192.168.1."
-                className="input"
+                autoFocus
               />
             </div>
 
             <button
               type="submit"
-              disabled={isGenerating}
-              className="btn btn-primary w-full py-2"
+              disabled={isGenerating || !nodeName.trim()}
+              className="btn btn-primary w-full py-2.5"
             >
               {isGenerating ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <>
-                  <Plus className="w-3.5 h-3.5" />
+                  <Terminal className="w-3.5 h-3.5" />
                   <span>{t('add_node.generate_token')}</span>
                 </>
               )}
@@ -165,47 +264,115 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
           </form>
         ) : (
           <div className="space-y-4 animate-fade-in">
-            {!isEnrolled && (
-              <div className="flex items-center justify-center gap-2 p-2.5 bg-accent-subtle border border-accent-primary/20 rounded-lg text-accent-primary text-[0.625rem] font-medium leading-relaxed animate-pulse">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>{t('add_node.waiting')}</span>
-              </div>
-            )}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              {!isEnrolled ? (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-accent-subtle border border-accent-primary/20 rounded-full text-accent-primary text-[0.625rem] font-semibold">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>{t('add_node.waiting')}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-success-subtle border border-success/20 rounded-full text-success text-[0.625rem] font-semibold">
+                  <Check className="w-3 h-3" />
+                  <span>{t('add_node.success')}</span>
+                </div>
+              )}
 
-            <div className="space-y-1">
-              <div className="flex justify-between items-center">
-                <span className="text-[0.5rem] font-bold text-accent-primary uppercase tracking-wider">Jeton généré</span>
-                <button
-                  onClick={() => handleCopy(joinData.token, 'token')}
-                  className="text-ink-secondary hover:text-accent-primary flex items-center gap-0.5 text-[0.625rem] font-bold cursor-pointer"
+              {secondsLeft !== null && (
+                <div
+                  className={[
+                    'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.5625rem] font-mono font-semibold border',
+                    expired
+                      ? 'bg-danger-subtle border-danger/30 text-danger'
+                      : expiringSoon
+                        ? 'bg-warning-subtle border-warning/30 text-warning'
+                        : 'bg-surface-1 border-border text-ink-secondary',
+                  ].join(' ')}
+                  title={t('add_node.expires_in_title')}
                 >
-                  {copiedId === 'token' ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedId === 'token' ? 'Copié' : 'Copier'}</span>
-                </button>
-              </div>
-              <div className="p-2 rounded-lg bg-surface-1 border border-border font-mono text-[0.5625rem] text-ink-primary break-all select-all">
-                {joinData.token}
-              </div>
+                  {expired ? <AlertTriangle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                  <span>{countdownLabel}</span>
+                </div>
+              )}
             </div>
 
-            <div className="space-y-1">
-              <div className="flex justify-between items-center">
-                <span className="text-[0.5rem] font-bold text-accent-primary uppercase tracking-wider">Commande Kickstart (SSH)</span>
-                <button
-                  onClick={() => handleCopy(joinData.curl_command, 'curl')}
-                  className="text-ink-secondary hover:text-accent-primary flex items-center gap-0.5 text-[0.625rem] font-bold cursor-pointer"
-                >
-                  {copiedId === 'curl' ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedId === 'curl' ? 'Copié' : 'Copier'}</span>
-                </button>
+            <div className="relative group">
+              <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-1 to-transparent pointer-events-none rounded-t-lg" />
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-surface-2 border border-border border-b-0 rounded-t-lg">
+                <span className="w-2.5 h-2.5 rounded-full bg-danger/60" />
+                <span className="w-2.5 h-2.5 rounded-full bg-warning/60" />
+                <span className="w-2.5 h-2.5 rounded-full bg-success/60" />
+                <span className="ml-2 text-[0.5625rem] font-mono text-ink-muted uppercase tracking-wider">sh</span>
               </div>
-              <div className="p-2 rounded-lg bg-surface-1 border border-border font-mono text-[0.5625rem] text-ink-primary whitespace-pre-wrap break-all select-all">
+              <pre
+                className={[
+                  'p-4 bg-[#08080d] border border-border border-t-0 rounded-b-lg overflow-x-auto',
+                  'font-mono text-[0.6875rem] leading-relaxed text-ink-primary',
+                  'whitespace-pre-wrap break-all select-all',
+                  expired ? 'opacity-50' : '',
+                ].join(' ')}
+                aria-label="Commande de déploiement"
+              >
                 {joinData.curl_command}
-              </div>
+              </pre>
             </div>
 
-            <div className="p-2 bg-warning-subtle border border-warning/20 rounded-lg text-[0.5625rem] text-warning leading-normal">
-              Ce jeton de connexion est à usage unique et expirera dans 30 minutes. Exécutez la commande curl sur le serveur cible avec les privilèges root.
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={expired}
+              className={[
+                'btn w-full py-3 text-sm font-semibold',
+                copied ? 'btn-secondary' : 'btn-primary',
+                expired ? 'opacity-50 cursor-not-allowed' : '',
+              ].join(' ')}
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 text-success" />
+                  <span>Copié !</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  <span>Copier la commande</span>
+                </>
+              )}
+            </button>
+
+            <div
+              className={[
+                'p-2.5 rounded-lg border text-[0.625rem] leading-relaxed flex items-start gap-2',
+                expired
+                  ? 'bg-danger-subtle border-danger/20 text-danger'
+                  : expiringSoon
+                    ? 'bg-warning-subtle border-warning/20 text-warning'
+                    : 'bg-surface-1 border-border text-ink-secondary',
+              ].join(' ')}
+            >
+              {expired ? (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <span>{t('add_node.token_expired_msg')}</span>
+                    <button
+                      type="button"
+                      onClick={handleRefresh}
+                      disabled={refreshing}
+                      className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-2 border border-border text-ink-primary hover:border-accent-primary/40 cursor-pointer font-semibold"
+                    >
+                      <RefreshCw className={['w-3 h-3', refreshing ? 'animate-spin' : ''].join(' ')} />
+                      <span>{t('add_node.refresh')}</span>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    {t('add_node.warning_privileges', { time: countdownLabel })}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}

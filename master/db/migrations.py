@@ -28,15 +28,18 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     """
     logger.info("Running database migrations...")
 
+    # Create tables
     for ddl in ALL_TABLES:
         await db.execute(ddl)
 
+    # Create indexes
     for idx_sql in CREATE_INDEXES:
         await db.execute(idx_sql)
 
     await db.commit()
     logger.info("Tables and indexes OK.")
 
+    # Idempotent dynamic columns upgrade for insights and caching
     async with db.execute("PRAGMA table_info(nodes)") as cursor:
         columns = [row["name"] for row in await cursor.fetchall()]
 
@@ -53,23 +56,65 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "cached_containers_json" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_containers_json TEXT")
         mutated = True
+    if "node_group" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN node_group TEXT")
+        mutated = True
+    if "disabled" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
+        mutated = True
 
     if mutated:
         await db.commit()
-        logger.info("Added insights and caching columns to nodes table.")
+        logger.info("Added insights/caching/group/disabled columns to nodes table.")
 
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_disabled ON nodes(disabled)")
+    await db.commit()
+
+    # Self-healing: drop legacy FK on join_tokens.node_id -> nodes.id if present (migration 006)
+    await _drop_join_tokens_fk_if_present(db)
+
+    # Stamp Alembic version if not already versioned (idempotent)
     await db.execute(
         "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
     )
     await db.execute(
         "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
-        ("004",),
+        ("006",),
     )
     await db.commit()
 
+    # Seed data
     await _seed_default_admin(db)
     await _seed_default_plugins(db)
     logger.info("Migrations complete.")
+
+
+async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
+    """Drop legacy FK on join_tokens.node_id -> nodes.id if present (migration 006)."""
+    async with db.execute("PRAGMA foreign_key_list(join_tokens)") as cursor:
+        fks = [dict(row) for row in await cursor.fetchall()]
+
+    has_fk = any(fk.get("from") == "node_id" and fk.get("table") == "nodes" for fk in fks)
+    if not has_fk:
+        return
+
+    logger.info("Dropping legacy FK join_tokens.node_id -> nodes.id (migration 006).")
+    await db.execute("PRAGMA foreign_keys=OFF")
+    await db.execute("""
+    CREATE TABLE join_tokens_new (
+        id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE, payload_b64 TEXT NOT NULL,
+        consumed INTEGER NOT NULL DEFAULT 0, expires_at REAL NOT NULL, created_at REAL NOT NULL
+    )""")
+    await db.execute("INSERT INTO join_tokens_new SELECT * FROM join_tokens")
+    await db.execute("DROP TABLE join_tokens")
+    await db.execute("ALTER TABLE join_tokens_new RENAME TO join_tokens")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_join_tokens_node_id ON join_tokens(node_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_join_tokens_consumed ON join_tokens(consumed, expires_at)")
+    await db.execute("PRAGMA foreign_keys=ON")
+    await db.commit()
+    logger.info("Legacy FK dropped successfully.")
 
 
 async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
@@ -112,6 +157,7 @@ async def _seed_default_admin(db: aiosqlite.Connection) -> None:
         (user_id, "admin", password_hash, must_change, now, now),
     )
 
+    # Log the seeding event in the audit trail
     await _seed_genesis_audit(db, user_id)
 
     await db.commit()

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, useNavigate, useLocation, Link } from 'react-router';
+import React, { useState, useEffect } from 'react';
+import { NavLink, useLocation, Link } from 'react-router';
 import { useAuthStore } from '../../store/authStore';
 import { usePermission } from '../../hooks/usePermission';
 import { useLayoutStore } from '../../store/layoutStore';
@@ -11,8 +11,6 @@ import {
   CheckSquare,
   Activity,
   Grid,
-  Plus,
-  Search,
   X,
   ChevronsLeft,
   ChevronsRight,
@@ -33,21 +31,14 @@ export const Sidebar: React.FC = () => {
     isSidebarCollapsed,
     setSidebarOpen,
     toggleSidebarCollapse,
-    setAddNodeModalOpen,
   } = useLayoutStore();
-  const { nodes, selectedNodeId, selectNode } = useNodeStore();
-  const navigate = useNavigate();
+  const { nodes } = useNodeStore();
   const location = useLocation();
 
   const [isMobile, setIsMobile] = useState(false);
   const pendingCount = useLayoutStore((s) => s.pendingCount);
-  const [showServerDropdown, setShowServerDropdown] = useState(false);
-  const [serverSearch, setServerSearch] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isSingleServer = nodes.length === 1;
-  const isGlobal = selectedNodeId === 'all' || !selectedNodeId;
-  const activeNode = nodes.find((n) => n.id === selectedNodeId) || null;
 
   const [isAdminExpanded, setIsAdminExpanded] = useState(() => localStorage.getItem('vigile_admin_expanded') !== 'false');
 
@@ -68,17 +59,6 @@ export const Sidebar: React.FC = () => {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowServerDropdown(false);
-        setServerSearch('');
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
   const handleNavClick = () => {
     if (isMobile) setSidebarOpen(false);
   };
@@ -86,181 +66,27 @@ export const Sidebar: React.FC = () => {
   const collapsed = !isMobile && isSidebarCollapsed;
 
   const renderServerSelector = () => {
-    const current = isGlobal ? null : activeNode;
+    if (!isSingleServer) return null;
 
-    if (isSingleServer) {
-      const srv = nodes[0];
-      return (
-        <div className={`flex items-center gap-2.5 px-4 py-3 select-none border-b border-border-strong/30 ${
-          collapsed ? 'justify-center px-2' : 'justify-between'
-        }`}>
-          <div className="flex items-center gap-2.5 min-w-0 flex-1 justify-center">
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                srv?.online
-                  ? 'bg-green-custom shadow-[0_0_6px_var(--color-green-glow)]'
-                  : 'bg-ink-muted'
-              }`}
-            />
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
-                  {srv?.name || 'Serveur'}
-                </div>
-                <div className="text-[9px] font-mono text-text-3 truncate">
-                  {srv?.hostname || 'Connecté'}
-                </div>
-              </div>
-            )}
-          </div>
-          {!collapsed && isAdmin && (
-            <button
-              onClick={() => setAddNodeModalOpen(true)}
-              className="p-1 rounded hover:bg-surface-hover/60 text-accent-custom hover:text-accent-custom/80 cursor-pointer transition-colors duration-150 shrink-0"
-              title="Ajouter un serveur"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      );
-    }
-
+    const srv = nodes[0];
     return (
-      <div ref={dropdownRef} className={`relative py-2.5 ${collapsed ? 'px-2 flex justify-center' : 'px-3'}`}>
-        {!collapsed && (
-          <div className="text-[9px] font-bold text-text-3 uppercase tracking-widest mb-1.5 px-1 font-mono">
-            Serveur actif
-          </div>
-        )}
-        <button
-          onClick={() => setShowServerDropdown(!showServerDropdown)}
-          className={`flex items-center gap-2 rounded-lg border border-border-strong/70 bg-surface-alt/45 hover:border-accent-border/50 hover:bg-accent-soft/10 transition-all duration-150 cursor-pointer text-left ${
-            collapsed ? 'w-9 h-9 justify-center px-0' : 'w-full px-2.5 py-2'
+      <div className={`flex items-center gap-2.5 px-4 py-3 select-none border-b border-border-strong/30 ${
+        collapsed ? 'justify-center px-2' : 'justify-center'
+      }`}>
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${
+            srv?.online
+              ? 'bg-green-custom shadow-[0_0_6px_var(--color-green-glow)]'
+              : 'bg-ink-muted'
           }`}
-          title={collapsed ? (current ? current.name : 'Tous les serveurs') : undefined}
-        >
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 ${
-              current
-                ? current.online
-                  ? 'bg-green-custom shadow-[0_0_6px_var(--color-green-glow)]'
-                  : 'bg-ink-muted'
-                : 'bg-accent-custom shadow-[0_0_6px_var(--color-accent-glow)]'
-            }`}
-          />
-          {!collapsed && (
-            <>
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
-                  {current ? current.name : 'Tous les serveurs'}
-                </div>
-                <div className="text-[9px] font-mono text-text-3 truncate">
-                  {current
-                    ? current.online
-                      ? 'EN LIGNE'
-                      : 'HORS LIGNE'
-                    : `${nodes.filter((n) => n.online).length} EN LIGNE`}
-                </div>
-              </div>
-              <ChevronDown
-                className={`w-3.5 h-3.5 text-text-3 shrink-0 transition-transform duration-200 ${
-                  showServerDropdown ? 'rotate-180' : ''
-                }`}
-              />
-            </>
-          )}
-        </button>
-
-        {showServerDropdown && (
-          <div className={`absolute z-50 rounded-lg border border-border-strong/70 bg-surface-2/95 backdrop-blur-md shadow-2xl overflow-hidden animate-fade-in ${
-            collapsed ? 'left-full ml-3 top-0 w-56' : 'left-3 right-3 top-full mt-1.5'
-          }`}>
-            <div className="sticky top-0 z-10 bg-surface-2/80 border-b border-border-strong/30 px-2 py-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3 pointer-events-none" />
-                <input
-                  type="text"
-                  value={serverSearch}
-                  onChange={(e) => setServerSearch(e.target.value)}
-                  placeholder="Rechercher..."
-                  className="w-full pl-7 pr-7 py-1.5 text-[10px] bg-surface/50 border border-border-strong/50 rounded-md text-text-1 placeholder-text-3 font-mono focus:border-accent focus:outline-hidden transition-colors"
-                  autoFocus
-                />
-                {serverSearch && (
-                  <button
-                    onClick={() => setServerSearch('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-1 transition-colors cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
+        />
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-bold text-text-1 truncate leading-tight uppercase font-mono">
+              {srv?.name || 'Serveur'}
             </div>
-
-            <div className="max-h-60 overflow-y-auto divide-y divide-border-strong/10 scrollable-list">
-              <button
-                onClick={() => {
-                  selectNode('all');
-                  navigate('/');
-                  setShowServerDropdown(false);
-                  setServerSearch('');
-                  handleNavClick();
-                }}
-                className={`flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-100 cursor-pointer ${
-                  isGlobal ? 'bg-accent-soft/20 text-accent font-bold' : 'text-text-2 hover:bg-surface-3/30'
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-[0_0_5px_var(--color-accent-glow)] shrink-0" />
-                <span className="font-mono text-[10px]">TOUS LES SERVEURS</span>
-                <span className="ml-auto text-[9px] font-mono text-text-3">{nodes.length}</span>
-              </button>
-
-              {nodes
-                .filter(node => !serverSearch || node.name.toLowerCase().includes(serverSearch.toLowerCase()))
-                .map((node) => (
-                <button
-                  key={node.id}
-                  onClick={() => {
-                    selectNode(node.id);
-                    navigate(`/nodes/${node.id}`);
-                    setShowServerDropdown(false);
-                    setServerSearch('');
-                    handleNavClick();
-                  }}
-                  className={`flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-xs font-semibold transition-colors duration-100 cursor-pointer ${
-                    selectedNodeId === node.id
-                      ? 'bg-accent-soft/20 text-accent font-bold'
-                      : 'text-text-2 hover:bg-surface-3/30'
-                  }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                      node.online
-                        ? 'bg-green-custom shadow-[0_0_5px_var(--color-green-glow)]'
-                        : 'bg-ink-muted'
-                    }`}
-                  />
-                  <span className="truncate font-mono text-[10px] uppercase">{node.name}</span>
-                  <span className="ml-auto text-[8px] font-mono text-text-3 uppercase">
-                    {node.online ? 'ON' : 'OFF'}
-                  </span>
-                </button>
-              ))}
-
-              {isAdmin && (
-                <button
-                  onClick={() => {
-                    setAddNodeModalOpen(true);
-                    setShowServerDropdown(false);
-                    setServerSearch('');
-                  }}
-                  className="flex items-center gap-2.5 w-full px-3 py-2.5 text-left text-xs font-bold text-accent border-t border-border-strong/30 hover:bg-accent-soft/10 transition-colors duration-100 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>AJOUTER SERVEUR</span>
-                </button>
-              )}
+            <div className="text-[9px] font-mono text-text-3 truncate">
+              {srv?.hostname || 'Connecté'}
             </div>
           </div>
         )}

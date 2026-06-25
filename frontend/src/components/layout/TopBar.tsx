@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useNodeStore } from '../../store/nodeStore';
 import { NodeSelector } from './NodeSelector';
 import { NotifBell } from './NotifBell';
 import { LogOut, Settings, ShieldAlert, User, Compass, Palette, Search } from 'lucide-react';
@@ -11,6 +12,7 @@ import { themes } from '../../design/themes';
 export const TopBar: React.FC = () => {
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useUiStore();
+  const { nodes } = useNodeStore();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -79,9 +81,12 @@ export const TopBar: React.FC = () => {
 
         <div className="w-px h-4 bg-border-strong/50 hidden md:block" />
 
-        <NodeSelector />
-
-        <div className="w-px h-4 bg-border-strong/50" />
+        {nodes.length >= 2 && (
+          <>
+            <NodeSelector />
+            <div className="w-px h-4 bg-border-strong/50" />
+          </>
+        )}
 
         <nav className="flex items-center gap-1">
           <Link

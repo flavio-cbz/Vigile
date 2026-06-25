@@ -55,13 +55,22 @@ async def test_generate_join_token_success(client: AsyncClient, db, auth_headers
     assert data["expires_in"] > 0
     assert "curl" in data["curl_command"]
 
-    # Verify node created in PENDING state in DB
+    # Anti-phantom assertion: no `nodes` row at generate-join (see migration 006).
+    # The row is only created by the Worker enrollment handshake.
     node_id = data["node_id"]
-    async with db.execute("SELECT state, ip_prefix FROM nodes WHERE id = ?", (node_id,)) as cursor:
+    async with db.execute("SELECT state FROM nodes WHERE id = ?", (node_id,)) as cursor:
         row = await cursor.fetchone()
-        assert row is not None
-        assert row["state"] == "PENDING"
-        assert row["ip_prefix"] == "192.168.1."
+        assert row is None, "Phantom node row created before Worker enrollment"
+
+    # The join_token IS persisted, with the right node_id and ip_prefix.
+    token_hash = SecurityManager.join_token_hash(None, data["token"])  # Static method
+    async with db.execute(
+        "SELECT consumed, expires_at, node_id FROM join_tokens WHERE token_hash = ?", (token_hash,)
+    ) as cursor:
+        token_row = await cursor.fetchone()
+    assert token_row is not None
+    assert token_row["consumed"] == 0
+    assert token_row["node_id"] == node_id
 
     # Verify join token stored in DB
     token_hash = SecurityManager.join_token_hash(None, data["token"])  # Static method
@@ -72,6 +81,22 @@ async def test_generate_join_token_success(client: AsyncClient, db, auth_headers
         assert row is not None
         assert row["consumed"] == 0
         assert row["expires_at"] > time.time()
+
+
+@pytest.mark.asyncio
+async def test_generate_join_no_phantom_node(client: AsyncClient, db, auth_headers):
+    """Generate-join must NOT create a `nodes` row before the Worker enrolls."""
+    response = await client.post(
+        "/api/nodes/generate-join",
+        headers=auth_headers("admin"),
+        json={"name": "phantom-test", "ip_prefix": "10.0.0."},
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    node_id = response.json()["node_id"]
+
+    async with db.execute("SELECT COUNT(*) FROM nodes WHERE id = ?", (node_id,)) as cursor:
+        count = (await cursor.fetchone())[0]
+    assert count == 0, "Phantom node persisted before Worker enrollment"
 
 
 @pytest.mark.asyncio
@@ -148,7 +173,7 @@ async def test_get_node(client: AsyncClient, db, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_revoke_node(client: AsyncClient, db, auth_headers):
+async def test_delete_node(client: AsyncClient, db, auth_headers):
     await db.execute(
         "INSERT INTO nodes (id, name, state, created_at, updated_at) "
         "VALUES ('n-4', 'node-4', 'CONNECTED', ?, ?)",
@@ -156,23 +181,68 @@ async def test_revoke_node(client: AsyncClient, db, auth_headers):
     )
     await db.commit()
 
-    # Admin is required to revoke
+    # Admin is required to delete
     response = await client.delete("/api/nodes/n-4", headers=auth_headers("admin"))
     assert response.status_code == status.HTTP_204_NO_CONTENT
 
-    # Verify node state is now REVOKED
-    async with db.execute("SELECT state FROM nodes WHERE id = 'n-4'") as cursor:
+    # Verify node row is gone (hard delete)
+    async with db.execute("SELECT id FROM nodes WHERE id = 'n-4'") as cursor:
         row = await cursor.fetchone()
-        assert row is not None
-        assert row["state"] == "REVOKED"
+        assert row is None
 
-    # Revoking an already revoked node -> 409
-    response_409 = await client.delete("/api/nodes/n-4", headers=auth_headers("admin"))
-    assert response_409.status_code == status.HTTP_409_CONFLICT
+    # Deleting an already-deleted node -> 404 (idempotent in semantic)
+    response_404 = await client.delete("/api/nodes/n-4", headers=auth_headers("admin"))
+    assert response_404.status_code == status.HTTP_404_NOT_FOUND
 
     # Non-existent node -> 404
-    response_404 = await client.delete("/api/nodes/nonexistent", headers=auth_headers("admin"))
-    assert response_404.status_code == status.HTTP_404_NOT_FOUND
+    response_404b = await client.delete("/api/nodes/nonexistent", headers=auth_headers("admin"))
+    assert response_404b.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_delete_node_cascades_to_dependent_rows(client: AsyncClient, db, auth_headers):
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-casc', 'casc-node', 'CONNECTED', ?, ?)",
+        (time.time(), time.time()),
+    )
+    await db.execute(
+        "INSERT INTO worker_tokens (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked) "
+        "VALUES ('wt-casc', 'n-casc', 'hash-casc', ?, ?, ?, 0)",
+        (time.time(), time.time() + 3600, time.time() + 7200),
+    )
+    await db.execute(
+        "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds) "
+        "VALUES ('s-casc', 'n-casc', ?, ?, 10.0, 1000, 500, 50.0, 0, 0, 1000, 100, 10.0, 100.0)",
+        (time.time(), time.time()),
+    )
+    await db.commit()
+
+    response = await client.delete("/api/nodes/n-casc", headers=auth_headers("admin"))
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    async with db.execute("SELECT id FROM worker_tokens WHERE node_id = 'n-casc'") as cursor:
+        assert await cursor.fetchone() is None
+    async with db.execute("SELECT id FROM metrics_snapshots WHERE node_id = 'n-casc'") as cursor:
+        assert await cursor.fetchone() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_node_keeps_audit_entry(client: AsyncClient, db, auth_headers):
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-aud', 'audit-node', 'CONNECTED', ?, ?)",
+        (time.time(), time.time()),
+    )
+    await db.commit()
+
+    await client.delete("/api/nodes/n-aud", headers=auth_headers("admin"))
+
+    async with db.execute(
+        "SELECT action FROM audit_log WHERE node_id = 'n-aud' AND action = 'NODE_DELETED'"
+    ) as cursor:
+        row = await cursor.fetchone()
+        assert row is not None
 
 
 @pytest.mark.asyncio
@@ -328,3 +398,242 @@ async def test_get_bulk_status(client: AsyncClient, db, auth_headers, security: 
     data_demo = response_demo.json()
     assert "statuses" in data_demo
     assert "demo-node-01" in data_demo["statuses"]
+
+
+# ---------------------------------------------------------------------------
+# New endpoints: PATCH, configure, regenerate-token, DELETE ENROLLING guard,
+# NodeResponse group/disabled/enrolled_recently, generate-join with group
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_patch_rename(client: AsyncClient, db, auth_headers):
+    """Operator renames a node — returns 200 and persists the new name."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-patch-1', 'old-name', 'CONNECTED', ?, ?)",
+        (now, now),
+    )
+    await db.commit()
+
+    response = await client.patch(
+        "/api/nodes/n-patch-1",
+        headers=auth_headers("operator"),
+        json={"name": "new-name"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["id"] == "n-patch-1"
+    assert data["name"] == "new-name"
+
+    async with db.execute("SELECT name FROM nodes WHERE id = 'n-patch-1'") as cursor:
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row["name"] == "new-name"
+
+
+@pytest.mark.asyncio
+async def test_patch_disable_by_operator_is_403(client: AsyncClient, db, auth_headers):
+    """Operator attempting to disable a node must get 403."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-patch-2', 'n2', 'CONNECTED', ?, ?)",
+        (now, now),
+    )
+    await db.commit()
+
+    response = await client.patch(
+        "/api/nodes/n-patch-2",
+        headers=auth_headers("operator"),
+        json={"disabled": True},
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    response_admin = await client.patch(
+        "/api/nodes/n-patch-2",
+        headers=auth_headers("admin"),
+        json={"disabled": True},
+    )
+    assert response_admin.status_code == status.HTTP_200_OK
+    data = response_admin.json()
+    assert data["disabled"] is True
+    assert data["state"] == "DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_configure_unconfigured_to_connected(client: AsyncClient, db, auth_headers):
+    """Full flow: PENDING -> UNCONFIGURED -> /configure -> CONNECTED."""
+    now = time.time()
+    node_id = "n-cfg-1"
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES (?, 'pending-name', 'UNCONFIGURED', ?, ?)",
+        (node_id, now, now),
+    )
+    await db.commit()
+
+    response = await client.post(
+        f"/api/nodes/{node_id}/configure",
+        headers=auth_headers("operator"),
+        json={"name": "configured-name", "group": "production"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["id"] == node_id
+    assert data["name"] == "configured-name"
+    assert data["state"] == "CONNECTED"
+    assert data["group"] == "production"
+
+    async with db.execute(
+        "SELECT state, name, node_group FROM nodes WHERE id = ?", (node_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row["state"] == "CONNECTED"
+        assert row["name"] == "configured-name"
+        assert row["node_group"] == "production"
+
+
+@pytest.mark.asyncio
+async def test_configure_wrong_state_is_409(client: AsyncClient, db, auth_headers):
+    """Configure on a CONNECTED node must be rejected with 409."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-cfg-2', 'n2', 'CONNECTED', ?, ?)",
+        (now, now),
+    )
+    await db.commit()
+
+    response = await client.post(
+        "/api/nodes/n-cfg-2/configure",
+        headers=auth_headers("operator"),
+        json={"name": "x", "group": None},
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_regenerate_token_admin_only(client: AsyncClient, db, auth_headers):
+    """Only admin can regenerate a JOIN_TOKEN; non-admin gets 403."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-reg-1', 'n1', 'PENDING', ?, ?)",
+        (now, now),
+    )
+    await db.commit()
+
+    response_op = await client.post(
+        "/api/nodes/n-reg-1/regenerate-token",
+        headers=auth_headers("operator"),
+    )
+    assert response_op.status_code == status.HTTP_403_FORBIDDEN
+
+    response_admin = await client.post(
+        "/api/nodes/n-reg-1/regenerate-token",
+        headers=auth_headers("admin"),
+    )
+    assert response_admin.status_code == status.HTTP_201_CREATED
+    data = response_admin.json()
+    assert data["node_id"] == "n-reg-1"
+    assert "token" in data
+    assert "curl" in data["curl_command"]
+
+
+@pytest.mark.asyncio
+async def test_regenerate_token_already_enrolled_409(client: AsyncClient, db, auth_headers):
+    """Regenerating on a CONNECTED node must be 409."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-reg-2', 'n2', 'CONNECTED', ?, ?)",
+        (now, now),
+    )
+    await db.commit()
+
+    response = await client.post(
+        "/api/nodes/n-reg-2/regenerate-token",
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert "already enrolled" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_delete_enrolling_succeeds(client: AsyncClient, db, auth_headers):
+    """Deleting a node in ENROLLING state must succeed (hard delete is unconditional)."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-enr-1', 'n1', 'ENROLLING', ?, ?)",
+        (now, now),
+    )
+    await db.commit()
+
+    response = await client.delete(
+        "/api/nodes/n-enr-1",
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    async with db.execute("SELECT id FROM nodes WHERE id = 'n-enr-1'") as cursor:
+        assert await cursor.fetchone() is None
+
+
+@pytest.mark.asyncio
+async def test_node_response_includes_group_disabled_enrolled_recently(
+    client: AsyncClient, db, auth_headers
+):
+    """NodeResponse exposes group, disabled, enrolled_recently fields."""
+    now = time.time()
+    recent_ts = time.time() - 60
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, node_group, disabled, enrolled_at, created_at, updated_at) "
+        "VALUES ('n-resp-1', 'n1', 'CONNECTED', 'prod', 1, ?, ?, ?)",
+        (recent_ts, now, now),
+    )
+    await db.commit()
+
+    response = await client.get(
+        "/api/nodes/n-resp-1",
+        headers=auth_headers("operator"),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["group"] == "prod"
+    assert data["disabled"] is True
+    assert data["enrolled_recently"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_join_with_group(client: AsyncClient, db, auth_headers):
+    """generate-join accepts an optional `group`. It is carried in the JOIN_TOKEN
+    payload and applied to the `nodes` row at enrollment time (anti-phantom)."""
+    response = await client.post(
+        "/api/nodes/generate-join",
+        headers=auth_headers("admin"),
+        json={"name": "grp-node", "group": "homelab"},
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    node_id = data["node_id"]
+
+    # No `nodes` row at generate-join time (anti-phantom).
+    async with db.execute("SELECT name FROM nodes WHERE id = ?", (node_id,)) as cursor:
+        row = await cursor.fetchone()
+    assert row is None
+
+    # The `name` and `group` are embedded in the join_token payload.
+    token_hash = SecurityManager.join_token_hash(None, data["token"])
+    async with db.execute(
+        "SELECT payload_b64 FROM join_tokens WHERE token_hash = ?", (token_hash,)
+    ) as cursor:
+        token_row = await cursor.fetchone()
+    assert token_row is not None
+    import base64
+    import json as _json
+    payload = _json.loads(base64.urlsafe_b64decode(token_row["payload_b64"] + "=="))
+    assert payload["name"] == "grp-node"
+    assert payload["group"] == "homelab"

@@ -29,6 +29,7 @@ import time
 import uuid
 from typing import Any
 
+import aiosqlite
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -45,6 +46,8 @@ from passlib.context import CryptContext
 
 
 class SecurityError(Exception):
+    """Base exception for all security issues."""
+
     pass
 
 
@@ -55,6 +58,8 @@ class InvalidTokenError(SecurityError):
 
 
 class ExpiredTokenError(SecurityError):
+    """Raised when a token has expired."""
+
     pass
 
 
@@ -66,6 +71,7 @@ logger = logging.getLogger(__name__)
 
 
 def _pad_b64(s: str) -> str:
+    """Normalize base64url string to have correct padding."""
     remainder = len(s) % 4
     return s + "=" * (4 - remainder) if remainder else s
 
@@ -110,6 +116,7 @@ class SecurityManager:
         master_private_key: Ed25519PrivateKey | None = None,
     ) -> None:
         self._server_secret: bytes = server_secret.encode()
+        self._jwt_secret: str = jwt_secret
         self._jwt_algorithm: str = jwt_algorithm
         self._join_token_ttl: int = join_token_ttl
         self._worker_token_ttl: int = worker_token_ttl
@@ -151,7 +158,13 @@ class SecurityManager:
     # JOIN_TOKEN — HMAC-SHA256, single-use, 30-min TTL
     # -----------------------------------------------------------------------
 
-    def generate_join_token(self, node_id: str, ip_prefix: str = "") -> tuple[str, dict]:
+    def generate_join_token(
+        self,
+        node_id: str,
+        ip_prefix: str = "",
+        name: str = "",
+        group: str = "",
+    ) -> tuple[str, dict]:
         """
         Generate a signed JOIN_TOKEN.
 
@@ -160,6 +173,11 @@ class SecurityManager:
         The payload is NOT encrypted (it's just base64). The HMAC signature
         is what guarantees authenticity and integrity.
 
+        The `name` and `group` fields are carried in the payload so the
+        Worker enrollment handshake can persist them on first INSERT
+        (see migration 006 + master/ws/worker_handler.py). Without this,
+        a first-time enrollment would lack the NOT NULL `name` column.
+
         Returns:
             (token_string, payload_dict)
         """
@@ -167,6 +185,8 @@ class SecurityManager:
             "node_id": node_id,
             "expires_at": int(time.time()) + self._join_token_ttl,
             "ip_prefix": ip_prefix,
+            "name": name,
+            "group": group,
             "single_use": True,
             "jti": str(uuid.uuid4()),
         }
@@ -225,6 +245,7 @@ class SecurityManager:
 
     @staticmethod
     def generate_challenge() -> str:
+        """Generate a 32-byte cryptographically random challenge, base64url-encoded."""
         raw = secrets.token_bytes(32)
         return base64.urlsafe_b64encode(raw).decode()
 
@@ -419,10 +440,12 @@ class SecurityManager:
 
     @staticmethod
     def hash_password(plain: str) -> str:
+        """Hash a plaintext password with bcrypt."""
         return _pwd_context.hash(plain)
 
     @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:
+        """Verify a plaintext password against a bcrypt hash."""
         return _pwd_context.verify(plain, hashed)
 
 
@@ -505,6 +528,7 @@ def init_security(
 
 
 def get_security_instance() -> SecurityManager:
+    """Return the initialized SecurityManager or raise."""
     if _security_instance is None:
         raise RuntimeError("SecurityManager not initialized. Call init_security() first.")
     return _security_instance
