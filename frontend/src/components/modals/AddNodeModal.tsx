@@ -203,7 +203,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-ink-muted hover:text-ink cursor-pointer"
-          aria-label="Fermer"
+          aria-label={t('common.close')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -329,12 +329,12 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
               {copied ? (
                 <>
                   <Check className="w-4 h-4 text-success" />
-                  <span>Copié !</span>
+                  <span>{t('chat.copied')}</span>
                 </>
               ) : (
                 <>
                   <Copy className="w-4 h-4" />
-                  <span>Copier la commande</span>
+                  <span>{t('add_node.copy_command')}</span>
                 </>
               )}
             </button>

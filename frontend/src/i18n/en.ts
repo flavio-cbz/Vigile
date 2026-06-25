@@ -147,6 +147,34 @@ export const en = {
   "add_node.expires_in_title": "Time remaining before token expires",
   "add_node.refresh": "Refresh",
   "add_node.warning_privileges": "Run this command on the target server with root privileges. Token expires in {time}.",
+  "add_node.copy_command": "Copy command",
+
+  // Server Config Modal
+  "server_config.title": "Configure server",
+  "server_config.subtitle": "Update this machine's identification settings.",
+  "server_config.name_label": "Display name",
+  "server_config.group_label": "Group",
+  "server_config.later": "Later",
+  "server_config.save": "Save",
+  "server_config.success": "Configuration saved",
+  "server_config.success_detail": "Changes have been applied to the server.",
+
+  // Node events
+  "node_events.new_server": "New server connected",
+
+  // Servers toasts
+  "servers.toast.disabled": "Server disabled",
+  "servers.toast.enabled": "Server enabled",
+  "servers.toast.deleted": "Server deleted",
+  "servers.toast.renamed": "Server renamed",
+
+  // Common
+  "common.close": "Close",
+  "common.copy": "Copy",
+  "common.cancel": "Cancel",
+
+  // Settings additions
+  "settings.cancel": "Cancel",
 
   // Error States
   "error.network": "Network error communicating with the API.",

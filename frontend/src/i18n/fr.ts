@@ -147,6 +147,34 @@ export const fr = {
   "add_node.expires_in_title": "Temps restant avant expiration du jeton",
   "add_node.refresh": "Rafraîchir",
   "add_node.warning_privileges": "Exécutez cette commande sur le serveur cible avec les privilèges root. Le jeton expire dans {time}.",
+  "add_node.copy_command": "Copier la commande",
+
+  // Server Config Modal
+  "server_config.title": "Configurer le serveur",
+  "server_config.subtitle": "Modifier les paramètres d'identification de cette machine.",
+  "server_config.name_label": "Nom d'affichage",
+  "server_config.group_label": "Groupe",
+  "server_config.later": "Plus tard",
+  "server_config.save": "Enregistrer",
+  "server_config.success": "Configuration enregistrée",
+  "server_config.success_detail": "Les modifications ont été appliquées au serveur.",
+
+  // Node events
+  "node_events.new_server": "Nouveau serveur connecté",
+
+  // Servers toasts
+  "servers.toast.disabled": "Serveur désactivé",
+  "servers.toast.enabled": "Serveur réactivé",
+  "servers.toast.deleted": "Serveur supprimé",
+  "servers.toast.renamed": "Serveur renommé",
+
+  // Common
+  "common.close": "Fermer",
+  "common.copy": "Copier",
+  "common.cancel": "Annuler",
+
+  // Settings additions
+  "settings.cancel": "Annuler",
 
   // Error States
   "error.network": "Erreur réseau lors de la communication avec l'API.",
