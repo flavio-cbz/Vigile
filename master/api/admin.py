@@ -14,7 +14,6 @@ Endpoints:
   - DELETE /api/admin/plugins/{plugin_id}  → Uninstall a plugin module
 """
 
-import ast
 import json
 import logging
 import os
@@ -28,6 +27,7 @@ from fastapi.responses import JSONResponse
 from master.api.demo_data import is_demo
 from master.api.deps import get_db, get_settings, require_role, reset_llm_clients
 from master.api.schemas.admin import IntentConfigUpdate, LLMSettingsUpdate
+from master.api.worker_binary import refresh_binary_cache
 from master.core.audit import log_action, verify_chain
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import canonical_plugin_id, plugin_file_stem, plugin_manager
@@ -43,35 +43,6 @@ def _resolve_plugin_stem(plugin_id: str, plugins_dir: str) -> str:
         if os.path.isfile(os.path.join(plugins_dir, f"{candidate}.py")):
             return candidate
     return plugin_file_stem(plugin_id)
-
-
-def _mask_settings_response(settings: Any) -> dict:
-    return {
-        "master_url": settings.master_url,
-        "host": settings.host,
-        "port": settings.port,
-        "debug": settings.debug,
-        "database_path": settings.database_path,
-        "server_secret_key": "••••••••" if settings.server_secret_key else "",
-        "jwt_secret_key": "••••••••" if settings.jwt_secret_key else "",
-        "jwt_algorithm": settings.jwt_algorithm,
-        "jwt_access_token_ttl": settings.jwt_access_token_ttl,
-        "jwt_refresh_token_ttl": settings.jwt_refresh_token_ttl,
-        "join_token_ttl": settings.join_token_ttl,
-        "worker_token_ttl": settings.worker_token_ttl,
-        "worker_token_rotation": settings.worker_token_rotation,
-        "heartbeat_interval": settings.heartbeat_interval,
-        "heartbeat_lost_threshold": settings.heartbeat_lost_threshold,
-        "heartbeat_stale_threshold": settings.heartbeat_stale_threshold,
-        "master_key_path": settings.master_key_path,
-        "cors_origins": settings.cors_origins,
-        "trusted_proxies": settings.trusted_proxies,
-        "enforce_https": settings.enforce_https,
-        "llm_base_url": settings.llm_base_url,
-        "llm_api_key": "••••••••" if settings.llm_api_key else "",
-        "llm_model": settings.llm_model,
-        "plugins_dir": settings.plugins_dir,
-    }
 
 
 @router.get("/audit-verify", summary="Verify audit log integrity")
@@ -93,6 +64,7 @@ async def verify_audit_chain(
 async def list_active_connections(
     claims=Depends(require_role("admin")),
 ) -> JSONResponse:
+    """Debug endpoint: show all currently connected Worker nodes."""
     return JSONResponse(
         {
             "connected_nodes": node_manager.connected_node_ids(),
@@ -106,7 +78,39 @@ async def get_system_settings(
     claims=Depends(require_role("admin", "operator")),
     settings=Depends(get_settings),
 ) -> JSONResponse:
-    return JSONResponse(_mask_settings_response(settings))
+    """Return system settings with sensitive keys masked. Admin or operator only."""
+    masked_server_secret = "••••••••" if settings.server_secret_key else ""
+    masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
+    masked_llm_key = "••••••••" if settings.llm_api_key else ""
+
+    return JSONResponse(
+        {
+            "master_url": settings.master_url,
+            "host": settings.host,
+            "port": settings.port,
+            "debug": settings.debug,
+            "database_path": settings.database_path,
+            "server_secret_key": masked_server_secret,
+            "jwt_secret_key": masked_jwt_secret,
+            "jwt_algorithm": settings.jwt_algorithm,
+            "jwt_access_token_ttl": settings.jwt_access_token_ttl,
+            "jwt_refresh_token_ttl": settings.jwt_refresh_token_ttl,
+            "join_token_ttl": settings.join_token_ttl,
+            "worker_token_ttl": settings.worker_token_ttl,
+            "worker_token_rotation": settings.worker_token_rotation,
+            "heartbeat_interval": settings.heartbeat_interval,
+            "heartbeat_lost_threshold": settings.heartbeat_lost_threshold,
+            "heartbeat_stale_threshold": settings.heartbeat_stale_threshold,
+            "master_key_path": settings.master_key_path,
+            "cors_origins": settings.cors_origins,
+            "trusted_proxies": settings.trusted_proxies,
+            "enforce_https": settings.enforce_https,
+            "llm_base_url": settings.llm_base_url,
+            "llm_api_key": masked_llm_key,
+            "llm_model": settings.llm_model,
+            "plugins_dir": settings.plugins_dir,
+        }
+    )
 
 
 @router.post("/settings/llm", summary="Update LLM settings")
@@ -116,12 +120,14 @@ async def update_llm_settings(
     db=Depends(get_db),
     settings=Depends(get_settings),
 ) -> JSONResponse:
+    """Update LLM settings and persist overrides. Admin only."""
     if is_demo(claims):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Modifications non autorisées en mode démonstration.",
         )
 
+    # Secure API key masking logic
     api_key_to_save = body.llm_api_key
     if api_key_to_save == "••••••••":
         api_key_to_save = settings.llm_api_key
@@ -154,6 +160,7 @@ async def update_llm_settings(
         model=body.llm_model,
     )
 
+    # Reset lazy singletons in deps
     reset_llm_clients()
 
     await log_action(
@@ -167,7 +174,38 @@ async def update_llm_settings(
         },
     )
 
-    return JSONResponse(_mask_settings_response(settings))
+    masked_server_secret = "••••••••" if settings.server_secret_key else ""
+    masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
+    masked_llm_key = "••••••••" if settings.llm_api_key else ""
+
+    return JSONResponse(
+        {
+            "master_url": settings.master_url,
+            "host": settings.host,
+            "port": settings.port,
+            "debug": settings.debug,
+            "database_path": settings.database_path,
+            "server_secret_key": masked_server_secret,
+            "jwt_secret_key": masked_jwt_secret,
+            "jwt_algorithm": settings.jwt_algorithm,
+            "jwt_access_token_ttl": settings.jwt_access_token_ttl,
+            "jwt_refresh_token_ttl": settings.jwt_refresh_token_ttl,
+            "join_token_ttl": settings.join_token_ttl,
+            "worker_token_ttl": settings.worker_token_ttl,
+            "worker_token_rotation": settings.worker_token_rotation,
+            "heartbeat_interval": settings.heartbeat_interval,
+            "heartbeat_lost_threshold": settings.heartbeat_lost_threshold,
+            "heartbeat_stale_threshold": settings.heartbeat_stale_threshold,
+            "master_key_path": settings.master_key_path,
+            "cors_origins": settings.cors_origins,
+            "trusted_proxies": settings.trusted_proxies,
+            "enforce_https": settings.enforce_https,
+            "llm_base_url": settings.llm_base_url,
+            "llm_api_key": masked_llm_key,
+            "llm_model": settings.llm_model,
+            "plugins_dir": settings.plugins_dir,
+        }
+    )
 
 
 @router.post("/settings/llm/test", summary="Test LLM connection")
@@ -176,6 +214,7 @@ async def test_llm_settings(
     claims=Depends(require_role("admin")),
     settings=Depends(get_settings),
 ) -> JSONResponse:
+    """Test LLM connection with the provided configuration. Admin only."""
     if is_demo(claims):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -211,6 +250,7 @@ async def update_intent_config(
     body: IntentConfigUpdate,
     claims=Depends(require_role("admin")),
 ) -> JSONResponse:
+    """Update the default max age for pending intents. Admin only."""
     node_manager.set_default_intent_max_age(body.default_intent_max_age)
     db = get_db_conn()
     await log_action(
@@ -230,6 +270,7 @@ async def list_plugins(
     """Get status, configuration, schema, and hooks of all plugins in the directory."""
     db = get_db_conn()
 
+    # 1. Get enabled/disabled status and configs from database
     plugin_db_states = {}
     try:
         async with db.execute(
@@ -241,6 +282,7 @@ async def list_plugins(
     except Exception as e:
         logger.error("Failed to query plugin_configs table: %s", e)
 
+    # 2. Scan directory
     plugins_dir = settings.plugins_dir
     plugin_files = []
     if os.path.isdir(plugins_dir):
@@ -248,18 +290,14 @@ async def list_plugins(
             if fname.endswith(".py") and not fname.startswith("_"):
                 plugin_files.append(fname[:-3])
 
-    hooks_registry = plugin_manager.get_hooks()
-    plugin_hooks_map = {
-        plugin_id: [name for name, plugins in hooks_registry.items() if plugin_id in plugins]
-        for plugin_id in plugin_manager.loaded_plugins
-    }
-
+    # 3. Build response for each plugin
     result = []
     for name in plugin_files:
         plugin_id = canonical_plugin_id(name)
         is_loaded = plugin_id in plugin_manager.loaded_plugins
         db_state = plugin_db_states.get(plugin_id, {"enabled": True, "config": {}})
 
+        # Dynamically inspect metadata and schema if loaded
         meta = {
             "name": name.replace("_", " ").title(),
             "description": "Custom Python extension module.",
@@ -276,6 +314,13 @@ async def list_plugins(
                 except Exception:
                     pass
 
+        # Find hooks registered by this plugin
+        plugin_hooks = []
+        hooks_registry = plugin_manager.get_hooks()
+        for hook_name, plugins in hooks_registry.items():
+            if plugin_id in plugins:
+                plugin_hooks.append(hook_name)
+
         result.append(
             {
                 "id": plugin_id,
@@ -286,7 +331,7 @@ async def list_plugins(
                 "enabled": db_state["enabled"],
                 "config": db_state["config"],
                 "loaded": is_loaded,
-                "hooks": plugin_hooks_map.get(plugin_id, []),
+                "hooks": plugin_hooks,
             }
         )
 
@@ -324,12 +369,25 @@ async def upload_plugin(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erreur de syntaxe Python: {str(e)}")
 
-    tree = ast.parse(source)
-    if not any(isinstance(node, ast.FunctionDef) and node.name == "register" for node in tree.body):
-        raise HTTPException(
-            status_code=400,
-            detail="Validation du contrat échouée: le plugin doit définir une fonction 'register(pm)'.",
-        )
+    # 2. AST validation for register contract
+    import ast
+
+    try:
+        tree = ast.parse(source)
+        has_register = False
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "register":
+                has_register = True
+                break
+        if not has_register:
+            raise HTTPException(
+                status_code=400,
+                detail="Validation du contrat échouée: le plugin doit définir une fonction 'register(pm)'.",
+            )
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail=f"Validation AST échouée: {str(e)}")
 
     plugin_name = file.filename[:-3]
     if "/" in plugin_name or "\\" in plugin_name or ".." in plugin_name:
@@ -386,6 +444,7 @@ async def configure_plugin(
 
     db = get_db_conn()
 
+    # Validate plugin exists
     plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
     plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
     if not os.path.isfile(plugin_path):
@@ -399,6 +458,7 @@ async def configure_plugin(
     )
     await db.commit()
 
+    # Log audit
     await log_action(
         db,
         user_id=claims["sub"],
@@ -425,11 +485,13 @@ async def toggle_plugin(
 
     db = get_db_conn()
 
+    # Validate plugin exists
     plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
     plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
     if not os.path.isfile(plugin_path):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
+    # Get current state
     enabled = True
     async with db.execute(
         "SELECT enabled FROM plugin_configs WHERE plugin_id = ?", (plugin_id,)
@@ -446,11 +508,13 @@ async def toggle_plugin(
     )
     await db.commit()
 
+    # Reload or Unload dynamically
     if new_state:
         plugin_manager.load_plugin(plugin_stem, settings.plugins_dir)
     else:
         await plugin_manager.unload_plugin(plugin_stem)
 
+    # Log audit
     await log_action(
         db,
         user_id=claims["sub"],
@@ -486,13 +550,16 @@ async def delete_plugin(
 
     db = get_db_conn()
 
+    # Validate plugin exists
     plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
     plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
     if not os.path.isfile(plugin_path):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
+    # 1. Unload hooks dynamically
     await plugin_manager.unload_plugin(plugin_stem)
 
+    # 2. Remove file from disk
     try:
         os.remove(plugin_path)
     except Exception as e:
@@ -500,9 +567,11 @@ async def delete_plugin(
             status_code=500, detail=f"Impossible de supprimer le fichier du plugin : {str(e)}"
         )
 
+    # 3. Clean up database entry
     await db.execute("DELETE FROM plugin_configs WHERE plugin_id = ?", (plugin_id,))
     await db.commit()
 
+    # 4. Log audit
     await log_action(
         db, user_id=claims["sub"], action="DELETE_PLUGIN", details={"plugin_id": plugin_id}
     )
@@ -510,3 +579,11 @@ async def delete_plugin(
     return JSONResponse(
         {"status": "success", "message": f"Plugin '{plugin_id}' désinstallé avec succès."}
     )
+
+
+@router.get("/binary/refresh", summary="Force re-fetch of worker binary cache")
+async def admin_refresh_binary_cache(
+    claims=Depends(require_role("admin")),
+) -> JSONResponse:
+    result = await refresh_binary_cache()
+    return JSONResponse(result)

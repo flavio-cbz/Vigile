@@ -2,22 +2,30 @@
 Vigile — Node Manager
 
 Manages the lifecycle of all Worker Nodes:
-  - State machine (PENDING → ENROLLING → CONNECTED → LOST → STALE → REVOKED)
+  - State machine (PENDING → ENROLLING → UNCONFIGURED → CONNECTED → LOST → STALE → DISABLED)
   - In-memory registry of active WebSocket connections
   - Background heartbeat monitor task
   - Intent routing to connected Workers
+  - Hard-delete on revoke (cascades to join_tokens, worker_tokens, metrics_snapshots, etc.)
 
 State transitions (allowed):
   PENDING      → ENROLLING   (token validated, handshake started)
   ENROLLING    → CONNECTED   (Ed25519 handshake complete)
   ENROLLING    → PENDING     (handshake failed/timeout)
   CONNECTED    → LOST        (heartbeat missed > threshold)
-  CONNECTED    → REVOKED     (manual revocation)
   LOST         → CONNECTED   (Worker reconnected)
   LOST         → STALE       (lost for > 24h)
   STALE        → CONNECTED   (Worker reconnected)
-  STALE        → REVOKED     (manual revocation)
-  REVOKED      → (terminal)  (no transitions out)
+
+Deletion:
+  Any state → (row removed) via `delete_node()`. The FK ON DELETE CASCADE clauses
+  on join_tokens, worker_tokens, metrics_snapshots, action_proposals, and
+  chat_sessions clean up child rows automatically. The audit_log keeps the
+  NODE_DELETED entry forever (it stores `node_id` as plain TEXT, no FK).
+
+Note: `NodeState.REVOKED` is kept as an enum value for backward compatibility
+with legacy rows, but the application no longer transitions to it — a revoked
+node is hard-deleted from the nodes table.
 """
 
 import asyncio
@@ -46,30 +54,36 @@ logger = logging.getLogger(__name__)
 class NodeState(str, Enum):
     PENDING = "PENDING"  # Token generated, Worker not yet connected
     ENROLLING = "ENROLLING"  # Handshake in progress
+    UNCONFIGURED = "UNCONFIGURED"  # Ed25519 OK, awaiting operator confirm of name+group
     CONNECTED = "CONNECTED"  # Fully enrolled, WSS active, heartbeat OK
     RECONNECTING = "RECONNECTING"  # Connection dropped, Worker attempting reconnect
     LOST = "LOST"  # No heartbeat for > heartbeat_lost_threshold
     STALE = "STALE"  # LOST for > heartbeat_stale_threshold
-    REVOKED = "REVOKED"  # Manually revoked, all connections refused
+    DISABLED = "DISABLED"  # Operator-disabled (orthogonal to connectivity)
+    REVOKED = "REVOKED"  # Legacy value — only present in rows from before the hard-delete migration.
 
 
 VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
     (NodeState.PENDING, NodeState.ENROLLING),
-    (NodeState.ENROLLING, NodeState.CONNECTED),
+    (NodeState.ENROLLING, NodeState.UNCONFIGURED),  # Ed25519 handshake done
+    (NodeState.ENROLLING, NodeState.CONNECTED),  # legacy direct path
     (NodeState.ENROLLING, NodeState.PENDING),  # handshake failed
+    (NodeState.UNCONFIGURED, NodeState.CONNECTED),  # operator confirmed
+    (NodeState.UNCONFIGURED, NodeState.DISABLED),
     (NodeState.CONNECTED, NodeState.LOST),
-    (NodeState.CONNECTED, NodeState.REVOKED),
     (NodeState.CONNECTED, NodeState.RECONNECTING),
+    (NodeState.CONNECTED, NodeState.DISABLED),
     (NodeState.RECONNECTING, NodeState.CONNECTED),
     (NodeState.RECONNECTING, NodeState.LOST),
     (NodeState.LOST, NodeState.CONNECTED),  # Worker came back
     (NodeState.LOST, NodeState.STALE),
-    (NodeState.LOST, NodeState.REVOKED),
     (NodeState.LOST, NodeState.ENROLLING),  # Re-enrollment allowed
     (NodeState.STALE, NodeState.CONNECTED),  # Worker came back
-    (NodeState.STALE, NodeState.REVOKED),
     (NodeState.STALE, NodeState.ENROLLING),  # Re-enrollment allowed
     (NodeState.RECONNECTING, NodeState.ENROLLING),  # Re-enrollment allowed
+    (NodeState.DISABLED, NodeState.CONNECTED),
+    (NodeState.DISABLED, NodeState.LOST),
+    (NodeState.DISABLED, NodeState.ENROLLING),
 }
 
 
@@ -79,6 +93,8 @@ VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
 
 
 class ActiveConnection:
+    """Wraps an active WebSocket with metadata."""
+
     def __init__(self, node_id: str, websocket: WebSocket) -> None:
         self.node_id = node_id
         self.websocket = websocket
@@ -98,6 +114,7 @@ class ActiveConnection:
 # ---------------------------------------------------------------------------
 
 
+# Valid column names for safe SQL updates in transition_state
 _VALID_NODE_FIELDS: set[str] = {
     "state",
     "hostname",
@@ -109,6 +126,8 @@ _VALID_NODE_FIELDS: set[str] = {
     "last_heartbeat",
     "enrolled_at",
     "name",
+    "node_group",
+    "disabled",
 }
 
 
@@ -293,11 +312,11 @@ class NodeManager:
                                 if c.get("state") == "running"
                                 or "up" in c.get("status", "").lower()
                             ]
-                            known_conts = {
+                            known_conts = [
                                 p.get("container_name")
                                 for p in profile_dict.get("known_heavy_processes", [])
                                 if p.get("container_name")
-                            }
+                            ]
                             new_apps_detected = any(fc not in known_conts for fc in fresh_running)
 
                         if expired_time or new_apps_detected:
@@ -322,16 +341,32 @@ class NodeManager:
     # Node creation (called when Admin generates a join token)
     # -----------------------------------------------------------------------
 
+    def generate_node_id(self) -> str:
+        """
+        Generate a new node_id (UUID) without persisting anything.
+
+        The corresponding `nodes` row is only created when the Worker
+        completes the enrollment handshake. Until then, only the
+        `join_tokens` row references this id.
+        """
+        return str(uuid.uuid4())
+
     async def create_node(
         self,
         db: aiosqlite.Connection,
         *,
         name: str,
         ip_prefix: str = "",
+        group: str = "",
     ) -> str:
         """
         Pre-create a node entry in PENDING state.
         Returns the node_id (UUID).
+
+        NOTE: Prefer `generate_node_id()` in production flows. This method
+        remains for tests and explicit pre-creation use cases. A node
+        created here is a 'phantom' until the Worker enrolls — the row
+        sits in PENDING state in the DB.
         """
         node_id = str(uuid.uuid4())
         now = time.time()
@@ -339,13 +374,13 @@ class NodeManager:
         await db.execute(
             """
             INSERT INTO nodes
-                (id, name, ip_prefix, state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (id, name, ip_prefix, node_group, state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (node_id, name, ip_prefix, NodeState.PENDING.value, now, now),
+            (node_id, name, ip_prefix, group, NodeState.PENDING.value, now, now),
         )
         await db.commit()
-        logger.info("Node pre-created: id=%s name=%s", node_id, name)
+        logger.info("Node pre-created: id=%s name=%s group=%s", node_id, name, group)
         return node_id
 
     # -----------------------------------------------------------------------
@@ -390,8 +425,9 @@ class NodeManager:
                     raise ValueError(f"Invalid node field: {k}")
             fields.update(extra_fields)
 
-        set_clause = ", ".join(f"{k} = ?" for k in fields)
-        values = list(fields.values()) + [node_id]
+        updates = {k: v for k, v in fields.items()}
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [node_id]
 
         await db.execute(
             f"UPDATE nodes SET {set_clause} WHERE id = ?",
@@ -400,36 +436,261 @@ class NodeManager:
         await db.commit()
         logger.info("Node %s: %s → %s", node_id, current_state.value, new_state.value)
 
-    async def revoke_node(
+        try:
+            from master.core.event_bus import get_event_bus
+
+            await get_event_bus().publish(
+                "node.state",
+                {
+                    "node_id": node_id,
+                    "from_state": current_state.value,
+                    "new_state": new_state.value,
+                    "ts": now,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish node.state event")
+
+    async def delete_node(
         self,
         db: aiosqlite.Connection,
         node_id: str,
-        revoked_by: str,
-    ) -> None:
+        deleted_by: str,
+    ) -> dict[str, Any] | None:
         """
-        Revoke a node: update state, disconnect active WebSocket, revoke all tokens.
+        Hard-delete a node and all its dependent rows.
+
+        Cascades (via FK ON DELETE CASCADE) clean up:
+          - join_tokens
+          - worker_tokens
+          - metrics_snapshots
+          - action_proposals
+          - chat_sessions (node_id set to NULL via ON DELETE SET NULL)
+
+        The audit_log keeps a NODE_DELETED entry forever (no FK on node_id).
+
+        Returns the deleted node's last known state and name (for audit details),
+        or None if the node was not found.
         """
+        async with db.execute(
+            "SELECT state, name, hostname FROM nodes WHERE id = ?", (node_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+
+        previous_state = row["state"]
+        previous_name = row["name"]
+        previous_hostname = row["hostname"]
         now = time.time()
 
-        await db.execute(
-            "UPDATE nodes SET state = ?, updated_at = ? WHERE id = ?",
-            (NodeState.REVOKED.value, now, node_id),
-        )
-        await db.execute(
-            "UPDATE worker_tokens SET revoked = 1, revoked_at = ?, revoked_by = ? WHERE node_id = ?",
-            (now, revoked_by, node_id),
-        )
+        await db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         await db.commit()
 
         async with self._lock:
             conn = self._connections.pop(node_id, None)
         if conn is not None:
             try:
-                await conn.websocket.close(code=4403, reason="Node revoked")
+                await conn.websocket.close(code=4403, reason="Node deleted by operator")
             except Exception:
                 pass
 
-        logger.warning("Node REVOKED: id=%s by=%s", node_id, revoked_by)
+        logger.warning("Node DELETED: id=%s by=%s", node_id, deleted_by)
+
+        try:
+            from master.core.event_bus import get_event_bus
+
+            bus = get_event_bus()
+            await bus.publish(
+                "node.deleted",
+                {
+                    "node_id": node_id,
+                    "previous_state": previous_state,
+                    "ts": now,
+                },
+            )
+            await bus.publish(
+                "node.state",
+                {
+                    "node_id": node_id,
+                    "from_state": previous_state,
+                    "new_state": NodeState.REVOKED.value,
+                    "ts": now,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish delete events")
+
+        try:
+            await log_action(
+                db,
+                user_id=deleted_by,
+                action="NODE_DELETED",
+                node_id=node_id,
+                details={
+                    "previous_state": previous_state,
+                    "previous_name": previous_name,
+                    "previous_hostname": previous_hostname,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to log NODE_DELETED audit entry")
+
+        return {
+            "id": node_id,
+            "state": previous_state,
+            "name": previous_name,
+            "hostname": previous_hostname,
+        }
+
+    async def configure_node(
+        self,
+        db: aiosqlite.Connection,
+        node_id: str,
+        *,
+        name: str,
+        group: str | None,
+    ) -> None:
+        """
+        Operator confirmed name+group: transition UNCONFIGURED -> CONNECTED.
+        """
+        await self.transition_state(
+            db,
+            node_id,
+            NodeState.CONNECTED,
+            extra_fields={"name": name, "node_group": group or ""},
+        )
+        await log_action(
+            db,
+            user_id="system",
+            action="CONFIGURE_NODE",
+            node_id=node_id,
+            details={"name": name, "group": group or ""},
+        )
+
+    async def set_disabled(
+        self,
+        db: aiosqlite.Connection,
+        node_id: str,
+        disabled: bool,
+        by_user: str,
+    ) -> None:
+        """
+        Toggle the `disabled` flag and transition to/from DISABLED accordingly.
+        Closing the active WebSocket with code 4429 if disabling an active node.
+        """
+        async with db.execute(
+            "SELECT state, disabled FROM nodes WHERE id = ?", (node_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            raise ValueError(f"Node not found: {node_id}")
+        current_state = NodeState(row["state"])
+        currently_disabled = bool(row["disabled"])
+
+        if disabled == currently_disabled:
+            return
+
+        now = time.time()
+        await db.execute(
+            "UPDATE nodes SET disabled = ?, updated_at = ? WHERE id = ?",
+            (1 if disabled else 0, now, node_id),
+        )
+        await db.commit()
+
+        target_state: NodeState | None = None
+        if disabled and current_state != NodeState.DISABLED:
+            target_state = NodeState.DISABLED
+        elif not disabled and current_state == NodeState.DISABLED:
+            async with self._lock:
+                is_alive = node_id in self._connections
+            target_state = NodeState.CONNECTED if is_alive else NodeState.LOST
+
+        if target_state is not None and target_state != current_state:
+            await self.transition_state(db, node_id, target_state)
+
+        if disabled:
+            async with self._lock:
+                conn = self._connections.pop(node_id, None)
+            if conn is not None:
+                try:
+                    await conn.websocket.close(code=4429, reason="Node disabled by operator")
+                except Exception:
+                    pass
+
+        await log_action(
+            db,
+            user_id=by_user,
+            action="DISABLE_NODE" if disabled else "ENABLE_NODE",
+            node_id=node_id,
+            details={
+                "from_state": current_state.value,
+                "new_state": target_state.value if target_state else current_state.value,
+            },
+        )
+        logger.info("Node %s: disabled=%s by=%s", node_id, disabled, by_user)
+
+    async def patch_metadata(
+        self,
+        db: aiosqlite.Connection,
+        node_id: str,
+        *,
+        name: str | None = None,
+        group: str | None = None,
+        by_user: str = "system",
+    ) -> None:
+        """
+        Update name and/or group on an existing node. Does NOT change state.
+        """
+        fields: dict[str, Any] = {"updated_at": time.time()}
+        details: dict[str, Any] = {}
+        if name is not None:
+            fields["name"] = name
+            details["name"] = name
+        if group is not None:
+            fields["node_group"] = group
+            details["group"] = group
+        if len(fields) == 1:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [node_id]
+        await db.execute(f"UPDATE nodes SET {set_clause} WHERE id = ?", values)
+        await db.commit()
+        await log_action(
+            db,
+            user_id=by_user,
+            action="UPDATE_NODE",
+            node_id=node_id,
+            details=details,
+        )
+
+    async def invalidate_join_tokens(self, db: aiosqlite.Connection, node_id: str) -> int:
+        """
+        Mark all existing join tokens for this node as consumed+expired.
+        Returns the number of tokens invalidated.
+        """
+        now = time.time()
+        async with db.execute(
+            "SELECT id FROM join_tokens WHERE node_id = ? AND consumed = 0",
+            (node_id,),
+        ) as cursor:
+            ids = [row["id"] for row in await cursor.fetchall()]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        await db.execute(
+            f"UPDATE join_tokens SET consumed = 1, expires_at = ? WHERE id IN ({placeholders})",
+            [now, *ids],
+        )
+        await db.commit()
+        return len(ids)
+
+    async def is_disabled(self, db: aiosqlite.Connection, node_id: str) -> bool:
+        async with db.execute("SELECT disabled FROM nodes WHERE id = ?", (node_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return False
+        return bool(row["disabled"])
 
     async def lockdown(self) -> None:
         """
@@ -612,6 +873,7 @@ class NodeManager:
                 logger.exception("Heartbeat monitor error (will retry)")
 
     def _cleanup_stale_intents(self) -> int:
+        """Remove pending intents that are done or have been waiting longer than their max_age."""
         now = time.time()
         stale_ids: list[str] = []
         for intent_id, future in list(self._pending_intents.items()):
@@ -703,14 +965,24 @@ class NodeManager:
         state: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        include_revoked: bool = False,
     ) -> list[dict[str, Any]]:
-        """List nodes, optionally filtered by state, with pagination."""
+        """List nodes, optionally filtered by state, with pagination.
+
+        By default, REVOKED rows are excluded (legacy state from before the
+        hard-delete migration — they should not exist in fresh DBs). Pass
+        `include_revoked=True` to include them (admin/debug only).
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
         if state:
-            sql = "SELECT * FROM nodes WHERE state = ? ORDER BY created_at DESC"
-            params: list[Any] = [state]
-        else:
-            sql = "SELECT * FROM nodes ORDER BY created_at DESC"
-            params = []
+            clauses.append("state = ?")
+            params.append(state)
+        if not include_revoked:
+            clauses.append("state != ?")
+            params.append(NodeState.REVOKED.value)
+        where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = f"SELECT * FROM nodes{where_sql} ORDER BY created_at DESC"
 
         if limit is not None:
             sql += " LIMIT ?"

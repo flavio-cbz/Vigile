@@ -8,10 +8,9 @@ Endpoints:
   GET    /api/nodes                          Operator+: list all nodes
   GET    /api/nodes/{node_id}                Operator+: node details
   GET    /api/nodes/{node_id}/stats          Operator+: latest metrics snapshots
-  DELETE /api/nodes/{node_id}                Admin: revoke a node
+  DELETE /api/nodes/{node_id}                Admin: hard-delete a node (cascades to tokens, metrics, etc.)
 """
 
-import json
 import logging
 import time
 import uuid
@@ -22,7 +21,15 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from master.api.demo_data import DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
-from master.api.deps import DB, Insights, get_locale, get_node_manager, get_security, require_role
+from master.api.deps import (
+    DB,
+    CurrentUser,
+    Insights,
+    get_locale,
+    get_node_manager,
+    get_security,
+    require_role,
+)
 from master.core.audit import log_action
 from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
 from master.core.node_manager import NodeManager, NodeState
@@ -33,14 +40,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
 
+# ---------------------------------------------------------------------------
+# Request / Response models
+# ---------------------------------------------------------------------------
+
+
 class GenerateJoinRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=128, description="Human-readable node label")
+    name: str | None = Field(
+        default=None, max_length=128, description="Optional pre-filled human label"
+    )
+    group: str | None = Field(default=None, max_length=128, description="Optional group/tag")
     ip_prefix: str = Field(
         default="",
         max_length=64,
         pattern=r"^$|^[\d.]+$",
-        description="Optional IP prefix restriction (e.g. '192.168.1.'). Empty = no restriction.",
+        description="DEPRECATED, ignored. Kept for back-compat with older clients.",
     )
+
+
+class NodePatchRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    group: str | None = Field(default=None, max_length=128)
+    disabled: bool | None = None
+
+
+class ConfigureRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    group: str | None = Field(default=None, max_length=128)
 
 
 class JoinTokenResponse(BaseModel):
@@ -63,6 +89,9 @@ class NodeResponse(BaseModel):
     enrolled_at: float | None
     created_at: float
     updated_at: float
+    group: str | None
+    disabled: bool
+    enrolled_recently: bool
 
 
 class BulkNodeStatus(BaseModel):
@@ -76,6 +105,10 @@ class BulkNodeStatus(BaseModel):
 class BulkStatusResponse(BaseModel):
     statuses: dict[str, BulkNodeStatus]
 
+
+# ---------------------------------------------------------------------------
+# Kickstart script template
+# ---------------------------------------------------------------------------
 
 KICKSTART_TEMPLATE = """\
 #!/usr/bin/env bash
@@ -222,6 +255,11 @@ echo "[vigile] Check status: systemctl status vigile-worker
 """
 
 
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
 @router.post(
     "/generate-join",
     response_model=JoinTokenResponse,
@@ -247,6 +285,7 @@ async def generate_join_token(
 
     The token is single-use and expires in 30 minutes.
     """
+    # Demo mode: return mock response
     if is_demo(claims):
         master_url = request.app.state.master_url
         fake_token = f"demo-join-token-{uuid.uuid4()}"
@@ -260,11 +299,28 @@ async def generate_join_token(
             ),
         )
 
-    node_id = await nm.create_node(db, name=body.name, ip_prefix=body.ip_prefix)
+    # Generate node_id (UUID) without persisting. The `nodes` row is created
+    # by the Worker enrollment handshake — see master/ws/worker_handler.py.
+    # This avoids "phantom" nodes: if the Worker never connects, no row leaks.
+    # `group` and `ip_prefix` are forwarded through the JOIN_TOKEN payload and
+    # applied to the `nodes` row at enrollment time.
+    node_id = nm.generate_node_id()
+    pending_name = body.name or ""
+    pending_group = body.group or ""
 
-    token, payload = sec.generate_join_token(node_id=node_id, ip_prefix=body.ip_prefix)
+    # 2. Generate JOIN_TOKEN (returns token + payload together)
+    # `name` and `group` are carried in the payload so the Worker enrollment
+    # can persist them on first INSERT (no `nodes` row exists yet).
+    token, payload = sec.generate_join_token(
+        node_id=node_id,
+        ip_prefix=body.ip_prefix,
+        name=pending_name,
+        group=pending_group,
+    )
     token_hash = sec.join_token_hash(token)
 
+    # 3. Store token in DB. The FK on join_tokens.node_id is dropped (migration
+    # 006) so this row can exist before the corresponding `nodes` row.
     token_id = str(uuid.uuid4())
     now = time.time()
     await db.execute(
@@ -283,12 +339,17 @@ async def generate_join_token(
     )
     await db.commit()
 
+    # 4. Audit (no node_id FK — audit log keeps the reference for traceability)
     await log_action(
         db,
         user_id=claims["sub"],
         action="GENERATE_JOIN_TOKEN",
         node_id=node_id,
-        details={"node_name": body.name, "ip_prefix": body.ip_prefix},
+        details={
+            "node_name": pending_name,
+            "node_group": pending_group,
+            "ip_prefix": body.ip_prefix,
+        },
     )
 
     master_url = request.app.state.master_url
@@ -349,6 +410,8 @@ async def list_nodes(
     offset: int = Query(default=0, ge=0, description="Result offset for pagination"),
     nm: NodeManager = Depends(get_node_manager),
 ) -> list[NodeResponse]:
+    """Return a list of registered nodes, with optional pagination."""
+    # Demo mode: return mock data
     if is_demo(claims):
         return [NodeResponse(**_node_to_response(n)) for n in DEMO_NODES]
 
@@ -369,6 +432,7 @@ async def verify_chain(
     ),
 ) -> dict:
     """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
+    # Demo mode: return mock data
     if is_demo(claims):
         return {"verified": True, "entries_checked": 5, "corrupted": False, "valid": True}
 
@@ -388,6 +452,9 @@ async def get_bulk_status(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> BulkStatusResponse:
+    """Get the latest metrics snapshots and container counts for all nodes in bulk."""
+    import json
+
     if is_demo(claims):
         demo_statuses = {}
         for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
@@ -419,6 +486,8 @@ async def get_bulk_status(
                 demo_statuses[node_id] = BulkNodeStatus()
         return BulkStatusResponse(statuses=demo_statuses)
 
+    # Real mode
+    # 1. Fetch latest snapshots using window function
     snapshots_map = {}
     async with db.execute(
         """
@@ -445,6 +514,7 @@ async def get_bulk_status(
                 "uptime": row["uptime_seconds"],
             }
 
+    # 2. Combine with container count from nodes cached_containers_json
     statuses = {}
     async with db.execute("SELECT id, cached_containers_json FROM nodes") as cursor:
         for row in await cursor.fetchall():
@@ -458,7 +528,7 @@ async def get_bulk_status(
                     conts = json.loads(cached_containers)
                     if isinstance(conts, list):
                         containers_count = len(conts)
-                except json.JSONDecodeError:
+                except Exception:
                     pass
 
             statuses[node_id] = BulkNodeStatus(
@@ -483,6 +553,8 @@ async def get_node(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeResponse:
+    """Fetch detailed information for a single node."""
+    # Demo mode: return mock data
     if is_demo(claims):
         node = get_demo_node(node_id)
         if node is None:
@@ -498,42 +570,240 @@ async def get_node(
 @router.delete(
     "/{node_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Revoke a node (Admin only)",
+    summary="Hard-delete a node (Admin only)",
 )
-async def revoke_node(
+async def delete_node(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> None:
     """
-    Revoke a node: disconnect it, invalidate its tokens, and mark it REVOKED.
-    This action is permanent — a new enrollment is required to re-add the node.
+    Hard-delete a node from the database.
+
+    This action is permanent — the row is removed and all dependent rows
+    (join_tokens, worker_tokens, metrics_snapshots, action_proposals) are
+    cascaded away by FK ON DELETE CASCADE. The audit_log keeps a NODE_DELETED
+    entry forever (it stores node_id as plain TEXT, no FK). A new enrollment
+    is required to re-add the same node.
     """
+    # Demo mode: no-op (simulate successful deletion)
     if is_demo(claims):
         return None
 
-    node = await nm.get_node(db, node_id)
-    if node is None:
+    deleted = await nm.delete_node(db, node_id, deleted_by=claims["sub"])
+    if deleted is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    if node["state"] == NodeState.REVOKED.value:
+    logger.warning("Node %s hard-deleted by user %s", node_id, claims["sub"])
+
+
+@router.patch(
+    "/{node_id}",
+    response_model=NodeResponse,
+    summary="Update node metadata or disable flag (Operator+ for metadata, Admin for disable)",
+)
+async def patch_node(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    body: NodePatchRequest,
+    db: DB,
+    claims: CurrentUser,
+    nm: NodeManager = Depends(get_node_manager),
+) -> NodeResponse:
+    """
+    Partial update of a node.
+      - `name` / `group` : operator+ can change; empty string for `group` clears the value.
+      - `disabled`       : admin only; toggles the disable flag and may transition state.
+    """
+    if is_demo(claims):
+        demo_node = get_demo_node(node_id)
+        if demo_node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+        if body.name is not None:
+            demo_node["name"] = body.name
+        if body.group is not None:
+            demo_node["node_group"] = body.group
+        if body.disabled is not None:
+            demo_node["disabled"] = bool(body.disabled)
+            demo_node["state"] = "DISABLED" if body.disabled else demo_node["state"]
+        demo_node["updated_at"] = time.time()
+        return NodeResponse(**_node_to_response(demo_node))
+
+    existing = await nm.get_node(db, node_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    user_role = claims.get("role", "viewer")
+    has_disabled_field = body.disabled is not None
+    has_metadata_field = body.name is not None or body.group is not None
+
+    if has_disabled_field and user_role != "admin":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Node is already revoked",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required to enable/disable a node",
         )
 
-    await nm.revoke_node(db, node_id, revoked_by=claims["sub"])
+    if has_disabled_field:
+        await nm.set_disabled(db, node_id, body.disabled, by_user=claims["sub"])  # type: ignore[arg-type]
+
+    if has_metadata_field:
+        # Empty string for group means clear; Pydantic keeps it as empty string
+        # (None means "field not provided", "" means "clear it").
+        group_value = body.group if body.group != "" else None
+        await nm.patch_metadata(
+            db,
+            node_id,
+            name=body.name,
+            group=group_value,
+            by_user=claims["sub"],
+        )
+
+    updated = await nm.get_node(db, node_id)
+    return NodeResponse(**_node_to_response(updated))  # type: ignore[arg-type]
+
+
+@router.post(
+    "/{node_id}/configure",
+    response_model=NodeResponse,
+    summary="Confirm node name+group after enrollment handshake (Operator+)",
+)
+async def configure_node(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    body: ConfigureRequest,
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+) -> NodeResponse:
+    """
+    Operator confirms the Worker's name and group after Ed25519 handshake.
+    Transitions UNCONFIGURED -> CONNECTED.
+    """
+    if is_demo(claims):
+        demo_node = get_demo_node(node_id)
+        if demo_node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+        demo_node["name"] = body.name
+        demo_node["node_group"] = body.group or ""
+        if demo_node["state"] == "UNCONFIGURED":
+            demo_node["state"] = "CONNECTED"
+        demo_node["updated_at"] = time.time()
+        return NodeResponse(**_node_to_response(demo_node))
+
+    existing = await nm.get_node(db, node_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    if existing["state"] != NodeState.UNCONFIGURED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Node is not awaiting configuration (state={existing['state']}).",
+        )
+
+    try:
+        await nm.configure_node(db, node_id, name=body.name, group=body.group)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+    updated = await nm.get_node(db, node_id)
+    return NodeResponse(**_node_to_response(updated))  # type: ignore[arg-type]
+
+
+@router.post(
+    "/{node_id}/regenerate-token",
+    response_model=JoinTokenResponse,
+    summary="Invalidate existing JOIN_TOKENs and issue a fresh one (Admin only)",
+    status_code=status.HTTP_201_CREATED,
+)
+async def regenerate_join_token(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    request: Request,
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("admin"))],
+    sec: SecurityManager = Depends(get_security),
+    nm: NodeManager = Depends(get_node_manager),
+) -> JoinTokenResponse:
+    """
+    Issue a new JOIN_TOKEN for an already-pre-created (PENDING) node, invalidating
+    any tokens previously issued for it. The node must still be in PENDING state.
+    """
+    if is_demo(claims):
+        master_url = request.app.state.master_url
+        fake_token = f"demo-regen-{uuid.uuid4()}"
+        return JoinTokenResponse(
+            node_id=node_id,
+            token=fake_token,
+            expires_in=1800,
+            curl_command=(
+                f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
+                f"sh -s -- --token {fake_token} --master {master_url}"
+            ),
+        )
+
+    existing = await nm.get_node(db, node_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    if existing["state"] != NodeState.PENDING.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Node already enrolled. Cannot regenerate token.",
+        )
+
+    invalidated = await nm.invalidate_join_tokens(db, node_id)
+    logger.info("Invalidated %d join tokens for node %s", invalidated, node_id)
+
+    token, payload = sec.generate_join_token(node_id=node_id, ip_prefix="")
+    token_hash = sec.join_token_hash(token)
+
+    token_id = str(uuid.uuid4())
+    now = time.time()
+    await db.execute(
+        """
+        INSERT INTO join_tokens (id, node_id, token_hash, payload_b64, consumed, expires_at, created_at)
+        VALUES (?, ?, ?, ?, 0, ?, ?)
+        """,
+        (
+            token_id,
+            node_id,
+            token_hash,
+            token.split(".", 1)[1],
+            payload["expires_at"],
+            now,
+        ),
+    )
+    await db.execute(
+        "UPDATE nodes SET updated_at = ? WHERE id = ?",
+        (now, node_id),
+    )
+    await db.commit()
 
     await log_action(
         db,
         user_id=claims["sub"],
-        action="REVOKE_NODE",
+        action="REGENERATE_JOIN_TOKEN",
         node_id=node_id,
-        details={"node_name": node.get("name"), "previous_state": node["state"]},
+        details={"invalidated": invalidated},
     )
 
-    logger.warning("Node %s revoked by user %s", node_id, claims["sub"])
+    master_url = request.app.state.master_url
+    curl_command = (
+        f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
+        f"sh -s -- --token {token} --master {master_url}"
+    )
+    expires_in = int(payload["expires_at"] - now)
+    logger.info("JOIN_TOKEN regenerated: node_id=%s expires_in=%ds", node_id, expires_in)
+
+    return JoinTokenResponse(
+        node_id=node_id,
+        token=token,
+        expires_in=expires_in,
+        curl_command=curl_command,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Logs response model
+# ---------------------------------------------------------------------------
 
 
 class LogsResponse(BaseModel):
@@ -545,6 +815,11 @@ class LogsResponse(BaseModel):
     service: str | None = None
     path: str | None = None
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Stats response models
+# ---------------------------------------------------------------------------
 
 
 class MetricsSnapshotResponse(BaseModel):
@@ -587,6 +862,8 @@ async def get_node_stats(
     limit: Annotated[int, Query(ge=1, le=100, description="Number of snapshots to return")] = 10,
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
+    """Return the latest metrics snapshots for a node, ordered by time descending."""
+    # Demo mode: return mock metrics
     if is_demo(claims):
         demo_node = get_demo_node(node_id)
         if demo_node is None:
@@ -597,6 +874,7 @@ async def get_node_stats(
             snapshots=[MetricsSnapshotResponse(**s) for s in snapshots],
         )
 
+    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -654,6 +932,7 @@ async def get_node_logs(
 
     If neither `service` nor `path` is specified, defaults to `/var/log/syslog`.
     """
+    # Demo mode: return mock logs
     if is_demo(claims):
         demo_node = get_demo_node(node_id)
         if demo_node is None:
@@ -711,7 +990,15 @@ async def get_node_logs(
     )
 
 
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
 def _node_to_response(node: dict) -> dict:
+    """Map DB row dict to the NodeResponse field set."""
+    enrolled_at = node.get("enrolled_at")
+    enrolled_recently = bool(enrolled_at is not None and (time.time() - float(enrolled_at)) < 86400)
     return {
         "id": node["id"],
         "name": node.get("name", ""),
@@ -722,10 +1009,18 @@ def _node_to_response(node: dict) -> dict:
         "state": node["state"],
         "online": node.get("online", False),
         "last_heartbeat": node.get("last_heartbeat"),
-        "enrolled_at": node.get("enrolled_at"),
+        "enrolled_at": enrolled_at,
         "created_at": node["created_at"],
         "updated_at": node["updated_at"],
+        "group": node.get("node_group") or None,
+        "disabled": bool(node.get("disabled", 0)),
+        "enrolled_recently": enrolled_recently,
     }
+
+
+# ---------------------------------------------------------------------------
+# Insights & Profiling Endpoints
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -740,6 +1035,7 @@ async def get_node_insights(
     nm: NodeManager = Depends(get_node_manager),
     locale: str = Depends(get_locale),
 ) -> dict:
+    """Fetch real-time natural language insights for CPU, memory, and disk usage."""
     if is_demo(claims):
         insights = []
         if node_id in ("demo-node-01", "demo-node-99"):
@@ -869,6 +1165,7 @@ async def get_node_insights(
             "profile_confidence": "high",
         }
 
+    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -904,6 +1201,7 @@ async def regenerate_node_profile(
             context_label="Homelab Server" if locale == "en" else "Serveur homelab",
         )
 
+    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -951,6 +1249,7 @@ async def analyze_node_anomaly(
             ),
         )
 
+    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")

@@ -1,0 +1,5 @@
+{
+  "revoked": [],
+  "revoked_at": {},
+  "note": "Add versions here to block them. Format: {\"revoked\": [\"v0.5.0\"], \"revoked_at\": {\"v0.5.0\": \"2026-06-25T12:00:00Z\"}}"
+}

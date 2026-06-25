@@ -232,7 +232,7 @@ async def test_enrollment_consumed_token(db, security, worker_keys):
 
 @pytest.mark.asyncio
 async def test_enrollment_revoked_node(db, security, worker_keys):
-    """REVOKED node → close with WS_CLOSE_REVOKED."""
+    """Legacy REVOKED row → close with WS_CLOSE_REVOKED (back-compat path)."""
     _, worker_pub_b64 = worker_keys
     node_id, join_token, _ = await setup_token(db, security, "ws-revoked")
 
@@ -251,6 +251,30 @@ async def test_enrollment_revoked_node(db, security, worker_keys):
     )
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_REVOKED
+
+
+@pytest.mark.asyncio
+async def test_enrollment_deleted_node(db, security, worker_keys):
+    """A deleted node row no longer blocks enrollment (anti-phantom).
+    The handler no longer rejects with WS_CLOSE_INVALID_TOKEN 'Node not found'."""
+    _, worker_pub_b64 = worker_keys
+    node_id, join_token, _ = await setup_token(db, security, "ws-deleted")
+
+    await db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+    await db.commit()
+
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": join_token,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
+    await worker_join_handler(ws)
+    assert ws.close_code != ws_handler.WS_CLOSE_INVALID_TOKEN
 
 
 @pytest.mark.asyncio
@@ -602,7 +626,7 @@ async def test_enrollment_reconnect_public_key_mismatch(db, security, worker_key
 
 @pytest.mark.asyncio
 async def test_enrollment_reconnect_revoked_node(db, security, worker_keys):
-    """Reconnect with revoked node → close with WS_CLOSE_REVOKED."""
+    """Reconnect with legacy REVOKED row → close with WS_CLOSE_REVOKED (back-compat)."""
     _, worker_pub_b64 = worker_keys
     node_id, worker_token = await _setup_enrolled_node(
         db, security, "ws-reconnect-rev", worker_pub_b64
@@ -627,6 +651,34 @@ async def test_enrollment_reconnect_revoked_node(db, security, worker_keys):
 
     await worker_join_handler(ws)
     assert ws.close_code == ws_handler.WS_CLOSE_REVOKED
+
+
+@pytest.mark.asyncio
+async def test_enrollment_reconnect_deleted_node(db, security, worker_keys):
+    """Reconnect with a hard-deleted node → close with WS_CLOSE_INVALID_TOKEN."""
+    _, worker_pub_b64 = worker_keys
+    node_id, worker_token = await _setup_enrolled_node(
+        db, security, "ws-reconnect-del", worker_pub_b64
+    )
+
+    await db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+    await db.commit()
+
+    ws = MockWebSocket(
+        [
+            {
+                "type": "ENROLLMENT_REQUEST",
+                "join_token": "",
+                "worker_token": worker_token,
+                "reconnect": True,
+                "public_key": worker_pub_b64,
+                "fingerprint": make_fingerprint(),
+            },
+        ]
+    )
+
+    await worker_join_handler(ws)
+    assert ws.close_code == ws_handler.WS_CLOSE_INVALID_TOKEN
 
 
 @pytest.mark.asyncio

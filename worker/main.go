@@ -29,9 +29,14 @@ var logger = log.New(os.Stdout, "[vigile-worker] ", log.Ldate|log.Ltime|log.Lmsg
 
 func main() {
 	// ── CLI flags ────────────────────────────────────────────────────────
-	masterURL := flag.String("master", "", "Master WebSocket URL (e.g. https://master:8443)")
-	joinToken := flag.String("token", "", "JOIN_TOKEN for enrollment")
+	masterURL := flag.String("master", os.Getenv("MASTER_URL"), "Master WebSocket URL (e.g. https://master:8443)")
+	joinToken := flag.String("token", os.Getenv("JOIN_TOKEN"), "JOIN_TOKEN for enrollment")
+	keyDir := flag.String("key-dir", os.Getenv("VIGILE_KEY_DIR"), "Directory for keys and config (default: /etc/vigile)")
 	flag.Parse()
+
+	if *keyDir != "" {
+		setKeyDir(*keyDir)
+	}
 
 	// ── Resolve master URL ───────────────────────────────────────────────
 	url := getMasterURL(*masterURL)

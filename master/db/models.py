@@ -42,16 +42,18 @@ CREATE TABLE IF NOT EXISTS nodes (
 # ---------------------------------------------------------------------------
 # join_tokens  (single-use, 30-min TTL)
 # ---------------------------------------------------------------------------
+# No FK to nodes.id: the `nodes` row is created by the Worker enrollment
+# handshake, AFTER the join_token row exists (see migration 006 + master/ws/
+# worker_handler.py). Orphaned join_tokens are cleaned by JOIN_TOKEN_TTL expiry.
 CREATE_JOIN_TOKENS = """
 CREATE TABLE IF NOT EXISTS join_tokens (
     id          TEXT PRIMARY KEY,     -- UUID
-    node_id     TEXT NOT NULL,        -- References nodes.id (node pre-created in PENDING state)
+    node_id     TEXT NOT NULL,        -- UUID of the (not-yet-existing) target node
     token_hash  TEXT NOT NULL UNIQUE, -- sha256 of the raw token (never store raw token)
     payload_b64 TEXT NOT NULL,        -- The base64url payload embedded in the token
     consumed    INTEGER NOT NULL DEFAULT 0,  -- 0=available, 1=consumed
     expires_at  REAL NOT NULL,        -- Unix timestamp
-    created_at  REAL NOT NULL,
-    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+    created_at  REAL NOT NULL
 )
 """
 
