@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -62,18 +63,72 @@ def _validate_os_arch(os_name: str, arch: str) -> None:
         )
 
 
-def _is_github_url(url: str) -> bool:
-    return url.startswith("https://github.com/") or url.startswith("https://api.github.com/")
+_GITHUB_RELEASE_RE = re.compile(
+    r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/releases/(?P<kind>latest|download/(?P<tag>[^/]+))/download/(?P<filename>.+)$"
+)
+
+
+async def _github_api_download(url: str, token: str, timeout: int) -> bytes:
+    match = _GITHUB_RELEASE_RE.match(url)
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unsupported GitHub release URL format: {url}",
+        )
+    owner = match.group("owner")
+    repo = match.group("repo")
+    kind = match.group("kind")
+    filename = match.group("filename")
+    if kind == "latest":
+        release_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    else:
+        tag = match.group("tag")
+        release_url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        release_resp = await client.get(release_url, headers=headers)
+        release_resp.raise_for_status()
+        release = release_resp.json()
+        asset_id = None
+        for asset in release.get("assets", []):
+            if asset.get("name") == filename:
+                asset_id = asset.get("id")
+                break
+        if not asset_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Asset {filename} not found in release",
+            )
+        asset_headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/octet-stream",
+        }
+        asset_url = f"https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}"
+        resp = await client.get(asset_url, headers=asset_headers)
+        resp.raise_for_status()
+        return resp.content
 
 
 async def _fetch_url(url: str, settings: Settings, timeout: int = 30) -> bytes:
-    headers = {}
     token = settings.worker_binary_github_token
-    if token and _is_github_url(url):
-        headers["Authorization"] = f"Bearer {token}"
+    if token and _GITHUB_RELEASE_RE.match(url):
+        try:
+            return await _github_api_download(url, token, timeout)
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"GitHub API returned {exc.response.status_code} for {url}",
+            )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Cannot reach GitHub API: {exc}",
+            )
+
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await client.get(url)
             resp.raise_for_status()
             return resp.content
     except httpx.HTTPStatusError as exc:
@@ -223,20 +278,14 @@ async def _fetch_revocations(settings) -> dict:
     if _revocation_cache["data"] and (now - _revocation_cache["fetched_at"]) < settings.worker_binary_revocation_ttl_seconds:
         return _revocation_cache["data"]
 
-    headers = {}
-    token = settings.worker_binary_github_token
-    if token and _is_github_url(settings.worker_binary_revocation_url):
-        headers["Authorization"] = f"Bearer {token}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(settings.worker_binary_revocation_url, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            _revocation_cache["data"] = data
-            _revocation_cache["fetched_at"] = now
-            return data
-    except (httpx.HTTPError, httpx.TimeoutException) as e:
-        logger.warning("Failed to fetch revocation list (network): %s. Failing open.", e)
+        data = await _fetch_url(settings.worker_binary_revocation_url, settings, timeout=10)
+        parsed = json.loads(data)
+        _revocation_cache["data"] = parsed
+        _revocation_cache["fetched_at"] = now
+        return parsed
+    except HTTPException as e:
+        logger.warning("Failed to fetch revocation list (network): %s. Failing open.", e.detail)
         return {"revoked": [], "revoked_at": {}}
     except json.JSONDecodeError as e:
         logger.error("Revocation list is malformed JSON: %s. Failing closed.", e)
