@@ -288,6 +288,8 @@ export const fr = {
   "settings.confirm.revoke_title": "Révoquer définitivement",
   "settings.confirm.revoke_message": "Cette action est irréversible. Le serveur ne pourra plus se reconnecter et toutes ses métriques seront supprimées.",
   "settings.confirm.revoke_action": "Révoquer",
+  "settings.confirm.uninstall_title": "Désinstaller le Worker du serveur",
+  "settings.confirm.uninstall_message": "Exécutez cette commande en root sur votre serveur pour désinstaller le binaire, les fichiers de configuration et le service associé :",
   "settings.saved": "Enregistré",
   "settings.error": "Erreur",
   "settings.cancel": "Annuler",

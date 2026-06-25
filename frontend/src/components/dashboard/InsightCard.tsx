@@ -76,10 +76,10 @@ export const InsightCard: React.FC<InsightCardProps> = ({
     >
       <div className={`absolute top-0 right-0 w-20 h-20 rounded-bl-full pointer-events-none transition-colors ${glowColor}`} />
 
-      <div className="flex items-center justify-between gap-2 z-10 shrink-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 z-10 shrink-0 min-w-0">
         <SeverityTag severity={insight.severity} className="whitespace-nowrap" />
         <span
-          className="text-[10px] font-extrabold font-interface tracking-wider text-text-3 uppercase bg-surface-2 px-1.5 py-0.5 rounded border border-border whitespace-nowrap truncate max-w-[140px]"
+          className="text-[10px] font-extrabold font-interface tracking-wider text-text-3 uppercase bg-surface-2 px-1.5 py-0.5 rounded border border-border min-w-0 break-words"
           title={nodeName}
         >
           {nodeName}

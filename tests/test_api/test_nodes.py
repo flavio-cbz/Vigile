@@ -634,6 +634,7 @@ async def test_generate_join_with_group(client: AsyncClient, db, auth_headers):
     assert token_row is not None
     import base64
     import json as _json
+
     payload = _json.loads(base64.urlsafe_b64decode(token_row["payload_b64"] + "=="))
     assert payload["name"] == "grp-node"
     assert payload["group"] == "homelab"

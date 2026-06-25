@@ -59,6 +59,7 @@ async def _setup_node(db, name: str = "test-logs") -> str:
     """Create a CONNECTED node for testing."""
     node_id = await node_manager.create_node(db, name=name)
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
+    await node_manager.transition_state(db, node_id, NodeState.UNCONFIGURED)
     await node_manager.transition_state(db, node_id, NodeState.CONNECTED)
     return node_id
 

@@ -119,3 +119,31 @@ File-by-file audit (4 specialists + cross-critique + Oracle verification) found 
 - **Infra**: 30 new issues (live API key in .env, zero Go/frontend tests, CI no pre-commit/securité)
 
 Full report: `.sisyphus/reports/audit-missed-report.md`
+
+## FIELD VALIDATION 2026-06-17 (youcloud.ovh, prod stack)
+Live test of the worker against the production deployment on youcloud.ovh:
+
+**Stack state** (before test): master `youcloud-master-1` running 4 weeks, BDD persisted on `vigile_data` volume. Worker `youcloud-persistent` running with an **expired** JOIN_TOKEN (exp 2026-05-15 22:34 UTC) — crashlooping on `peer closed connection` because the master rejects the stale token. `connected_nodes: 0`.
+
+**Fresh test worker** (`node_id: 13d2e23a-4eee-43dd-a00b-d43bd179c29c`, name `test-worker-1`):
+- WebSocket upgrade against `http://master:8000/ws/worker/join` — **OK**
+- Ed25519 challenge/response (44-byte challenge, 32-byte raw signature) — **OK**
+- Node appears in `/api/nodes` as `state: CONNECTED, online: true` — **OK**
+- Plugin intents dispatched successfully:
+  - `LIST_SERVICES` → 39 services returned (mysql: failed, prometheus: failed, ssh: active/running, etc.)
+  - `LIST_CONTAINERS` → 40 containers returned
+  - `READ_LOGS` → syslog tail returned
+  - `STATUS_SERVICE ssh.service` → `{"active": "active", "enabled": "enabled"}`
+- All intents completed `success=true`.
+
+**BUG DISCOVERED — Worker env var mismatch** (worker/main.go:23-28):
+- The Go binary reads `MASTER_URL` and `JOIN_TOKEN` **only** via `--master` and `--token` CLI flags (or via `/etc/vigile/master_url` and `/etc/vigile/enrollment.token` files).
+- The `docker-compose.yml` declares these as **environment variables** (`MASTER_URL=http://master:8000` on the `worker` service) but the binary **ignores them entirely**.
+- `docker compose run --rm -e JOIN_TOKEN=... worker` from `setup_test.sh` only works if the container inherits `--master` and `--token` args from the service definition; it does NOT.
+- The historical `youcloud-persistent` container has `--master http://master:8000 --token <...>` in `Config.Cmd` (set at creation time by Compose), which is why it worked.
+- **Fix candidates** (none applied — needs design decision):
+  1. Add `os.Getenv("MASTER_URL")` and `os.Getenv("JOIN_TOKEN")` fallbacks in `worker/main.go` after `flag.Parse()`
+  2. Modify `setup_test.sh` to override `--entrypoint` with full arg list (what I used: `--entrypoint "/usr/local/bin/vigile-worker --master http://master:8000 --token $TOKEN"`)
+  3. Modify `docker-compose.yml` `worker` service to set `command: ["--master", "http://master:8000"]`
+
+**Worker `vigile-test-worker-1` and `vigile-debug-worker` containers were cleaned up manually**. The historical `youcloud-persistent` was preserved. Master was inadvertently stopped+removed by `docker compose down --remove-orphans` (cleanup mistake) and was immediately restored with `docker compose up -d master`. BDD is intact.

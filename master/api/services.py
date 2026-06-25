@@ -38,7 +38,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/nodes/{node_id}", tags=["services"])
 
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
 async def _get_node_or_404(nm: NodeManager, db: DB, node_id: str) -> dict[str, Any]:
+    """Fetch a node or raise 404."""
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
@@ -51,6 +58,7 @@ async def _send_intent(
     action: str,
     params: dict[str, Any],
 ) -> dict[str, Any]:
+    """Send an intent and handle connection/timeout errors."""
     try:
         return await nm.send_intent(
             node_id,
@@ -67,6 +75,12 @@ async def _send_intent(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=f"Worker did not respond to {action} request in time",
         )
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+
 
 class ServiceListResponse(BaseModel):
     node_id: str
@@ -98,6 +112,12 @@ class ContainerActionResponse(BaseModel):
     output: str
     error: str | None = None
 
+
+# ---------------------------------------------------------------------------
+# Systemd Endpoints
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/services",
     response_model=ServiceListResponse,
@@ -109,6 +129,7 @@ async def list_services(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceListResponse:
+    """Fetch the list of all systemd services from a Worker."""
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -145,6 +166,7 @@ async def get_service_status(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceStatusResponse:
+    """Fetch the status of a specific systemd service on a Worker."""
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -196,6 +218,7 @@ async def restart_service(
     claims: Annotated[dict, Depends(require_role("admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceActionResponse:
+    """Restart a systemd service on a Worker (requires admin role)."""
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -203,6 +226,7 @@ async def restart_service(
             node_id=node_id,
             service=service_name,
             output=f"Simulated restart of {service_name} completed successfully.",
+            error=None,
         )
 
     await _get_node_or_404(nm, db, node_id)
@@ -224,6 +248,12 @@ async def restart_service(
         error=result.get("error") if not result.get("success") else None,
     )
 
+
+# ---------------------------------------------------------------------------
+# Docker Endpoints
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/containers",
     response_model=ContainerListResponse,
@@ -235,6 +265,7 @@ async def list_containers(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerListResponse:
+    """Fetch the list of all Docker containers from a Worker."""
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -275,6 +306,7 @@ async def restart_container(
     claims: Annotated[dict, Depends(require_role("admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerActionResponse:
+    """Restart a Docker container on a Worker (requires admin role)."""
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -282,6 +314,7 @@ async def restart_container(
             node_id=node_id,
             container_id=container_id,
             output=f"Simulated restart of container {container_id} completed successfully.",
+            error=None,
         )
 
     await _get_node_or_404(nm, db, node_id)

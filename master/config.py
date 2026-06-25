@@ -84,12 +84,8 @@ class Settings(BaseModel):
         "WORKER_BINARY_MANIFEST_URL",
         "https://github.com/flavio-cbz/Vigile/releases/latest/download/manifest.json",
     )
-    worker_binary_cache_dir: str = os.getenv(
-        "WORKER_BINARY_CACHE_DIR", "/var/cache/vigile/worker"
-    )
-    worker_binary_cache_ttl_seconds: int = int(
-        os.getenv("WORKER_BINARY_CACHE_TTL_SECONDS", "3600")
-    )
+    worker_binary_cache_dir: str = os.getenv("WORKER_BINARY_CACHE_DIR", "/var/cache/vigile/worker")
+    worker_binary_cache_ttl_seconds: int = int(os.getenv("WORKER_BINARY_CACHE_TTL_SECONDS", "3600"))
     worker_binary_revocation_url: str = os.getenv(
         "WORKER_BINARY_REVOCATION_URL",
         "https://github.com/flavio-cbz/Vigile/releases/latest/download/revoked-versions.json",

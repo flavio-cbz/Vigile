@@ -163,4 +163,6 @@ class RateLimiter:
         logger.info("Rate limiter cleanup task started (interval=%ds).", interval)
         return task
 
+
+# Module-level singleton
 rate_limiter = RateLimiter()

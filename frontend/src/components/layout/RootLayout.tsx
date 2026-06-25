@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Outlet } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -13,6 +13,10 @@ import { usePolling } from '../../hooks/usePolling';
 
 export const RootLayout: React.FC = () => {
   const { isAddNodeModalOpen, setAddNodeModalOpen } = useLayoutStore();
+
+  const handleCloseAddNodeModal = useCallback(() => {
+    setAddNodeModalOpen(false);
+  }, [setAddNodeModalOpen]);
 
   const fetchPendingCount = async () => {
     const token = useAuthStore.getState().accessToken;
@@ -46,7 +50,7 @@ export const RootLayout: React.FC = () => {
       <CommandPalette />
 
       {isAddNodeModalOpen && (
-        <AddNodeModal onClose={() => setAddNodeModalOpen(false)} />
+        <AddNodeModal onClose={handleCloseAddNodeModal} />
       )}
     </div>
   );

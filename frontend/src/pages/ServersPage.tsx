@@ -333,6 +333,7 @@ export const ServersPage: React.FC = () => {
           message={t('settings.confirm.revoke_message')}
           confirmWord={deleteNode.hostname || deleteNode.name}
           confirmLabel={t('settings.confirm.revoke_action')}
+          uninstallCommand={`curl -sSL ${window.location.origin}/api/nodes/kickstart.sh | sudo sh -s -- --uninstall`}
           onClose={() => setDeleteNode(null)}
           onConfirm={async () => {
             const id = deleteNode.id;

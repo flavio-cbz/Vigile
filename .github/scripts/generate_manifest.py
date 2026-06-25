@@ -28,14 +28,16 @@ def main():
         if len(parts) < 3:
             continue
         _, os_name, arch = parts[0], parts[1], "-".join(parts[2:])
-        binaries.append({
-            "os": os_name,
-            "arch": arch,
-            "url": f"https://github.com/flavio-cbz/Vigile/releases/download/{args.version}/{f.name}",
-            "sha256": sha256,
-            "sig": sig,
-            "size": f.stat().st_size,
-        })
+        binaries.append(
+            {
+                "os": os_name,
+                "arch": arch,
+                "url": f"https://github.com/flavio-cbz/Vigile/releases/download/{args.version}/{f.name}",
+                "sha256": sha256,
+                "sig": sig,
+                "size": f.stat().st_size,
+            }
+        )
 
     manifest = {
         "version": args.version,

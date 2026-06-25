@@ -14,9 +14,17 @@ import time
 import uuid
 from typing import Any
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
 DEMO_USER_ID = "demo-user"
 DEMO_USERNAME = "guest"
 DEMO_PASSWORD = "guest"
+
+# ---------------------------------------------------------------------------
+# Nodes
+# ---------------------------------------------------------------------------
 
 _NOW = time.time()
 
@@ -109,11 +117,16 @@ DEMO_NODES: list[dict[str, Any]] = [
 
 
 def get_demo_node(node_id: str) -> dict[str, Any] | None:
+    """Return a demo node by ID, or None."""
     for n in DEMO_NODES:
         if n["id"] == node_id:
-            return dict(n)
+            return dict(n)  # copy
     return None
 
+
+# ---------------------------------------------------------------------------
+# Metrics snapshots (dynamic — generated at call time)
+# ---------------------------------------------------------------------------
 
 
 def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -238,6 +251,10 @@ def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
     return snapshots
 
 
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+
 DEMO_SERVICES: list[dict[str, str]] = [
     {"name": "ssh.service", "state": "active", "status": "enabled"},
     {"name": "nginx.service", "state": "active", "status": "enabled"},
@@ -258,11 +275,16 @@ DEMO_SERVICES: list[dict[str, str]] = [
 
 
 def get_demo_service(service_name: str) -> dict[str, str] | None:
+    """Return a demo service by name, or None."""
     for s in DEMO_SERVICES:
         if s["name"] == service_name:
             return dict(s)
     return None
 
+
+# ---------------------------------------------------------------------------
+# Docker containers
+# ---------------------------------------------------------------------------
 
 DEMO_CONTAINERS: list[dict[str, Any]] = [
     {
@@ -356,7 +378,9 @@ def get_demo_container(container_id: str) -> dict[str, Any] | None:
     return None
 
 
+# ---------------------------------------------------------------------------
 # Logs
+# ---------------------------------------------------------------------------
 
 _NGINX_LOGS = [
     '192.168.1.100 - - [23/May/2026:10:15:23 +0200] "GET /api/health HTTP/1.1" 200 72 "-" "curl/8.4.0"',
@@ -413,10 +437,13 @@ def get_demo_logs(
     return logs[: min(lines, len(logs))]
 
 
+# ---------------------------------------------------------------------------
 # Helpers
+# ---------------------------------------------------------------------------
 
 
 def _ts(offset_seconds: float) -> float:
+    """Return a timestamp offset from now."""
     return _NOW - offset_seconds
 
 
@@ -444,10 +471,13 @@ def _compute_audit_hash(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+# ---------------------------------------------------------------------------
 # Action Proposals (mutable — in-memory)
+# ---------------------------------------------------------------------------
 
 
 def _initial_proposals() -> list[dict[str, Any]]:
+    """Factory returning default proposal set."""
     return [
         # 0: PENDING LOW — web-app container memory
         {
@@ -636,6 +666,7 @@ DEMO_PROPOSALS: list[dict[str, Any]] = _initial_proposals()
 
 
 def get_demo_proposal(proposal_id: str) -> dict[str, Any] | None:
+    """Return a demo proposal by ID, or None."""
     for p in DEMO_PROPOSALS:
         if p["id"] == proposal_id:
             return p
@@ -643,6 +674,7 @@ def get_demo_proposal(proposal_id: str) -> dict[str, Any] | None:
 
 
 def update_demo_proposal(proposal_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    """Update fields on a demo proposal in-place."""
     for p in DEMO_PROPOSALS:
         if p["id"] == proposal_id:
             p.update(updates)
@@ -651,10 +683,13 @@ def update_demo_proposal(proposal_id: str, updates: dict[str, Any]) -> dict[str,
     return None
 
 
+# ---------------------------------------------------------------------------
 # Chat Sessions (mutable — in-memory)
+# ---------------------------------------------------------------------------
 
 
 def _initial_chat_sessions() -> dict[str, dict[str, Any]]:
+    """Factory returning default pre-seeded chat sessions."""
     return {
         "demo-session-en": {
             "id": "demo-session-en",
@@ -757,6 +792,7 @@ DEMO_CHAT_SESSIONS: dict[str, dict[str, Any]] = _initial_chat_sessions()
 
 
 def get_demo_chat_sessions(user_id: str = DEMO_USER_ID) -> list[dict[str, Any]]:
+    """Return all demo chat sessions for a user."""
     return [
         {**s, "history": s.get("history", [])}
         for s in DEMO_CHAT_SESSIONS.values()
@@ -765,6 +801,7 @@ def get_demo_chat_sessions(user_id: str = DEMO_USER_ID) -> list[dict[str, Any]]:
 
 
 def get_demo_chat_session(session_id: str) -> dict[str, Any] | None:
+    """Return a single demo chat session, or None."""
     s = DEMO_CHAT_SESSIONS.get(session_id)
     if s:
         return {**s, "history": s.get("history", [])}
@@ -778,6 +815,7 @@ def save_demo_chat_session(
     title: str = "Demo Chat Session",
     history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Create or update a demo chat session in-memory."""
     now = time.time()
     if session_id in DEMO_CHAT_SESSIONS:
         existing = DEMO_CHAT_SESSIONS[session_id]
@@ -802,10 +840,13 @@ def save_demo_chat_session(
 
 
 def delete_demo_chat_session(session_id: str) -> bool:
+    """Delete a demo chat session. Returns True if deleted."""
     return DEMO_CHAT_SESSIONS.pop(session_id, None) is not None
 
 
-# Audit entries (30 entries spanning ~24h with real SHA256 hash chain)
+# ---------------------------------------------------------------------------
+# Audit entries  (30 entries spanning ~24h with real SHA256 hash chain)
+# ---------------------------------------------------------------------------
 
 _DEMO_GENESIS = "0" * 64
 
@@ -936,14 +977,18 @@ for i, (action, node_id, details) in enumerate(_DEMO_AUDIT_RAW):
     _seq += 1
 
 
+# ---------------------------------------------------------------------------
 # Helper: is_demo_user
+# ---------------------------------------------------------------------------
 
 
 def is_demo(claims: dict[str, Any]) -> bool:
     return claims.get("username") in {"guest", "demo"}
 
 
+# ---------------------------------------------------------------------------
 # Simulated chat streaming
+# ---------------------------------------------------------------------------
 
 DEMO_RESPONSES = {
     "status": (
@@ -1018,6 +1063,7 @@ DEMO_RESPONSES = {
 
 
 def get_demo_chat_tokens(message: str) -> list[str]:
+    """Generate simulated response tokens for the demo chat."""
     msg_lower = message.lower()
     if "status" in msg_lower or "état" in msg_lower or "santé" in msg_lower:
         text = DEMO_RESPONSES["status"]
@@ -1035,16 +1081,20 @@ def get_demo_chat_tokens(message: str) -> list[str]:
 
 
 def get_demo_proposal_from_text(message: str) -> dict[str, Any] | None:
+    """Try to create a demo action proposal based on user message keywords."""
     for p in DEMO_PROPOSALS:
         if p["status"] == "PENDING":
             return p
     return None
 
 
+# ---------------------------------------------------------------------------
 # State reset
+# ---------------------------------------------------------------------------
 
 
 def reset_demo_state() -> None:
+    """Reset all mutable demo state to defaults."""
     DEMO_PROPOSALS.clear()
     DEMO_PROPOSALS.extend(_initial_proposals())
     DEMO_CHAT_SESSIONS.clear()

@@ -115,6 +115,7 @@ async def mock_intent_timeout(node_id, intent, *, timeout=30.0):
 async def _setup_node(db, name: str = "test-svc") -> str:
     node_id = await node_manager.create_node(db, name=name)
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
+    await node_manager.transition_state(db, node_id, NodeState.UNCONFIGURED)
     await node_manager.transition_state(db, node_id, NodeState.CONNECTED)
     return node_id
 

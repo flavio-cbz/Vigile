@@ -288,6 +288,8 @@ export const en = {
   "settings.confirm.revoke_title": "Revoke permanently",
   "settings.confirm.revoke_message": "This action is irreversible. The server will not be able to reconnect and all its metrics will be deleted.",
   "settings.confirm.revoke_action": "Revoke",
+  "settings.confirm.uninstall_title": "Uninstall the Worker from the server",
+  "settings.confirm.uninstall_message": "Run this command as root on your server to uninstall the binary, configuration files, and associated service:",
   "settings.saved": "Saved",
   "settings.error": "Error",
   "settings.cancel": "Cancel",

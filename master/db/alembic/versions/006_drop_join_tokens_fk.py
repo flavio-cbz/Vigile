@@ -16,6 +16,7 @@ Rationale:
   Other FKs referencing `nodes.id` (worker_tokens, metrics_snapshots,
   action_proposals) are preserved — they only ever point to *real* nodes.
 """
+
 from typing import Sequence, Union
 
 from alembic import op

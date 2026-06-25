@@ -101,17 +101,21 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
 
     logger.info("Dropping legacy FK join_tokens.node_id -> nodes.id (migration 006).")
     await db.execute("PRAGMA foreign_keys=OFF")
-    await db.execute("""
+    await db.execute(
+        """
     CREATE TABLE join_tokens_new (
         id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
         token_hash TEXT NOT NULL UNIQUE, payload_b64 TEXT NOT NULL,
         consumed INTEGER NOT NULL DEFAULT 0, expires_at REAL NOT NULL, created_at REAL NOT NULL
-    )""")
+    )"""
+    )
     await db.execute("INSERT INTO join_tokens_new SELECT * FROM join_tokens")
     await db.execute("DROP TABLE join_tokens")
     await db.execute("ALTER TABLE join_tokens_new RENAME TO join_tokens")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_join_tokens_node_id ON join_tokens(node_id)")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_join_tokens_consumed ON join_tokens(consumed, expires_at)")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_join_tokens_consumed ON join_tokens(consumed, expires_at)"
+    )
     await db.execute("PRAGMA foreign_keys=ON")
     await db.commit()
     logger.info("Legacy FK dropped successfully.")

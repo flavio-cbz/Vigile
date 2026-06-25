@@ -56,6 +56,7 @@ class DatabaseConnectionPool:
             except Exception:
                 pass
         self._connections.clear()
+        # Drain the queue
         while not self._pool.empty():
             self._pool.get_nowait()
 
@@ -88,6 +89,7 @@ async def init_db(database_path: str) -> aiosqlite.Connection:
     if _db is not None:
         raise RuntimeError("Database already initialized. close_db() first.")
 
+    # Primary connection (used for migrations and fallback)
     db = await aiosqlite.connect(database_path, timeout=30.0)
 
     await db.execute("PRAGMA journal_mode=WAL")
@@ -98,6 +100,7 @@ async def init_db(database_path: str) -> aiosqlite.Connection:
     await db.commit()
     _db = db
 
+    # Initialize the database connection pool
     await _pool.init(database_path, size=5)
     return db
 

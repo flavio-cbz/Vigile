@@ -12,6 +12,7 @@ Concepts:
 Features beyond the PLAN.md sketch:
   - Async-aware: async_call() awaits coroutine implementations
   - Registration metadata: track which plugin registered which hook
+  - Thread/task safety: locks protect the hook registry during load
 
 A plugin module must expose:
     def register(pm: PluginManager) -> None:
@@ -24,7 +25,6 @@ import inspect
 import json
 import logging
 import os
-import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -42,10 +42,12 @@ _BUILTIN_PLUGIN_ID_TO_FILE = {
 
 
 def canonical_plugin_id(plugin_name: str) -> str:
+    """Map an on-disk plugin stem to the public plugin id."""
     return _BUILTIN_PLUGIN_FILE_TO_ID.get(plugin_name, plugin_name)
 
 
 def plugin_file_stem(plugin_id: str) -> str:
+    """Resolve the file stem for a public plugin id."""
     return _BUILTIN_PLUGIN_ID_TO_FILE.get(plugin_id, plugin_id)
 
 
@@ -107,6 +109,10 @@ class PluginManager:
             logger.error("Error fetching config for plugin '%s': %s", plugin_name, e)
         return {}
 
+    # -----------------------------------------------------------------------
+    # Registration
+    # -----------------------------------------------------------------------
+
     def register(self, hook_name: str, fn: Callable, *, plugin_name: str = "anonymous") -> None:
         """
         Register a callable under a hook name.
@@ -129,6 +135,10 @@ class PluginManager:
         ]
         removed = before - len(self._hooks[hook_name])
         return removed
+
+    # -----------------------------------------------------------------------
+    # Synchronous dispatch
+    # -----------------------------------------------------------------------
 
     def call(self, hook_name: str, **kwargs: Any) -> list[Any]:
         """
@@ -189,6 +199,10 @@ class PluginManager:
                 self._active_calls[plugin_name] -= 1
         return None
 
+    # -----------------------------------------------------------------------
+    # Async dispatch
+    # -----------------------------------------------------------------------
+
     async def _run_async_hook(
         self, plugin_name: str, fn: Callable, hook_name: str, **kwargs: Any
     ) -> Any:
@@ -196,8 +210,9 @@ class PluginManager:
         try:
             if inspect.iscoroutinefunction(fn):
                 return await fn(**kwargs)
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, lambda: fn(**kwargs))
+            else:
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, lambda: fn(**kwargs))
         finally:
             self._active_calls[plugin_name] -= 1
 
@@ -237,6 +252,10 @@ class PluginManager:
         """Async version of call_first — returns the first non-None result."""
         results = await self.async_call(hook_name, **kwargs)
         return results[0] if results else None
+
+    # -----------------------------------------------------------------------
+    # Dynamic plugin loading
+    # -----------------------------------------------------------------------
 
     def load_plugins_from_dir(self, plugins_dir: str) -> list[str]:
         """
@@ -296,6 +315,8 @@ class PluginManager:
             module = importlib.util.module_from_spec(spec)
 
             # Register in sys.modules before executing to handle relative/absolute imports cleanly
+            import sys
+
             sys.modules[module_name] = module
 
             spec.loader.exec_module(module)
@@ -315,6 +336,7 @@ class PluginManager:
         except Exception:
             logger.exception("Failed to load plugin '%s'", plugin_id)
             module_name = f"vigile.plugins.{plugin_name}"
+            import sys
 
             if module_name in sys.modules:
                 del sys.modules[module_name]
@@ -348,12 +370,17 @@ class PluginManager:
             self._enabled_plugins.remove(plugin_id)
 
         module_name = f"vigile.plugins.{module_stem}"
+        import sys
 
         if module_name in sys.modules:
             del sys.modules[module_name]
 
         self._draining_plugins.discard(plugin_id)
         logger.info("Plugin '%s' unloaded successfully.", plugin_id)
+
+    # -----------------------------------------------------------------------
+    # Introspection
+    # -----------------------------------------------------------------------
 
     def get_hooks(self) -> dict[str, list[str]]:
         """Return a dict of hook_name → [plugin_names] for debugging."""

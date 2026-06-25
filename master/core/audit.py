@@ -201,17 +201,24 @@ async def verify_chain(
         "error": None,
     }
 
-    _columns = (
-        "id, sequence, timestamp, user_id, action, node_id, "
-        "details_json, previous_hash, entry_hash"
-    )
     if max_entries is not None:
-        sql = f"SELECT {_columns} FROM audit_log ORDER BY sequence DESC LIMIT ?"
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence DESC
+            LIMIT ?
+        """
         async with db.execute(sql, (max_entries,)) as cursor:
             rows = await cursor.fetchall()
         rows.reverse()
     else:
-        sql = f"SELECT {_columns} FROM audit_log ORDER BY sequence ASC"
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence ASC
+        """
         async with db.execute(sql) as cursor:
             rows = await cursor.fetchall()
 
@@ -280,6 +287,10 @@ async def get_recent_entries(
     node_id: str | None = None,
     user_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """
+    Fetch recent audit entries, optionally filtered by node or user.
+    Returns a list of dicts ordered newest-first.
+    """
     conditions = []
     params: list[Any] = []
 

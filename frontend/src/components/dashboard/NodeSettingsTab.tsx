@@ -280,6 +280,7 @@ export const NodeSettingsTab = ({ node }: NodeSettingsTabProps) => {
           message={t('settings.confirm.revoke_message')}
           confirmWord={n.hostname || n.name}
           confirmLabel={t('settings.confirm.revoke_action')}
+          uninstallCommand={`curl -sSL ${window.location.origin}/api/nodes/kickstart.sh | sudo sh -s -- --uninstall`}
           onClose={() => setConfirmDelete(false)}
           onConfirm={handleRevoke}
         />

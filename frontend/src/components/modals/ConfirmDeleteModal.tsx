@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocale } from '../../i18n';
-import { X, Trash2, RefreshCw } from 'lucide-react';
+import { X, Trash2, RefreshCw, Copy, Check } from 'lucide-react';
 
 interface ConfirmDeleteModalProps {
   title: string;
@@ -9,6 +9,7 @@ interface ConfirmDeleteModalProps {
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
   confirmLabel?: string;
+  uninstallCommand?: string;
 }
 
 export const ConfirmDeleteModal = ({
@@ -18,11 +19,13 @@ export const ConfirmDeleteModal = ({
   onConfirm,
   onClose,
   confirmLabel = 'Supprimer définitivement',
+  uninstallCommand,
 }: ConfirmDeleteModalProps) => {
   const { t } = useLocale();
   const [value, setValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -47,6 +50,13 @@ export const ConfirmDeleteModal = ({
     }
   };
 
+  const handleCopy = () => {
+    if (!uninstallCommand) return;
+    navigator.clipboard.writeText(uninstallCommand);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div
       className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in"
@@ -62,12 +72,36 @@ export const ConfirmDeleteModal = ({
         >
           <X className="w-4 h-4" />
         </button>
-        <div>
-          <h3 className="text-sm font-bold text-red-500 uppercase tracking-wider flex items-center gap-2">
-            <Trash2 className="w-4 h-4" />
-            <span>{title}</span>
-          </h3>
-          <p className="text-[0.625rem] text-ink-secondary mt-1 leading-relaxed">{message}</p>
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-red-500 uppercase tracking-wider flex items-center gap-2">
+              <Trash2 className="w-4 h-4" />
+              <span>{title}</span>
+            </h3>
+            <p className="text-[0.625rem] text-ink-secondary mt-1 leading-relaxed">{message}</p>
+          </div>
+
+          {uninstallCommand && (
+            <div className="p-3.5 rounded-lg bg-surface-1 border border-border space-y-2">
+              <p className="text-[0.625rem] font-bold text-ink uppercase tracking-wider">
+                {t('settings.confirm.uninstall_title')}
+              </p>
+              <p className="text-[0.5625rem] text-ink-muted leading-relaxed">
+                {t('settings.confirm.uninstall_message')}
+              </p>
+              <div className="flex items-center justify-between gap-2 p-2 rounded bg-surface-2 border border-border font-mono text-[0.625rem] text-ink-secondary select-all break-all relative group">
+                <span className="pr-8">{uninstallCommand}</span>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="absolute right-2 top-1.5 p-1 rounded hover:bg-surface-3 text-ink-muted hover:text-ink cursor-pointer"
+                  title="Copier la commande"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-green-500 animate-fade-in" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {error && (

@@ -60,7 +60,9 @@ class NodeState(str, Enum):
     LOST = "LOST"  # No heartbeat for > heartbeat_lost_threshold
     STALE = "STALE"  # LOST for > heartbeat_stale_threshold
     DISABLED = "DISABLED"  # Operator-disabled (orthogonal to connectivity)
-    REVOKED = "REVOKED"  # Legacy value — only present in rows from before the hard-delete migration.
+    REVOKED = (
+        "REVOKED"  # Legacy value — only present in rows from before the hard-delete migration.
+    )
 
 
 VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {

@@ -131,14 +131,13 @@ async def test_api_integration_flow():
         assert r.status_code == 200
         assert r.text.startswith("#!/usr/env bash") or r.text.startswith("#!/usr/bin/env bash")
 
-        # Revoke Node
+        # Delete Node
         r = await client.delete(f"/api/nodes/{node_id}", headers=headers)
         assert r.status_code == 204
 
-        # Verify Revoked State
+        # Verify Hard Delete (row gone)
         r = await client.get(f"/api/nodes/{node_id}", headers=headers)
-        assert r.status_code == 200
-        assert r.json()["state"] == "REVOKED"
+        assert r.status_code == 404
 
         # 4. Admin, Audit, and Debug Endpoints
         r = await client.get("/api/admin/audit-verify", headers=headers)

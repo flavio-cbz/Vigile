@@ -59,7 +59,7 @@ def _validate_os_arch(os_name: str, arch: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported arch '{arch}' for OS '{os_name}'. "
-                   f"Must be one of: {', '.join(SUPPORTED[os_name])}",
+            f"Must be one of: {', '.join(SUPPORTED[os_name])}",
         )
 
 
@@ -247,6 +247,7 @@ async def _fetch_and_cache(
             sig_path.write_bytes(sig_data)
         finally:
             import shutil
+
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return binary_path
@@ -254,7 +255,10 @@ async def _fetch_and_cache(
 
 async def _fetch_manifest(settings) -> dict:
     now = time.time()
-    if _manifest_cache["data"] and (now - _manifest_cache["fetched_at"]) < settings.worker_binary_cache_ttl_seconds:
+    if (
+        _manifest_cache["data"]
+        and (now - _manifest_cache["fetched_at"]) < settings.worker_binary_cache_ttl_seconds
+    ):
         return _manifest_cache["data"]
 
     data = await _fetch_url(settings.worker_binary_manifest_url, settings)
@@ -273,7 +277,10 @@ async def _is_version_revoked(settings, version: str) -> bool:
 
 async def _fetch_revocations(settings) -> dict:
     now = time.time()
-    if _revocation_cache["data"] and (now - _revocation_cache["fetched_at"]) < settings.worker_binary_revocation_ttl_seconds:
+    if (
+        _revocation_cache["data"]
+        and (now - _revocation_cache["fetched_at"]) < settings.worker_binary_revocation_ttl_seconds
+    ):
         return _revocation_cache["data"]
 
     try:

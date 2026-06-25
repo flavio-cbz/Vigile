@@ -47,6 +47,18 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
 
   const addToast = useToastStore((s) => s.addToast);
 
+  // Refs for callbacks used inside the polling interval so the interval is
+  // not recreated on every parent render.
+  const onCloseRef = useRef(onClose);
+  const addToastRef = useRef(addToast);
+  const tRef = useRef(t);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    addToastRef.current = addToast;
+    tRef.current = t;
+  });
+
   // ---- Token generation ----
   const generate = useCallback(async () => {
     if (!nodeName.trim() || isGenerating) return;
@@ -86,7 +98,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
     return () => window.clearInterval(id);
   }, [joinData, secondsLeft]);
 
-  // ---- Enrollment polling (unchanged behavior) ----
+  // ---- Enrollment polling ----
   useEffect(() => {
     if (!joinData || !joinData.node_id || isEnrolled) return;
 
@@ -98,10 +110,10 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
           if (enrolledNode && enrolledNode.online) {
             setIsEnrolled(true);
             clearInterval(intervalId);
-            addToast('success', t('add_node.success'), t('add_node.success'));
+            addToastRef.current('success', tRef.current('add_node.success'), tRef.current('add_node.success'));
             useNodeStore.getState().fetchNodes();
             closeTimerRef.current = window.setTimeout(() => {
-              onClose();
+              onCloseRef.current();
             }, ENROLLMENT_AUTO_CLOSE_MS);
           }
         }
@@ -111,7 +123,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
     }, POLL_INTERVAL_MS);
 
     return () => clearInterval(intervalId);
-  }, [joinData, addToast, onClose, isEnrolled, t]);
+  }, [joinData, isEnrolled]);
 
   // ---- Cleanup ----
   useEffect(() => {

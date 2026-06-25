@@ -122,6 +122,13 @@ KICKSTART_TEMPLATE = """\
 
 set -euo pipefail
 
+# ── Privilege check ─────────────────────────────────────────────────────────
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: This script must be run as root. Please run with sudo at the end of the pipe:" >&2
+    echo "  curl -sSL $master_url/api/nodes/kickstart.sh | sudo sh -s -- --token <token> --master <master_url>" >&2
+    exit 1
+fi
+
 # ── Cleanup trap ────────────────────────────────────────────────────────────
 TMPDIR_VIGILE="$(mktemp -d /tmp/vigile_install.XXXXXX)"
 cleanup() {
@@ -132,19 +139,37 @@ trap cleanup EXIT
 # ── Argument parsing ─────────────────────────────────────────────────────────
 JOIN_TOKEN=""
 MASTER_URL=""
+UNINSTALL=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --token)   JOIN_TOKEN="$2"; shift 2 ;;
-        --master)  MASTER_URL="$2"; shift 2 ;;
-        *)         echo "Unknown argument: $1"; exit 1 ;;
+        --token)       JOIN_TOKEN="$2"; shift 2 ;;
+        --master)      MASTER_URL="$2"; shift 2 ;;
+        --uninstall)   UNINSTALL=true; shift ;;
+        *)             echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+if [ "$UNINSTALL" = true ]; then
+    echo "[vigile] Uninstalling Worker..."
+    if command -v systemctl &>/dev/null && (systemctl is-active vigile-worker &>/dev/null || systemctl is-enabled vigile-worker &>/dev/null); then
+        echo "[vigile] Disabling and stopping systemd service..."
+        systemctl disable --now vigile-worker || true
+        rm -f /etc/systemd/system/vigile-worker.service
+        systemctl daemon-reload
+    fi
+    echo "[vigile] Removing binary and configurations..."
+    rm -f /usr/local/bin/vigile-worker
+    rm -rf /etc/vigile
+    echo "[vigile] Uninstallation complete!"
+    exit 0
+fi
 
 if [[ -z "$JOIN_TOKEN" || -z "$MASTER_URL" ]]; then
     echo "ERROR: --token and --master are required." >&2
     exit 1
 fi
+
 
 # ── OS / Arch detection ──────────────────────────────────────────────────────
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -179,7 +204,7 @@ echo "[vigile] Downloading Worker binary..."
 curl -sSfL "$BINARY_URL" -o "$BINARY_PATH"
 
 echo "[vigile] Verifying SHA256..."
-EXPECTED_HASH="$(curl -sSfL "$HASH_URL")"
+EXPECTED_HASH="$(curl -sSfL "$HASH_URL" | awk '{print $1}')"
 if command -v sha256sum &>/dev/null; then
     ACTUAL_HASH="$(sha256sum "$BINARY_PATH" | awk '{print $1}')"
 else
@@ -205,6 +230,10 @@ install -m 0755 "$BINARY_PATH" "$INSTALL_DIR/vigile-worker"
 
 mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
+if [ ! -d "$CONFIG_DIR" ]; then
+    echo "ERROR: Failed to create $CONFIG_DIR" >&2
+    exit 1
+fi
 
 echo "[vigile] Storing enrollment token..."
 printf '%s' "$JOIN_TOKEN" > "$CONFIG_DIR/enrollment.token"
@@ -241,17 +270,25 @@ EOF
     systemctl daemon-reload
     systemctl enable --now vigile-worker
     echo "[vigile] systemd service enabled and started."
+    echo "[vigile] Installation complete! The Worker will enroll automatically."
+    echo "[vigile] Check status: systemctl status vigile-worker"
 
-elif command -v launchctl &>/dev/null; then
-    # macOS launchd (Sprint 2 — placeholder for now)
-    echo "[vigile] macOS detected. launchd support coming in Sprint 2."
 else
-    echo "[vigile] WARNING: No init system detected. Start manually:"
-    echo "  vigile-worker"
-fi
+    local_allow_insecure=""
+    if [[ "$MASTER_URL" =~ ^http:// || "$MASTER_URL" =~ ^ws:// ]]; then
+        local_allow_insecure="ALLOW_INSECURE=true "
+    fi
 
-echo "[vigile] Installation complete! The Worker will enroll automatically."
-echo "[vigile] Check status: systemctl status vigile-worker
+    if command -v launchctl &>/dev/null; then
+        # macOS launchd (Sprint 2 — placeholder for now)
+        echo "[vigile] macOS detected. launchd support coming in Sprint 2."
+    fi
+    echo "[vigile] To start the worker manually, run:"
+    echo "  sudo ${local_allow_insecure}/usr/local/bin/vigile-worker --master ${MASTER_URL} --token ${JOIN_TOKEN}"
+    echo "[vigile] Once /etc/vigile is populated you can simplify to:"
+    echo "  sudo ${local_allow_insecure}/usr/local/bin/vigile-worker"
+    echo "[vigile] Installation complete!"
+fi
 """
 
 
@@ -295,7 +332,7 @@ async def generate_join_token(
             expires_in=1800,
             curl_command=(
                 f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-                f"sh -s -- --token {fake_token} --master {master_url}"
+                f"sudo sh -s -- --token {fake_token} --master {master_url}"
             ),
         )
 
@@ -355,7 +392,7 @@ async def generate_join_token(
     master_url = request.app.state.master_url
     curl_command = (
         f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-        f"sh -s -- --token {token} --master {master_url}"
+        f"sudo sh -s -- --token {token} --master {master_url}"
     )
 
     expires_in = int(payload["expires_at"] - now)
@@ -735,7 +772,7 @@ async def regenerate_join_token(
             expires_in=1800,
             curl_command=(
                 f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-                f"sh -s -- --token {fake_token} --master {master_url}"
+                f"sudo sh -s -- --token {fake_token} --master {master_url}"
             ),
         )
 
@@ -788,7 +825,7 @@ async def regenerate_join_token(
     master_url = request.app.state.master_url
     curl_command = (
         f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-        f"sh -s -- --token {token} --master {master_url}"
+        f"sudo sh -s -- --token {token} --master {master_url}"
     )
     expires_in = int(payload["expires_at"] - now)
     logger.info("JOIN_TOKEN regenerated: node_id=%s expires_in=%ds", node_id, expires_in)

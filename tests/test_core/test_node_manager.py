@@ -147,36 +147,51 @@ async def test_node_manager_intents(node_manager: NodeManager):
 
 
 @pytest.mark.asyncio
-async def test_node_manager_revocation(db: aiosqlite.Connection, node_manager: NodeManager):
+async def test_node_manager_delete_node(db: aiosqlite.Connection, node_manager: NodeManager):
     node_id = await node_manager.create_node(db, name="revoked-node")
     ws = DummyWebSocket()
     await node_manager.register_connection(node_id, ws)
 
-    # Insert a dummy worker token so we can check if it gets revoked
+    # Insert a dummy worker token so we can verify cascade
     await db.execute(
         "INSERT INTO worker_tokens (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, 0)",
         ("token_id_1", node_id, "dummy_hash", time.time(), time.time() + 3600, time.time() + 7200),
     )
     await db.commit()
 
-    await node_manager.revoke_node(db, node_id, revoked_by="admin")
+    result = await node_manager.delete_node(db, node_id, deleted_by="admin")
 
-    # Verify node state in DB
+    # The method returns the previous state + name for audit
+    assert result is not None
+    assert result["state"] == "PENDING"
+    assert result["name"] == "revoked-node"
+
+    # Verify node row is gone (hard delete)
     node = await node_manager.get_node(db, node_id)
-    assert node["state"] == "REVOKED"
+    assert node is None
 
-    # Verify connection dropped
+    # Verify connection dropped with revoke code
     assert ws.closed
     assert ws.close_code == 4403
     assert not await node_manager.is_connected(node_id)
 
-    # Verify token revoked in DB
+    # Verify cascade: worker_tokens row removed via FK ON DELETE CASCADE
+    async with db.execute("SELECT id FROM worker_tokens WHERE node_id = ?", (node_id,)) as cur:
+        assert await cur.fetchone() is None
+
+    # Verify audit log kept the NODE_DELETED entry
     async with db.execute(
-        "SELECT revoked, revoked_by FROM worker_tokens WHERE node_id = ?", (node_id,)
+        "SELECT action FROM audit_log WHERE node_id = ? AND action = 'NODE_DELETED'",
+        (node_id,),
     ) as cur:
         row = await cur.fetchone()
-        assert row["revoked"] == 1
-        assert row["revoked_by"] == "admin"
+        assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_node_manager_delete_nonexistent(db: aiosqlite.Connection, node_manager: NodeManager):
+    result = await node_manager.delete_node(db, "ghost-id", deleted_by="admin")
+    assert result is None
 
 
 @pytest.mark.asyncio
@@ -289,14 +304,14 @@ async def test_node_manager_websocket_close_exceptions(
     await node_manager.register_connection(node_id, ws2)
     assert not ws2.closed
 
-    # Register old connection again, and test exception on revoke_node
+    # Register old connection again, and test exception on delete_node
     await node_manager.register_connection(node_id, ws)
     await db.execute(
         "INSERT INTO nodes (id, name, state, created_at, updated_at) VALUES (?, 'name', 'CONNECTED', ?, ?)",
         (node_id, time.time(), time.time()),
     )
     await db.commit()
-    await node_manager.revoke_node(db, node_id, revoked_by="admin")
+    await node_manager.delete_node(db, node_id, deleted_by="admin")
     # Exception is caught and ignored, code doesn't crash
 
     # Register connection again, and test exception on stop()
