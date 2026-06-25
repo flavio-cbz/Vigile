@@ -36,22 +36,20 @@ type MetricsSnapshot struct {
 // collectMetrics gathers all system metrics from /proc (Linux).
 func collectMetrics() MetricsSnapshot {
 	now := float64(time.Now().UnixMicro()) / 1_000_000
-	memTotal, memUsed, memPercent, swapTotal, swapUsed := getMemStats()
-	diskTotal, diskUsed, diskPercent := getDiskStats()
 	return MetricsSnapshot{
 		CPUPercent:    getCPUPercent(),
 		CPULoad1m:     getLoadAvg(0),
 		CPULoad5m:     getLoadAvg(1),
 		CPULoad15m:    getLoadAvg(2),
 		CPUCores:      getCPUCores(),
-		MemTotalBytes: memTotal,
-		MemUsedBytes:  memUsed,
-		MemPercent:    memPercent,
-		SwapTotal:     swapTotal,
-		SwapUsed:      swapUsed,
-		DiskTotal:     diskTotal,
-		DiskUsed:      diskUsed,
-		DiskPercent:   diskPercent,
+		MemTotalBytes: getMemField("MemTotal"),
+		MemUsedBytes:  getMemUsed(),
+		MemPercent:    getMemPercent(),
+		SwapTotal:     getMemField("SwapTotal"),
+		SwapUsed:      getSwapUsed(),
+		DiskTotal:     getDiskTotal(),
+		DiskUsed:      getDiskUsed(),
+		DiskPercent:   getDiskPercent(),
 		UptimeSeconds: getUptime(),
 		Processes:     getProcessCount(),
 		CollectedAt:   now,
@@ -134,49 +132,80 @@ func getCPUCores() int {
 
 // ── Memory ───────────────────────────────────────────────────────────
 
-func getMemStats() (total int64, used int64, percent float64, swapTotal int64, swapUsed int64) {
+func getMemField(field string) int64 {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		return 0, 0, 0, 0, 0
+		return 0
 	}
-	fields := make(map[string]int64)
 	for _, line := range strings.Split(string(data), "\n") {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			field := strings.TrimSuffix(parts[0], ":")
-			v, _ := strconv.ParseInt(parts[1], 10, 64)
-			fields[field] = v * 1024 // kB -> bytes
+		if strings.HasPrefix(line, field+":") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				v, _ := strconv.ParseInt(parts[1], 10, 64)
+				return v * 1024 // kB → bytes
+			}
 		}
 	}
-	total = fields["MemTotal"]
-	available := fields["MemAvailable"]
+	return 0
+}
+
+func getMemUsed() int64 {
+	total := getMemField("MemTotal")
+	available := getMemField("MemAvailable")
 	if available > 0 {
-		used = total - available
-	} else {
-		used = total - fields["MemFree"] - fields["Buffers"] - fields["Cached"]
+		return total - available
 	}
-	if total > 0 {
-		percent = math.Round(float64(used)/float64(total)*1000) / 10
+	free := getMemField("MemFree")
+	buffers := getMemField("Buffers")
+	cached := getMemField("Cached")
+	return total - free - buffers - cached
+}
+
+func getMemPercent() float64 {
+	total := getMemField("MemTotal")
+	if total == 0 {
+		return 0
 	}
-	swapTotal = fields["SwapTotal"]
-	swapUsed = swapTotal - fields["SwapFree"]
-	return total, used, percent, swapTotal, swapUsed
+	used := getMemUsed()
+	return math.Round(float64(used)/float64(total)*1000) / 10
+}
+
+func getSwapUsed() int64 {
+	total := getMemField("SwapTotal")
+	free := getMemField("SwapFree")
+	if total <= 0 {
+		return 0
+	}
+	return total - free
 }
 
 // ── Disk (root partition) ────────────────────────────────────────────
 
-func getDiskStats() (total int64, used int64, percent float64) {
+func getDiskTotal() int64 {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs("/", &stat); err != nil {
-		return 0, 0, 0
+		return 0
 	}
-	total = int64(stat.Blocks) * stat.Bsize
-	free := int64(stat.Bavail) * stat.Bsize
-	used = total - free
-	if total > 0 {
-		percent = math.Round(float64(used)/float64(total)*1000) / 10
+	return int64(stat.Blocks) * int64(stat.Bsize)
+}
+
+func getDiskUsed() int64 {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs("/", &stat); err != nil {
+		return 0
 	}
-	return total, used, percent
+	total := int64(stat.Blocks) * int64(stat.Bsize)
+	free := int64(stat.Bavail) * int64(stat.Bsize)
+	return total - free
+}
+
+func getDiskPercent() float64 {
+	total := getDiskTotal()
+	if total == 0 {
+		return 0
+	}
+	used := getDiskUsed()
+	return math.Round(float64(used)/float64(total)*1000) / 10
 }
 
 // ── System ───────────────────────────────────────────────────────────
@@ -224,6 +253,7 @@ func isNumeric(s string) bool {
 
 // ── Intent handler ───────────────────────────────────────────────────
 
+// handleGetStats collects metrics and returns them as a STATUS_REPORT.
 func handleGetStats(intent Intent) IntentResult {
 	metrics := collectMetrics()
 	out, err := json.Marshal(metrics)
@@ -236,9 +266,23 @@ func handleGetStats(intent Intent) IntentResult {
 // buildStatusReport builds a STATUS_REPORT message from metrics.
 func buildStatusReport() map[string]interface{} {
 	m := collectMetrics()
-	out, _ := json.Marshal(m)
-	var report map[string]interface{}
-	_ = json.Unmarshal(out, &report)
-	report["type"] = "STATUS_REPORT"
-	return report
+	return map[string]interface{}{
+		"type":            "STATUS_REPORT",
+		"cpu_percent":     m.CPUPercent,
+		"cpu_load_1m":     m.CPULoad1m,
+		"cpu_load_5m":     m.CPULoad5m,
+		"cpu_load_15m":    m.CPULoad15m,
+		"cpu_cores":       m.CPUCores,
+		"mem_total_bytes": m.MemTotalBytes,
+		"mem_used_bytes":  m.MemUsedBytes,
+		"mem_percent":     m.MemPercent,
+		"swap_total_bytes": m.SwapTotal,
+		"swap_used_bytes": m.SwapUsed,
+		"disk_total_bytes": m.DiskTotal,
+		"disk_used_bytes": m.DiskUsed,
+		"disk_percent":    m.DiskPercent,
+		"uptime_seconds":  m.UptimeSeconds,
+		"processes":       m.Processes,
+		"collected_at":    m.CollectedAt,
+	}
 }
