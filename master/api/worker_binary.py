@@ -173,7 +173,7 @@ def verify_minisign(
                     "minisign",
                     "-Vm",
                     str(binary_path),
-                    "-P",
+                    "-p",
                     str(pub_file),
                     "-x",
                     str(sig_file),
