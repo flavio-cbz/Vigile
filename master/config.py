@@ -97,6 +97,7 @@ class Settings(BaseModel):
     worker_binary_revocation_ttl_seconds: int = int(
         os.getenv("WORKER_BINARY_REVOCATION_TTL_SECONDS", "300")
     )
+    worker_binary_github_token: str = os.getenv("WORKER_BINARY_GITHUB_TOKEN", "")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

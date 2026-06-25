@@ -42,9 +42,25 @@ Ajoute un secret dans **Settings → Secrets and variables → Actions** :
 
 > Ce fichier est gitignoré. Ne le committe jamais. En production, seule la clé publique est nécessaire sur le Master.
 
-### 2. Variable d'environnement Master
+### 2. Accès aux releases (repo privé)
 
-Sur le serveur Master, définis :
+Si le dépôt GitHub est **privé**, le Master doit s'authentifier pour télécharger les assets. Crée un Personal Access Token (classic) avec le scope `repo`, puis définis :
+
+```bash
+WORKER_BINARY_GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+Pour le développement local, tu peux utiliser le token de `gh` :
+
+```bash
+export WORKER_BINARY_GITHUB_TOKEN=$(gh auth token)
+```
+
+Si le dépôt est public, laisse cette variable vide.
+
+### 3. Variable d'environnement Master
+
+Sur le serveur Master, définis au minimum :
 
 ```bash
 WORKER_BINARY_PUBLIC_KEY=RWT+mYY8j2fYe5RBquJ1QLm8iEenxrZrvT7cXbTJFXyRyvjWqBU3d6ka
@@ -106,6 +122,9 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/binary/re
 
 ## Dépannage
 
-- **502 Bad Gateway** : le Master ne trouve pas le `manifest.json` sur GitHub Releases. Vérifie que le tag a bien déclenché la CI et que la release contient `manifest.json`.
+- **502 Bad Gateway** : le Master ne trouve pas le `manifest.json` sur GitHub Releases.
+  - Vérifie que le tag a bien déclenché la CI et que la release contient `manifest.json`.
+  - Si le dépôt est privé, vérifie que `WORKER_BINARY_GITHUB_TOKEN` est défini et possède le scope `repo`.
 - **Erreur de signature** : vérifie que `WORKER_BINARY_PUBLIC_KEY` correspond bien à la clé utilisée pour signer en CI.
 - **Clé secrète manquante** : vérifie le secret `MINISIGN_SECRET_KEY` dans les paramètres GitHub.
+- **403 Resource not accessible** en CI : vérifie que le workflow a la permission `contents: write` (voir `.github/workflows/release-worker.yml`).

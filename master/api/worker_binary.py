@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from master.api.deps import get_settings
+from master.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,18 @@ def _validate_os_arch(os_name: str, arch: str) -> None:
         )
 
 
-async def _fetch_url(url: str, timeout: int = 30) -> bytes:
+def _is_github_url(url: str) -> bool:
+    return url.startswith("https://github.com/") or url.startswith("https://api.github.com/")
+
+
+async def _fetch_url(url: str, settings: Settings, timeout: int = 30) -> bytes:
+    headers = {}
+    token = settings.worker_binary_github_token
+    if token and _is_github_url(url):
+        headers["Authorization"] = f"Bearer {token}"
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, headers=headers)
             resp.raise_for_status()
             return resp.content
     except httpx.HTTPStatusError as exc:
@@ -155,9 +164,9 @@ async def _fetch_and_cache(
     tmp_dir = cache_dir / ".tmp"
     async with _cache_lock:
         try:
-            binary_data = await _fetch_url(binary_info["url"])
-            sha256_data = await _fetch_url(binary_info["url"] + ".sha256")
-            sig_data = await _fetch_url(binary_info["url"] + ".sig")
+            binary_data = await _fetch_url(binary_info["url"], settings)
+            sha256_data = await _fetch_url(binary_info["url"] + ".sha256", settings)
+            sig_data = await _fetch_url(binary_info["url"] + ".sig", settings)
 
             tmp_dir.mkdir(parents=True, exist_ok=True)
             tmp_bin = tmp_dir / "worker"
@@ -195,7 +204,7 @@ async def _fetch_manifest(settings) -> dict:
     if _manifest_cache["data"] and (now - _manifest_cache["fetched_at"]) < settings.worker_binary_cache_ttl_seconds:
         return _manifest_cache["data"]
 
-    data = await _fetch_url(settings.worker_binary_manifest_url)
+    data = await _fetch_url(settings.worker_binary_manifest_url, settings)
     manifest = json.loads(data)
     _manifest_cache["data"] = manifest
     _manifest_cache["fetched_at"] = now
@@ -214,9 +223,13 @@ async def _fetch_revocations(settings) -> dict:
     if _revocation_cache["data"] and (now - _revocation_cache["fetched_at"]) < settings.worker_binary_revocation_ttl_seconds:
         return _revocation_cache["data"]
 
+    headers = {}
+    token = settings.worker_binary_github_token
+    if token and _is_github_url(settings.worker_binary_revocation_url):
+        headers["Authorization"] = f"Bearer {token}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(settings.worker_binary_revocation_url)
+            response = await client.get(settings.worker_binary_revocation_url, headers=headers)
             response.raise_for_status()
             data = response.json()
             _revocation_cache["data"] = data
