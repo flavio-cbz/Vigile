@@ -120,6 +120,21 @@ Puis publiera sur GitHub Releases :
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/binary/refresh
 ```
 
+## Exécuter le Worker manuellement
+
+```bash
+# Avec les flags CLI
+vigile-worker --master https://master.example.com --token <JOIN_TOKEN>
+
+# Ou avec les variables d'environnement
+export MASTER_URL=https://master.example.com
+export JOIN_TOKEN=<JOIN_TOKEN>
+vigile-worker
+
+# Clés et token dans un répertoire personnalisé (utile pour les tests non-root)
+vigile-worker --key-dir ./vigile-data
+```
+
 ## Dépannage
 
 - **502 Bad Gateway** : le Master ne trouve pas le `manifest.json` sur GitHub Releases.
@@ -128,3 +143,4 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/binary/re
 - **Erreur de signature** : vérifie que `WORKER_BINARY_PUBLIC_KEY` correspond bien à la clé utilisée pour signer en CI.
 - **Clé secrète manquante** : vérifie le secret `MINISIGN_SECRET_KEY` dans les paramètres GitHub.
 - **403 Resource not accessible** en CI : vérifie que le workflow a la permission `contents: write` (voir `.github/workflows/release-worker.yml`).
+- **Permission denied sur /etc/vigile** : utilise `--key-dir` pour pointer vers un répertoire accessible en écriture.
