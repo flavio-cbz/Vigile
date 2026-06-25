@@ -28,6 +28,28 @@ from master.core.secret_loader import load_secret
 logger = logging.getLogger(__name__)
 
 
+# User-facing error messages (French, no raw exception leakage).
+# Internal operators still get the raw exception via WARNING logs below.
+LLM_ERROR_MESSAGES = {
+    "request_timeout": (
+        "La requête au service IA a expiré après {timeout} secondes. "
+        "Réessayez ou réduisez la complexité de votre demande."
+    ),
+    "stream_timeout": (
+        "Le service IA a mis trop de temps à répondre. "
+        "Réessayez ou réduisez la complexité de votre demande."
+    ),
+    "connection_failed": (
+        "Connexion au service IA impossible. "
+        "Vérifiez la configuration LLM dans Paramètres → Configuration Master."
+    ),
+    "http_error": (
+        "Le service IA a renvoyé une erreur (HTTP {status_code}). "
+        "Contactez l'administrateur si le problème persiste."
+    ),
+}
+
+
 class LLMError(Exception):
     pass
 
@@ -76,16 +98,21 @@ class LLMClient:
         try:
             resp = await self._client.post(url, headers=headers, json=body)
         except httpx.TimeoutException as exc:
-            raise LLMError(f"LLM request timed out after {self.timeout}s") from exc
+            logger.warning("LLM request timed out after %ss: %s", self.timeout, exc)
+            raise LLMError(
+                LLM_ERROR_MESSAGES["request_timeout"].format(timeout=self.timeout)
+            ) from exc
         except httpx.ConnectError as exc:
-            raise LLMError(f"LLM connection failed: {exc}") from exc
+            logger.warning("LLM connection failed: %s", exc)
+            raise LLMError(LLM_ERROR_MESSAGES["connection_failed"]) from exc
 
         if resp.status_code >= 400:
-            detail = f"LLM returned HTTP {resp.status_code}"
             try:
-                detail += f": {resp.text[:200]}"
+                error_text = resp.text[:200]
             except Exception:
-                pass
+                error_text = "<unreadable response>"
+            logger.warning("LLM returned HTTP %s: %s", resp.status_code, error_text)
+            detail = LLM_ERROR_MESSAGES["http_error"].format(status_code=resp.status_code)
             raise LLMError(detail)
 
         return resp.json()
@@ -117,12 +144,17 @@ class LLMClient:
                 timeout=httpx.Timeout(self.timeout, read=120),
             ) as resp:
                 if resp.status_code >= 400:
-                    detail = f"LLM returned HTTP {resp.status_code}"
                     try:
-                        detail += f": {resp.text[:200]}"
+                        error_text = resp.text[:200]
                     except Exception:
-                        pass
-                    yield {"type": "error", "detail": detail}
+                        error_text = "<unreadable response>"
+                    logger.warning("LLM returned HTTP %s: %s", resp.status_code, error_text)
+                    yield {
+                        "type": "error",
+                        "detail": LLM_ERROR_MESSAGES["http_error"].format(
+                            status_code=resp.status_code
+                        ),
+                    }
                     return
 
                 async for line in resp.aiter_lines():
@@ -151,11 +183,13 @@ class LLMClient:
                     tool_calls = delta.get("tool_calls")
                     if tool_calls:
                         yield {"type": "tool_call", "tool_calls": tool_calls}
-        except httpx.TimeoutException:
-            yield {"type": "error", "detail": "LLM stream timed out"}
+        except httpx.TimeoutException as exc:
+            logger.warning("LLM stream timed out: %s", exc)
+            yield {"type": "error", "detail": LLM_ERROR_MESSAGES["stream_timeout"]}
             return
         except httpx.ConnectError as exc:
-            yield {"type": "error", "detail": f"LLM connection failed: {exc}"}
+            logger.warning("LLM connection failed: %s", exc)
+            yield {"type": "error", "detail": LLM_ERROR_MESSAGES["connection_failed"]}
             return
 
     async def close(self) -> None:

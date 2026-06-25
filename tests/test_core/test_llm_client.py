@@ -68,7 +68,7 @@ async def test_complete_timeout():
 
     with pytest.raises(LLMError) as exc_info:
         await client.complete([{"role": "user", "content": "Hi"}])
-    assert "timed out" in str(exc_info.value).lower()
+    assert "expiré" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_complete_connect_error():
 
     with pytest.raises(LLMError) as exc_info:
         await client.complete([{"role": "user", "content": "Hi"}])
-    assert "connection failed" in str(exc_info.value).lower()
+    assert "connexion" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_stream_timeout_and_connect_errors():
         events.append(event)
     assert len(events) == 1
     assert events[0]["type"] == "error"
-    assert "timed out" in events[0]["detail"]
+    assert "répondre" in events[0]["detail"].lower()
 
     # Connect error
     client._client.stream = mock.MagicMock(
@@ -190,7 +190,7 @@ async def test_stream_timeout_and_connect_errors():
         events_conn.append(event)
     assert len(events_conn) == 1
     assert events_conn[0]["type"] == "error"
-    assert "connection failed" in events_conn[0]["detail"]
+    assert "connexion" in events_conn[0]["detail"].lower()
 
 
 @pytest.mark.asyncio
