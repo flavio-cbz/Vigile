@@ -382,6 +382,16 @@ export const en = {
   "plugins.toggle_error": "Unable to toggle plugin.",
   "plugins.uploaded": "Plugin \"{name}\" uploaded successfully.",
   "plugins.upload_failed": "Plugin upload failed.",
+  "plugins.tabs.installed": "Installed",
+  "plugins.tabs.registry": "Registry",
+  "plugins.registry.empty": "No plugins available in the registry.",
+  "plugins.registry.author": "Author",
+  "plugins.registry.version": "Version",
+  "plugins.registry.install": "Install",
+  "plugins.registry.installed": "Installed",
+  "plugins.registry.installing": "Installing...",
+  "plugins.registry.install_success": "Plugin \"{name}\" installed successfully.",
+  "plugins.registry.install_failed": "Failed to install plugin \"{name}\".",
 
   // Add Server Modal
   "add_node.title": "Add a server",

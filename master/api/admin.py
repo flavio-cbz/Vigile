@@ -26,7 +26,12 @@ from fastapi.responses import JSONResponse
 
 from master.api.demo_data import is_demo
 from master.api.deps import get_db, get_settings, require_role, reset_llm_clients
-from master.api.schemas.admin import IntentConfigUpdate, LLMSettingsUpdate
+from master.api.schemas.admin import (
+    IntentConfigUpdate,
+    LLMSettingsUpdate,
+    RegistryPluginResponse,
+    RegistryResponse,
+)
 from master.api.worker_binary import refresh_binary_cache
 from master.core.audit import AuditAction, log_action, verify_chain
 from master.core.node_manager import node_manager
@@ -341,6 +346,194 @@ async def list_plugins(
             "hooks": plugin_manager.get_hooks(),
             "plugins": result,
         }
+    )
+
+
+@router.get("/plugins/registry", response_model=RegistryResponse, summary="Get available plugins from registry")
+async def get_plugin_registry(
+    claims=Depends(require_role("admin")),
+    settings=Depends(get_settings),
+) -> RegistryResponse:
+    """Fetch the plugin registry list from remote or fallback."""
+    import httpx
+
+    registry_url = settings.plugin_registry_url
+    logger.info("Fetching plugin registry from %s", registry_url)
+
+    fallback_data = {
+        "plugins": [
+            {
+                "id": "discord_alert",
+                "name": "Discord Alerts",
+                "description": "Send alert notifications to a Discord webhook on node state changes.",
+                "author": "Vigile Team",
+                "version": "1.0.0",
+                "download_url": "https://raw.githubusercontent.com/flavio-cbz/Vigile-Plugins/main/plugins/discord_alert.py",
+            },
+            {
+                "id": "slack_alert",
+                "name": "Slack Alerts",
+                "description": "Send alert notifications to a Slack webhook on node state changes.",
+                "author": "Vigile Team",
+                "version": "1.0.0",
+                "download_url": "https://raw.githubusercontent.com/flavio-cbz/Vigile-Plugins/main/plugins/slack_alert.py",
+            },
+            {
+                "id": "clean_logs",
+                "name": "Clean Logs Utility",
+                "description": "Periodically clean up large log files on target worker nodes.",
+                "author": "Vigile Team",
+                "version": "1.0.0",
+                "download_url": "https://raw.githubusercontent.com/flavio-cbz/Vigile-Plugins/main/plugins/clean_logs.py",
+            },
+        ]
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(registry_url)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict) and "plugins" in data:
+                    return RegistryResponse(plugins=data["plugins"])
+            logger.warning("Remote registry returned status %d. Using fallback.", r.status_code)
+    except Exception as e:
+        logger.warning("Failed to fetch remote registry (%s). Using fallback.", e)
+
+    return RegistryResponse(plugins=fallback_data["plugins"])
+
+
+@router.post("/plugins/registry/{plugin_id}/install", summary="Install a plugin from registry")
+async def install_plugin(
+    plugin_id: str,
+    claims=Depends(require_role("admin")),
+    settings=Depends(get_settings),
+) -> JSONResponse:
+    """Download, validate, and install a plugin from the registry by its ID."""
+    if is_demo(claims):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Installation d'extensions non autorisée en mode démonstration.",
+        )
+
+    # 1. Fetch registry first to find the download URL
+    registry = await get_plugin_registry(claims, settings)
+    target_plugin = None
+    for p in registry.plugins:
+        if p.id == plugin_id:
+            target_plugin = p
+            break
+
+    if not target_plugin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plugin '{plugin_id}' non trouvé dans le registre.",
+        )
+
+    # 2. Fetch the source code
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(target_plugin.download_url)
+            if r.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Impossible de télécharger le fichier source (HTTP {r.status_code}).",
+                )
+            source = r.text
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Erreur lors du téléchargement de l'extension : {str(e)}",
+        )
+
+    # 3. Compilability checks
+    try:
+        compile(source, f"{plugin_id}.py", "exec")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erreur de syntaxe Python dans le code téléchargé : {str(e)}",
+        )
+
+    # 4. AST validation for register contract
+    import ast
+    try:
+        tree = ast.parse(source)
+        has_register = False
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "register":
+                has_register = True
+                break
+        if not has_register:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Validation du contrat échouée : le plugin doit définir une fonction 'register(pm)'.",
+            )
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Validation AST échouée : {str(e)}",
+        )
+
+    # 5. Sanitize and build paths
+    if "/" in plugin_id or "\\" in plugin_id or ".." in plugin_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nom d'extension invalide.")
+
+    plugin_name = plugin_id
+    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_name}.py")
+    os.makedirs(settings.plugins_dir, exist_ok=True)
+
+    # 6. Write to disk using run_sync to prevent blocking the event loop (as per Phase 1)
+    import anyio
+
+    def _write_file():
+        with open(plugin_path, "w", encoding="utf-8") as f:
+            f.write(source)
+
+    try:
+        await anyio.to_thread.run_sync(_write_file)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Échec de l'écriture du fichier : {str(e)}",
+        )
+
+    # 7. Update database configuration
+    db = get_db_conn()
+    await db.execute(
+        "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, '{}')",
+        (plugin_name,),
+    )
+    await db.commit()
+
+    # 8. Load the plugin into PluginManager
+    success = plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
+    if not success:
+        if os.path.exists(plugin_path):
+            try:
+                os.remove(plugin_path)
+            except Exception:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Impossible de charger le plugin dans PluginManager.",
+        )
+
+    # 9. Log audit action
+    await log_action(
+        db,
+        user_id=claims["sub"],
+        action=AuditAction.UPLOAD_PLUGIN,
+        details={"plugin_id": plugin_name, "source": "registry"},
+    )
+
+    return JSONResponse(
+        {"status": "success", "message": f"Plugin '{plugin_name}' installé et activé avec succès."}
     )
 
 

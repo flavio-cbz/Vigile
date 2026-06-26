@@ -382,6 +382,16 @@ export const fr = {
   "plugins.toggle_error": "Impossible de basculer le plugin.",
   "plugins.uploaded": "Plugin \"{name}\" uploadé avec succès.",
   "plugins.upload_failed": "Échec de l'upload du plugin.",
+  "plugins.tabs.installed": "Installés",
+  "plugins.tabs.registry": "Registre",
+  "plugins.registry.empty": "Aucun plugin disponible dans le registre.",
+  "plugins.registry.author": "Auteur",
+  "plugins.registry.version": "Version",
+  "plugins.registry.install": "Installer",
+  "plugins.registry.installed": "Installé",
+  "plugins.registry.installing": "Installation...",
+  "plugins.registry.install_success": "Plugin \"{name}\" installé avec succès.",
+  "plugins.registry.install_failed": "Échec de l'installation du plugin \"{name}\".",
 
   // Add Server Modal
   "add_node.title": "Ajouter un serveur",

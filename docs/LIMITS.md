@@ -134,6 +134,9 @@ Le code était correct avant la détection dans l'audit. La doc LIMITS.md était
 9. **Contraintes et Defaults DB (S-02, S-03)** ✅ Fait (Phase 11)
    Sécurisation avec contraintes CHECK sur les statuts et valeurs par défaut robustes dans la migration de base de données.
 
+10. **Registre de Plugins (Sprint 5 — Étape 1)** ✅ Fait
+    Ajout d'un système de registre d'extensions officiel dynamique (`/api/admin/plugins/registry`) permettant de lister les plugins disponibles, de les télécharger en un clic de manière asynchrone, d'effectuer des vérifications de syntaxe et de contrat AST (fonction `register(pm)`), et de basculer automatiquement sur un registre local résilient (fallback hors-ligne) en cas d'absence d'accès à Internet.
+
 ---
 
 ## Security Deployment Notes

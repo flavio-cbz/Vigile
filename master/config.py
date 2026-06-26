@@ -85,6 +85,10 @@ class Settings(BaseModel):
 
     # --- Plugins ---
     plugins_dir: str = os.getenv("PLUGINS_DIR", "./master/plugins")
+    plugin_registry_url: str = os.getenv(
+        "PLUGIN_REGISTRY_URL",
+        "https://raw.githubusercontent.com/flavio-cbz/Vigile-Plugins/main/registry.json",
+    )
 
     # --- Allowed dependencies (X-06) ---
     allowed_dependencies: list[str] = (
