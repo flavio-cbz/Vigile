@@ -68,11 +68,15 @@ class LLMClient:
         api_key: str = "",
         model: str = "gpt-4o-mini",
         timeout: int = 30,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or load_secret("LLM_API_KEY")
         self.model = model
         self.timeout = timeout
+        self.max_tokens = max_tokens
+        self.temperature = temperature
         self._client: httpx.AsyncClient = httpx.AsyncClient(
             timeout=timeout,
             limits=httpx.Limits(

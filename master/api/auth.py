@@ -17,9 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from master.api.demo_data import DEMO_PASSWORD, DEMO_USER_ID, DEMO_USERNAME, is_demo
-from master.api.deps import DB, CurrentUser, get_security
-from master.config import settings
-from master.core.audit import log_action
+from master.api.deps import DB, CurrentUser, get_security, get_settings
+from master.core.audit import AuditAction, log_action
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityError, SecurityManager
 
@@ -65,12 +64,16 @@ REFRESH_TOKEN_COOKIE = "vigile_refresh_token"
 
 
 def _cookie_domain() -> str | None:
+    from master.config import settings
+
     return settings.cookie_domain or None
 
 
 def _set_auth_cookies(
     response: Response, access_token: str, refresh_token: str, sec: SecurityManager
 ) -> None:
+    from master.config import settings
+
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
         access_token,
@@ -94,6 +97,8 @@ def _set_auth_cookies(
 
 
 def _clear_auth_cookies(response: Response) -> None:
+    from master.config import settings
+
     response.delete_cookie(
         ACCESS_TOKEN_COOKIE,
         domain=_cookie_domain(),
@@ -228,7 +233,7 @@ async def login(
     await log_action(
         db,
         user_id=user["id"],
-        action="USER_LOGIN",
+        action=AuditAction.USER_LOGIN,
         details={"username": user["username"]},
     )
     await db.commit()
@@ -311,7 +316,7 @@ async def refresh_token(
         await log_action(
             db,
             user_id=user_id,
-            action="REFRESH_THEFT_DETECTED",
+            action=AuditAction.REFRESH_THEFT_DETECTED,
             details={"family_id": db_token["family_id"], "attempted_token_hash": token_hash},
         )
         await db.commit()
@@ -375,7 +380,7 @@ async def refresh_token(
     await log_action(
         db,
         user_id=user["id"],
-        action="TOKEN_REFRESH",
+        action=AuditAction.TOKEN_REFRESH,
         details={"family_id": db_token["family_id"], "token_hash_prefix": new_token_hash[:8]},
     )
     await db.commit()
@@ -422,7 +427,7 @@ async def logout(
     await log_action(
         db,
         user_id=user_id,
-        action="USER_LOGOUT",
+        action=AuditAction.USER_LOGOUT,
         details={"token_hash_prefix": token_hash[:8]},
     )
     await db.commit()
@@ -487,7 +492,7 @@ async def change_password(
     await log_action(
         db,
         user_id=user_id,
-        action="USER_CHANGE_PASSWORD",
+        action=AuditAction.USER_CHANGE_PASSWORD,
         details={"username": user["username"]},
     )
     await db.commit()

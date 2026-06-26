@@ -335,6 +335,8 @@ export const en = {
   "settings.access_ttl": "Access Token TTL",
   "settings.refresh_ttl": "Refresh Token TTL",
   "settings.master_specs": "Master Technical Specifications",
+  "settings.plugins_title": "Plugins",
+  "settings.plugins_dir": "Plugins Directory",
   "settings.listen_host": "Listen Host",
   "settings.listen_port": "Listen Port",
   "settings.debug_mode": "Debug Mode",

@@ -335,6 +335,8 @@ export const fr = {
   "settings.access_ttl": "TTL Access Token",
   "settings.refresh_ttl": "TTL Refresh Token",
   "settings.master_specs": "Spécifications Techniques Master",
+  "settings.plugins_title": "Plugins",
+  "settings.plugins_dir": "Répertoire Plugins",
   "settings.listen_host": "Hôte d'Écoute",
   "settings.listen_port": "Port d'Écoute",
   "settings.debug_mode": "Mode Débogage",

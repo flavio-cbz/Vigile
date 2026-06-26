@@ -206,6 +206,9 @@ def get_llm_client() -> "LLMClient":  # noqa: F821
                 base_url=settings.llm_base_url,
                 api_key=settings.llm_api_key,
                 model=settings.llm_model,
+                timeout=settings.llm_timeout,
+                max_tokens=settings.llm_max_tokens,
+                temperature=settings.llm_temperature,
             )
         return _llm_client
 

@@ -177,7 +177,8 @@ CREATE TABLE IF NOT EXISTS action_proposals (
     params_json       TEXT NOT NULL DEFAULT '{}',
     reasoning         TEXT NOT NULL,
     risk_level        TEXT NOT NULL DEFAULT 'MEDIUM',
-    status            TEXT NOT NULL DEFAULT 'PENDING',
+    status            TEXT NOT NULL DEFAULT 'PENDING'
+                      CHECK(status IN ('PENDING','APPROVED','EXECUTED','FAILED','REJECTED')),
     created_by        TEXT NOT NULL,
     approved_by       TEXT,
     rejected_by       TEXT,

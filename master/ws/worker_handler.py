@@ -38,7 +38,7 @@ from typing import Any
 import aiosqlite
 from fastapi import WebSocket, WebSocketDisconnect
 
-from master.core.audit import log_action
+from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeState, node_manager
 from master.core.plugin_manager import plugin_manager
 from master.core.security_manager import get_security_instance
@@ -388,7 +388,7 @@ async def _run_enrollment(
     await log_action(
         db,
         user_id="system",
-        action="NODE_ENROLLED",
+        action=AuditAction.NODE_ENROLLED,
         node_id=node_id,
         details={
             "hostname": hostname,
@@ -545,7 +545,7 @@ async def _run_reconnect(
     await log_action(
         db,
         user_id="system",
-        action="NODE_RECONNECTED",
+        action=AuditAction.NODE_RECONNECTED,
         node_id=node_id,
         details={
             "token_id": token_id,
@@ -621,7 +621,7 @@ async def _run_operational(
             await log_action(
                 db,
                 user_id="system",
-                action="INTENT_RESULT",
+                action=AuditAction.INTENT_RESULT,
                 node_id=node_id,
                 details={
                     "intent_id": intent_id,

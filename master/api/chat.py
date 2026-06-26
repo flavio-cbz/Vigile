@@ -41,7 +41,7 @@ from master.api.deps import (
     require_role,
 )
 from master.core.action_proposal import ActionProposal
-from master.core.audit import log_action
+from master.core.audit import AuditAction, log_action
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager
 from master.core.structured_llm import StructuredLLM
@@ -413,7 +413,7 @@ async def approve_proposal(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="PROPOSAL_APPROVED",
+        action=AuditAction.PROPOSAL_APPROVED,
         node_id=proposal.node_id,
         details={
             "proposal_id": proposal.id,
@@ -503,7 +503,7 @@ async def reject_proposal(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="PROPOSAL_REJECTED",
+        action=AuditAction.PROPOSAL_REJECTED,
         node_id=proposal.node_id,
         details={
             "proposal_id": proposal.id,
@@ -715,27 +715,19 @@ async def _build_chat_context(
     Build a system prompt with node context.
     If no node_id is specified, returns a generic sysadmin prompt.
     """
+    from master.core.prompts import load_prompt
+
     lang_instruction = (
         "You must always reply in English."
         if locale == "en"
         else "Tu dois toujours répondre en français."
     )
     if not node_id or node_id == "all":
-        return (
-            "You are a server fleet management AI assistant. "
-            "You help operators monitor and manage their servers. "
-            "When an action is needed, you can propose it and the operator will approve it. "
-            "Be concise, technical, and precise. "
-            f"{lang_instruction}"
-        )
+        return load_prompt("chat_generic", lang_instruction=lang_instruction)
 
     node = await nm.get_node(db, node_id)
     if node is None:
-        return (
-            "You are a server fleet management AI assistant. "
-            "The specified node was not found. "
-            f"{lang_instruction}"
-        )
+        return load_prompt("chat_node_not_found", lang_instruction=lang_instruction)
 
     # Gather node context
     context_parts = [
@@ -767,22 +759,12 @@ async def _build_chat_context(
         except Exception:
             pass
 
-    base = (
-        "You are a server fleet management AI assistant. "
-        "You help operators monitor and manage their servers.\n\n"
-        "Available actions you can propose (use the proper action name):\n"
-        "- GET_STATS: Collect CPU/RAM/disk metrics\n"
-        "- READ_LOGS: Read log files from /var/log/\n"
-        "- LIST_SERVICES: List systemd services\n"
-        "- STATUS_SERVICE: Get status of a specific service\n"
-        "- RESTART_SERVICE: Restart a systemd service\n"
-        "- LIST_CONTAINERS: List Docker containers\n"
-        "- RESTART_CONTAINER: Restart a Docker container\n\n"
-        f"{lang_instruction}\n\n"
-        "Current node context:\n"
+    context_lines = "\n".join(f"- {line}" for line in context_parts)
+    return load_prompt(
+        "chat_with_context",
+        lang_instruction=lang_instruction,
+        context_lines=context_lines,
     )
-
-    return base + "\n".join(f"- {line}" for line in context_parts)
 
 
 class _ProposalRequest(BaseModel):

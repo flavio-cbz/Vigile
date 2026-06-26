@@ -110,6 +110,30 @@ Le code était correct avant la détection dans l'audit. La doc LIMITS.md était
 4. **Correction des violations de Dependency Injection** de la configuration système ✅ Fait
 5. **Nettoyage automatique du rate-limiter** via tâche asyncio de lifespan ✅ Fait
 6. **Force-change du mot de passe** administrateur par défaut ✅ Fait
+
+---
+
+## 📐 Décisions architecturales et corrections du Sprint 5 (Dette technique)
+
+1. **Passage à des opérations de fichiers asynchrones** ✅ Fait (Phase 1)
+   Les lectures/écritures synchrones dans `admin.py` et `main.py` sont déportées sur des threads dédiés via `anyio.to_thread.run_sync` pour ne plus bloquer l'event loop FastAPI.
+2. **Optimisation des requêtes SQL et transactions** ✅ Fait (Phase 2)
+   Les requêtes N+1 et commits répétés dans `node_manager.py` ont été regroupés dans des transactions uniques. Les requêtes SQL dynamiques ont été paramétrées de manière sécurisée.
+3. **Traçabilité totale des mutations** ✅ Fait (Phase 3)
+   Les mutations et suppressions orphelines sont désormais journalisées via `log_action`.
+4. **Centralisation du Polling UI** ✅ Fait (Phase 4)
+   Les `setInterval` multiples ont été remplacés par le hook unifié `usePolling.ts`.
+5. **Typage strict Frontend** ✅ Fait (Phase 5)
+   Suppression des types `any` injustifiés et renforcement du typage statique TypeScript.
+6. **Découpage des composants God** ✅ Fait (Phase 6 & 7)
+   Les composants géants (`NodeDetail.tsx`, `LoginPage.tsx`, etc.) ont été découpés en sous-composants, et le code mort a été nettoyé.
+7. **Timeout et Paramétrage centralisé (X-03, P-02, B-01, B-02)** ✅ Fait (Phase 11)
+   Exposition de tous les timeouts, paramètres LLM et variables d'environnement dans les `Settings` globaux et exclusion des imports de `settings` au niveau module.
+8. **Séparation des Prompts Système** ✅ Fait (Phase 11)
+   Les prompts du LLM sont externalisés dans des fichiers `.md` sous `master/core/prompts/`.
+9. **Contraintes et Defaults DB (S-02, S-03)** ✅ Fait (Phase 11)
+   Sécurisation avec contraintes CHECK sur les statuts et valeurs par défaut robustes dans la migration de base de données.
+
 ---
 
 ## Security Deployment Notes
@@ -117,3 +141,4 @@ Le code était correct avant la détection dans l'audit. La doc LIMITS.md était
 Vigile must be exposed in production behind an external TLS reverse proxy. The Master is prepared for that deployment model through `ENFORCE_HTTPS`, `TRUSTED_PROXIES`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, and `COOKIE_DOMAIN`; Workers should use a `wss://` master URL once the TLS proxy is in place.
 
 Never commit `.env` files. If `LLM_API_KEY`, `SERVER_SECRET_KEY`, or `JWT_SECRET_KEY` was written to a shared or exposed `.env`, treat it as compromised: revoke the provider key, generate a new value, redeploy, and verify that only `.env.example` is tracked.
+

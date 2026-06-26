@@ -70,12 +70,9 @@ class StructuredLLM:
             LLMError: If the LLM provider returns an error.
         """
         schema = response_model.model_json_schema()
-        system_prompt = (
-            "You are a precise JSON generator. "
-            "Respond ONLY with valid JSON matching this schema, "
-            "no markdown, no explanation, no code blocks:\n"
-            f"{json.dumps(schema, indent=2)}"
-        )
+        from master.core.prompts import load_prompt
+
+        system_prompt = load_prompt("structured_output", schema=json.dumps(schema, indent=2))
 
         full_messages = [{"role": "system", "content": system_prompt}, *messages]
 

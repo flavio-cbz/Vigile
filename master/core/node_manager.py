@@ -33,36 +33,20 @@ import json
 import logging
 import time
 import uuid
-from enum import Enum
 from typing import Any
 
 import aiosqlite
 from fastapi import WebSocket
 
-from master.core.audit import log_action
+from master.core.audit import AuditAction, log_action
+from master.core.enums import NodeState, WebSocketCloseCode, WorkerAction
 from master.core.lock import LoopBoundLock
 from master.db.database import get_db_conn
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Node state enum
-# ---------------------------------------------------------------------------
-
-
-class NodeState(str, Enum):
-    PENDING = "PENDING"  # Token generated, Worker not yet connected
-    ENROLLING = "ENROLLING"  # Handshake in progress
-    UNCONFIGURED = "UNCONFIGURED"  # Ed25519 OK, awaiting operator confirm of name+group
-    CONNECTED = "CONNECTED"  # Fully enrolled, WSS active, heartbeat OK
-    RECONNECTING = "RECONNECTING"  # Connection dropped, Worker attempting reconnect
-    LOST = "LOST"  # No heartbeat for > heartbeat_lost_threshold
-    STALE = "STALE"  # LOST for > heartbeat_stale_threshold
-    DISABLED = "DISABLED"  # Operator-disabled (orthogonal to connectivity)
-    REVOKED = (
-        "REVOKED"  # Legacy value — only present in rows from before the hard-delete migration.
-    )
+# NodeState is imported from master.core.enums for canonical definition
 
 
 VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
@@ -163,6 +147,7 @@ class NodeManager:
         lost_threshold: int = 300,
         stale_threshold: int = 86400,
         default_intent_max_age: float = 300.0,
+        cache_update_interval: int = 300,
     ) -> None:
         """Start the background heartbeat monitor and cache updater. Called at app startup.
         Thresholds are injected here — no config coupling inside the loop."""
@@ -173,7 +158,7 @@ class NodeManager:
             name="heartbeat_monitor",
         )
         self._cache_task = asyncio.create_task(
-            self._cache_updater(300),  # Update cache every 5 minutes
+            self._cache_updater(cache_update_interval),
             name="cache_updater",
         )
         logger.info("NodeManager started. Heartbeat monitor and cache updater running.")
@@ -276,7 +261,7 @@ class NodeManager:
                         await log_action(
                             db,
                             user_id="system",
-                            action="CACHE_REFRESH",
+                            action=AuditAction.CACHE_REFRESH,
                             node_id=nid,
                             details={
                                 "services_updated": services_json is not None,
@@ -527,7 +512,7 @@ class NodeManager:
             await log_action(
                 db,
                 user_id=deleted_by,
-                action="NODE_DELETED",
+                action=AuditAction.NODE_DELETED,
                 node_id=node_id,
                 details={
                     "previous_state": previous_state,
@@ -565,7 +550,7 @@ class NodeManager:
         await log_action(
             db,
             user_id="system",
-            action="CONFIGURE_NODE",
+            action=AuditAction.CONFIGURE_NODE,
             node_id=node_id,
             details={"name": name, "group": group or ""},
         )
@@ -623,7 +608,7 @@ class NodeManager:
         await log_action(
             db,
             user_id=by_user,
-            action="DISABLE_NODE" if disabled else "ENABLE_NODE",
+            action=AuditAction.DISABLE_NODE if disabled else AuditAction.ENABLE_NODE,
             node_id=node_id,
             details={
                 "from_state": current_state.value,
@@ -661,7 +646,7 @@ class NodeManager:
         await log_action(
             db,
             user_id=by_user,
-            action="UPDATE_NODE",
+            action=AuditAction.UPDATE_NODE,
             node_id=node_id,
             details=details,
         )
@@ -919,7 +904,7 @@ class NodeManager:
                     await log_action(
                         db,
                         user_id="system",
-                        action="NODE_LOST",
+                        action=AuditAction.NODE_LOST,
                         node_id=node_id,
                         details={"heartbeat_age": age, "lost_threshold": lost_threshold},
                     )
@@ -939,7 +924,7 @@ class NodeManager:
                         await log_action(
                             db,
                             user_id="system",
-                            action="NODE_STALE",
+                            action=AuditAction.NODE_STALE,
                             node_id=node_id,
                             details={"heartbeat_age": age, "stale_threshold": stale_threshold},
                         )

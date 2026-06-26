@@ -30,7 +30,8 @@ from master.api.deps import (
     get_security,
     require_role,
 )
-from master.core.audit import log_action
+from master.core.audit import AuditAction, log_action
+from master.core.enums import WorkerAction
 from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
 from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
@@ -380,7 +381,7 @@ async def generate_join_token(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="GENERATE_JOIN_TOKEN",
+        action=AuditAction.GENERATE_JOIN_TOKEN,
         node_id=node_id,
         details={
             "node_name": pending_name,
@@ -817,7 +818,7 @@ async def regenerate_join_token(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="REGENERATE_JOIN_TOKEN",
+        action=AuditAction.REGENERATE_JOIN_TOKEN,
         node_id=node_id,
         details={"invalidated": invalidated},
     )
@@ -990,13 +991,13 @@ async def get_node_logs(
 
     effective_path = path
     if service:
-        action = "READ_LOGS_SERVICE"
+        action = WorkerAction.READ_LOGS
         params = {"service": service, "lines": lines}
     elif effective_path:
-        action = "READ_LOGS"
+        action = WorkerAction.READ_LOGS
         params = {"path": effective_path, "lines": lines}
     else:
-        action = "READ_LOGS"
+        action = WorkerAction.READ_LOGS
         effective_path = "/var/log/syslog"
         params = {"path": effective_path, "lines": lines}
 

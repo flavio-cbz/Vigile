@@ -28,7 +28,7 @@ from master.api.demo_data import is_demo
 from master.api.deps import get_db, get_settings, require_role, reset_llm_clients
 from master.api.schemas.admin import IntentConfigUpdate, LLMSettingsUpdate
 from master.api.worker_binary import refresh_binary_cache
-from master.core.audit import log_action, verify_chain
+from master.core.audit import AuditAction, log_action, verify_chain
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import canonical_plugin_id, plugin_file_stem, plugin_manager
 from master.db.database import get_db_conn
@@ -166,7 +166,7 @@ async def update_llm_settings(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="UPDATE_LLM_SETTINGS",
+        action=AuditAction.UPDATE_LLM_SETTINGS,
         details={
             "llm_base_url": body.llm_base_url,
             "llm_model": body.llm_model,
@@ -256,7 +256,7 @@ async def update_intent_config(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="UPDATE_INTENT_CONFIG",
+        action=AuditAction.UPDATE_INTENT_CONFIG,
         details={"default_intent_max_age": body.default_intent_max_age},
     )
     return JSONResponse({"status": "ok", "default_intent_max_age": body.default_intent_max_age})
@@ -421,7 +421,7 @@ async def upload_plugin(
         )
 
     await log_action(
-        db, user_id=claims["sub"], action="UPLOAD_PLUGIN", details={"plugin_id": plugin_name}
+        db, user_id=claims["sub"], action=AuditAction.UPLOAD_PLUGIN, details={"plugin_id": plugin_name}
     )
 
     return JSONResponse(
@@ -462,7 +462,7 @@ async def configure_plugin(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="CONFIGURE_PLUGIN",
+        action=AuditAction.CONFIGURE_PLUGIN,
         details={"plugin_id": plugin_id, "config": config},
     )
 
@@ -518,7 +518,7 @@ async def toggle_plugin(
     await log_action(
         db,
         user_id=claims["sub"],
-        action="TOGGLE_PLUGIN",
+        action=AuditAction.TOGGLE_PLUGIN,
         details={"plugin_id": plugin_id, "enabled": new_state},
     )
 
@@ -573,7 +573,7 @@ async def delete_plugin(
 
     # 4. Log audit
     await log_action(
-        db, user_id=claims["sub"], action="DELETE_PLUGIN", details={"plugin_id": plugin_id}
+        db, user_id=claims["sub"], action=AuditAction.DELETE_PLUGIN, details={"plugin_id": plugin_id}
     )
 
     return JSONResponse(

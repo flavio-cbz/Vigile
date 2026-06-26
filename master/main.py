@@ -123,7 +123,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("🔒 Secure mode active: HTTPS/WSS is enforced.")
 
     # 1. Init DB
-    db = await init_db(settings.database_path)
+    db = await init_db(settings.database_path, timeout=settings.db_timeout)
     logger.info("Database connection established.")
 
     # 2. Migrations
@@ -157,6 +157,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         lost_threshold=settings.heartbeat_lost_threshold,
         stale_threshold=settings.heartbeat_stale_threshold,
         default_intent_max_age=settings.default_intent_max_age,
+        cache_update_interval=settings.cache_update_interval,
     )
 
     app.state.startup_time = time.time()

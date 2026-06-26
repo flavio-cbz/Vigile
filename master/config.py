@@ -21,9 +21,12 @@ class Settings(BaseModel):
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    testing: bool = os.getenv("TESTING", "false").lower() == "true"
 
     # --- Database ---
     database_path: str = os.getenv("DATABASE_PATH", "./data/vigile.db")
+    db_timeout: int = int(os.getenv("DB_TIMEOUT", "30"))
+    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
 
     # --- Security: Server Secret (HMAC signing for JOIN_TOKENs) ---
     server_secret_key: str = os.getenv("SERVER_SECRET_KEY", "")
@@ -68,12 +71,31 @@ class Settings(BaseModel):
     llm_base_url: str = os.getenv("LLM_BASE_URL", "")
     llm_api_key: str = load_secret("LLM_API_KEY")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+    llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+    llm_timeout: int = int(os.getenv("LLM_TIMEOUT", "30"))
+    llm_stream_read_timeout: int = int(os.getenv("LLM_STREAM_READ_TIMEOUT", "120"))
 
     # --- Intent GC ---
     default_intent_max_age: int = int(os.getenv("INTENT_DEFAULT_MAX_AGE", "300"))
+    intent_timeout: float = float(os.getenv("INTENT_TIMEOUT", "10.0"))
+
+    # --- Cache ---
+    cache_update_interval: int = int(os.getenv("CACHE_UPDATE_INTERVAL", "300"))
 
     # --- Plugins ---
     plugins_dir: str = os.getenv("PLUGINS_DIR", "./master/plugins")
+
+    # --- Allowed dependencies (X-06) ---
+    allowed_dependencies: list[str] = (
+        os.getenv("ALLOWED_DEPENDENCIES", "aiosqlite,httpx,pydantic,passlib,bcrypt,fastapi,uvicorn,starlette,python-multipart,anyio,pydantic-settings").split(",")
+        if os.getenv("ALLOWED_DEPENDENCIES")
+        else [
+            "aiosqlite", "httpx", "pydantic", "passlib", "bcrypt",
+            "fastapi", "uvicorn", "starlette", "python-multipart",
+            "anyio", "pydantic-settings",
+        ]
+    )
 
     # --- Worker Binary Distribution ---
     # Public minisign key used to verify Worker binary signatures.

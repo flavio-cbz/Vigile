@@ -6,13 +6,13 @@ Creates all tables if not exists, then seeds the default admin user.
 """
 
 import logging
-import os
 import time
 import uuid
 
 import aiosqlite
 from passlib.context import CryptContext
 
+from master.config import settings
 from master.core.audit import GENESIS_HASH, compute_entry_hash
 from master.db.models import ALL_TABLES, CREATE_INDEXES
 
@@ -45,19 +45,19 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
 
     mutated = False
     if "insight_profile" not in columns:
-        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile TEXT")
+        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile TEXT DEFAULT NULL")
         mutated = True
     if "insight_profile_generated_at" not in columns:
-        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile_generated_at REAL")
+        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile_generated_at REAL DEFAULT NULL")
         mutated = True
     if "cached_services_json" not in columns:
-        await db.execute("ALTER TABLE nodes ADD COLUMN cached_services_json TEXT")
+        await db.execute("ALTER TABLE nodes ADD COLUMN cached_services_json TEXT DEFAULT '[]'")
         mutated = True
     if "cached_containers_json" not in columns:
-        await db.execute("ALTER TABLE nodes ADD COLUMN cached_containers_json TEXT")
+        await db.execute("ALTER TABLE nodes ADD COLUMN cached_containers_json TEXT DEFAULT '[]'")
         mutated = True
     if "node_group" not in columns:
-        await db.execute("ALTER TABLE nodes ADD COLUMN node_group TEXT")
+        await db.execute("ALTER TABLE nodes ADD COLUMN node_group TEXT DEFAULT ''")
         mutated = True
     if "disabled" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
@@ -151,7 +151,7 @@ async def _seed_default_admin(db: aiosqlite.Connection) -> None:
     now = time.time()
     user_id = str(uuid.uuid4())
     password_hash = _pwd_context.hash("admin")
-    must_change = 1 if os.getenv("TESTING") == "true" else 0
+    must_change = 1 if settings.testing else 0
 
     await db.execute(
         """

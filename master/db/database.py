@@ -26,15 +26,16 @@ class DatabaseConnectionPool:
         self._connections: list[aiosqlite.Connection] = []
         self._path: str = ""
 
-    async def init(self, database_path: str, size: int = 5) -> None:
+    async def init(self, database_path: str, size: int = 5, timeout: float = 30.0) -> None:
         self._path = database_path
+        self._timeout = timeout
         for _ in range(size):
             conn = await self._create_connection()
             self._connections.append(conn)
             await self._pool.put(conn)
 
     async def _create_connection(self) -> aiosqlite.Connection:
-        conn = await aiosqlite.connect(self._path, timeout=30.0)
+        conn = await aiosqlite.connect(self._path, timeout=getattr(self, '_timeout', 30.0))
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA foreign_keys=ON")
         await conn.execute("PRAGMA synchronous=NORMAL")
@@ -79,7 +80,7 @@ async def database_session() -> AsyncGenerator[aiosqlite.Connection, None]:
         await _pool.release(conn)
 
 
-async def init_db(database_path: str) -> aiosqlite.Connection:
+async def init_db(database_path: str, timeout: float = 30.0, pool_size: int = 5) -> aiosqlite.Connection:
     """
     Open the SQLite database and configure it for production use.
     Called once at application startup via the FastAPI lifespan.
@@ -90,7 +91,7 @@ async def init_db(database_path: str) -> aiosqlite.Connection:
         raise RuntimeError("Database already initialized. close_db() first.")
 
     # Primary connection (used for migrations and fallback)
-    db = await aiosqlite.connect(database_path, timeout=30.0)
+    db = await aiosqlite.connect(database_path, timeout=timeout)
 
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")
@@ -101,7 +102,7 @@ async def init_db(database_path: str) -> aiosqlite.Connection:
     _db = db
 
     # Initialize the database connection pool
-    await _pool.init(database_path, size=5)
+    await _pool.init(database_path, size=pool_size, timeout=timeout)
     return db
 
 
