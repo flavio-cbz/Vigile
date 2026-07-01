@@ -111,6 +111,21 @@ async def _github_api_download(url: str, token: str, timeout: int) -> bytes:
 
 
 async def _fetch_url(url: str, settings: Settings, timeout: int = 30) -> bytes:
+    if url.startswith("file://"):
+        file_path = Path(url[7:])
+        try:
+            return file_path.read_bytes()
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Local file not found: {file_path}",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Cannot read local file {file_path}: {exc}",
+            ) from exc
+
     token = settings.worker_binary_github_token
     if token and _GITHUB_RELEASE_RE.match(url):
         try:
