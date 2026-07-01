@@ -12,6 +12,7 @@ Endpoints:
 import logging
 import time
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -63,17 +64,17 @@ ACCESS_TOKEN_COOKIE = "vigile_access_token"
 REFRESH_TOKEN_COOKIE = "vigile_refresh_token"
 
 
-def _cookie_domain() -> str | None:
-    from master.config import settings
-
+def _cookie_domain(settings: Any) -> str | None:
     return settings.cookie_domain or None
 
 
 def _set_auth_cookies(
-    response: Response, access_token: str, refresh_token: str, sec: SecurityManager
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+    sec: SecurityManager,
+    settings: Any,
 ) -> None:
-    from master.config import settings
-
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
         access_token,
@@ -81,7 +82,7 @@ def _set_auth_cookies(
         httponly=True,
         secure=settings.cookie_secure,
         samesite=settings.cookie_samesite,
-        domain=_cookie_domain(),
+        domain=_cookie_domain(settings),
         path="/",
     )
     response.set_cookie(
@@ -91,17 +92,15 @@ def _set_auth_cookies(
         httponly=True,
         secure=settings.cookie_secure,
         samesite=settings.cookie_samesite,
-        domain=_cookie_domain(),
+        domain=_cookie_domain(settings),
         path="/api/auth",
     )
 
 
-def _clear_auth_cookies(response: Response) -> None:
-    from master.config import settings
-
+def _clear_auth_cookies(response: Response, settings: Any) -> None:
     response.delete_cookie(
         ACCESS_TOKEN_COOKIE,
-        domain=_cookie_domain(),
+        domain=_cookie_domain(settings),
         path="/",
         samesite=settings.cookie_samesite,
         secure=settings.cookie_secure,
@@ -109,7 +108,7 @@ def _clear_auth_cookies(response: Response) -> None:
     )
     response.delete_cookie(
         REFRESH_TOKEN_COOKIE,
-        domain=_cookie_domain(),
+        domain=_cookie_domain(settings),
         path="/api/auth",
         samesite=settings.cookie_samesite,
         secure=settings.cookie_secure,
@@ -148,6 +147,7 @@ async def login(
     response: Response,
     db: DB,
     sec: SecurityManager = Depends(get_security),
+    settings: Any = Depends(get_settings),
 ) -> TokenResponse:
     """
     Authenticate a human user with username + password.
@@ -165,7 +165,7 @@ async def login(
         )
         refresh_token, _ = sec.create_refresh_token(user_id=DEMO_USER_ID)
         logger.info("Demo user '%s' logged in (no DB).", DEMO_USERNAME)
-        _set_auth_cookies(response, access_token, refresh_token, sec)
+        _set_auth_cookies(response, access_token, refresh_token, sec, settings)
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -240,7 +240,7 @@ async def login(
 
     logger.info("User '%s' (role=%s) logged in.", user["username"], user["role"])
 
-    _set_auth_cookies(response, access_token, refresh_token, sec)
+    _set_auth_cookies(response, access_token, refresh_token, sec, settings)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -259,6 +259,7 @@ async def refresh_token(
     response: Response,
     db: DB,
     sec: SecurityManager = Depends(get_security),
+    settings: Any = Depends(get_settings),
 ) -> TokenResponse:
     """
     Exchange a valid refresh token for a new access token and rotated refresh token.
@@ -282,7 +283,7 @@ async def refresh_token(
         )
         new_refresh_token, _ = sec.create_refresh_token(user_id=DEMO_USER_ID)
         logger.info("Demo user refresh token rotated (no DB).")
-        _set_auth_cookies(response, access_token, new_refresh_token, sec)
+        _set_auth_cookies(response, access_token, new_refresh_token, sec, settings)
         return TokenResponse(
             access_token=access_token,
             refresh_token=new_refresh_token,
@@ -385,7 +386,7 @@ async def refresh_token(
     )
     await db.commit()
 
-    _set_auth_cookies(response, access_token, new_refresh_token, sec)
+    _set_auth_cookies(response, access_token, new_refresh_token, sec, settings)
     return TokenResponse(
         access_token=access_token,
         refresh_token=new_refresh_token,
@@ -404,11 +405,12 @@ async def logout(
     response: Response,
     db: DB,
     sec: SecurityManager = Depends(get_security),
+    settings: Any = Depends(get_settings),
 ):
     """Log out by revoking the provided refresh token."""
     refresh_token_value = body.refresh_token or request.cookies.get(REFRESH_TOKEN_COOKIE)
     if not refresh_token_value:
-        _clear_auth_cookies(response)
+        _clear_auth_cookies(response, settings)
         return
     token_hash = sec.hash_refresh_token(refresh_token_value)
 
@@ -431,7 +433,7 @@ async def logout(
         details={"token_hash_prefix": token_hash[:8]},
     )
     await db.commit()
-    _clear_auth_cookies(response)
+    _clear_auth_cookies(response, settings)
 
 
 @router.post(

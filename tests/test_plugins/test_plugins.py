@@ -231,7 +231,8 @@ async def test_on_status_report():
 
 
 # 6. Plugin loading from directory
-def test_plugin_loading_from_dir(tmp_path):
+@pytest.mark.asyncio
+async def test_plugin_loading_from_dir(tmp_path):
     import pathlib
 
     project_root = pathlib.Path(__file__).parent.parent.parent
@@ -240,7 +241,7 @@ def test_plugin_loading_from_dir(tmp_path):
     shutil.copy2(plugin_src, plugin_dst)
 
     pm2 = PluginManager()
-    loaded = pm2.load_plugins_from_dir(str(tmp_path))
+    loaded = await pm2.load_plugins_from_dir(str(tmp_path))
     assert "metrics" in loaded
 
     actions = pm2.call_first("get_supported_actions")

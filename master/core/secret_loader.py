@@ -49,13 +49,15 @@ def load_secret(
     if file_var is None:
         file_var = f"{env_var}_FILE"
 
+    env = getattr(os, "environ", {})
+
     # Priority 1: direct environment variable
-    value = os.environ.get(env_var)
+    value = env.get(env_var)
     if value:
         return value
 
     # Priority 2: Docker secrets file path
-    file_path_str = os.environ.get(file_var)
+    file_path_str = env.get(file_var)
     if file_path_str:
         try:
             return Path(file_path_str).read_text().strip()

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Server, Search, HardDrive, Cpu, Clock } from 'lucide-react';
+import { Server, Search, HardDrive, Cpu, Clock, Plus } from 'lucide-react';
 import { useNodeStore, type Node } from '../store/nodeStore';
+import { useLayoutStore } from '../store/layoutStore';
 import { StatusDot } from '../components/primitives/StatusDot';
 import { EmptyState } from '../components/ui/EmptyState';
 import { KebabMenu } from '../components/ui/KebabMenu';
@@ -79,6 +80,7 @@ export const ServersPage: React.FC = () => {
   const addToast = useToastStore((s) => s.addToast);
   const [renameNode, setRenameNode] = useState<Node | null>(null);
   const [deleteNode, setDeleteNode] = useState<Node | null>(null);
+  const setAddNodeModalOpen = useLayoutStore((s) => s.setAddNodeModalOpen);
 
   const fetchBulkMetrics = async () => {
     try {
@@ -159,7 +161,7 @@ export const ServersPage: React.FC = () => {
           description={search ? t('servers.empty_search_description') : t('servers.empty_description')}
           action={!search ? {
             label: t('servers.add_server'),
-            onClick: () => navigate('/'),
+            onClick: () => setAddNodeModalOpen(true),
           } : undefined}
         />
       )}
@@ -317,6 +319,28 @@ export const ServersPage: React.FC = () => {
               </div>
             );
           })}
+
+          <div
+            onClick={() => setAddNodeModalOpen(true)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter') setAddNodeModalOpen(true); }}
+            className="bg-surface-2 border-2 border-dashed border-border-strong/20 hover:bg-surface-2/80 rounded-xl p-4 text-center transition-all duration-200 cursor-pointer group flex flex-col items-center justify-center min-h-[200px] w-full card-glow-accent"
+          >
+            <div className="flex flex-col items-center justify-center space-y-3">
+              <div className="p-3 rounded-full bg-accent/5 group-hover:bg-accent/10 transition-colors">
+                <Plus className="w-6 h-6 text-accent group-hover:scale-110 transition-transform duration-200" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-text-1 group-hover:text-accent transition-colors">
+                  {t('servers.add_server')}
+                </h3>
+                <p className="text-[11px] text-text-3 mt-1 max-w-[200px] leading-relaxed">
+                  {t('servers.empty_description')}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

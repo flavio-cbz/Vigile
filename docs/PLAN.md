@@ -458,124 +458,203 @@ vigile/
 │   └── ...
 │
 └── scripts/
-    ├── kickstart.sh                 # Script universel d'installation Worker
-    ├── build_worker.sh              # Cross-compile Go pour toutes les cibles
-    └── dev_setup.sh                 # Setup environnement de dev
+    ├── ✅ kickstart.sh                 # Script universel d'installation Worker (servi dynamiquement par l'API)
+    ├── ❌ build_worker.sh              # Cross-compile Go pour toutes les cibles (MANQUANT)
+    ├── ❌ dev_setup.sh                 # Setup environnement de dev (MANQUANT)
+    └── ✅ setup_test.sh                # Test stack Docker (existe mais non listé dans le plan original)
 ```
 
 ---
 
 ## Sprints
 
-### Sprint 1 — Core Sécurisé et Enrollment
+> **Légende :** ✅ = fait | ⚠️ = partiel | ❌ = manquant
 
-- `SecurityManager` : JOIN_TOKEN HMAC, challenge Ed25519, WORKER_TOKEN avec cycle de vie
-- `NodeManager` : registre des nodes, machine à états, dictionnaire WebSockets
-- `PluginManager` : chargement dynamique, système de hooks
-- API : `POST /api/nodes/generate-join`, `GET /api/nodes/kickstart.sh`, `GET /api/nodes/binary/{os}/{arch}/worker`
-- WebSocket : `/ws/worker/join` — handshake complet enrollment + bascule opérationnel
-- DB : schema SQLite complet (nodes, tokens, audit)
-- Worker Go : enrollment Ed25519, heartbeat, reconnexion backoff, dispatcher whitelist
+### Sprint 1 — Core Sécurisé et Enrollment ✅
 
-### Sprint 2 — Plugins OS et Métriques
+- ✅ `SecurityManager` : JOIN_TOKEN HMAC, challenge Ed25519, WORKER_TOKEN avec cycle de vie
+- ✅ `NodeManager` : registre des nodes, machine à états, dictionnaire WebSockets
+- ✅ `PluginManager` : chargement dynamique, système de hooks
+- ✅ API : `POST /api/nodes/generate-join`, `GET /api/nodes/kickstart.sh`, `GET /api/nodes/binary/{os}/{arch}/worker`
+- ✅ WebSocket : `/ws/worker/join` — handshake complet enrollment + bascule opérationnel
+- ✅ DB : schema SQLite complet (nodes, tokens, audit)
+- ✅ Worker Go : enrollment Ed25519, heartbeat, reconnexion backoff, dispatcher whitelist
 
-- Plugin `metrics` : CPU, RAM, disque, uptime (cross-platform, sans dépendance)
-- Plugin `docker` : list containers, restart, logs (si Docker détecté dynamiquement)
-- Plugin `systemd` : list services, status, restart (si Linux)
-- `kickstart.sh` complet : détection OS/arch, vérification SHA256, cascade installation
-- API : `GET /api/nodes`, `GET /api/nodes/{id}/stats`, `GET /api/nodes/{id}/logs`
+### Sprint 2 — Plugins OS et Métriques ✅ (100%)
 
-### Sprint 3 — Couche IA et Human-in-the-Loop
+- ✅ Plugin `metrics` : CPU, RAM, disque, uptime (cross-platform, sans dépendance)
+- ✅ Plugin `docker` : list containers, restart, logs (si Docker détecté dynamiquement)
+- ✅ Plugin `systemd` : list services, status, restart (si Linux)
+- ✅ `kickstart.sh` complet : détection OS/arch, vérification SHA256, cascade installation
+- ✅ API : `GET /api/nodes`, `GET /api/nodes/{id}/stats`, `GET /api/nodes/{id}/logs`
 
-- `LLMClient` natif : complete + stream SSE
-- `StructuredLLM` : boucle retry + validation Pydantic
-- Modèle `ActionProposal` : action, params, reasoning, risk_level
-- API : `POST /api/chat` (stream), `POST /api/chat/approve`, `POST /api/chat/reject`
-- Audit Trail : hash chaîné, stockage immuable
+### Sprint 3 — Couche IA et Human-in-the-Loop ✅
 
-### Sprint 4 — Frontend
+- ✅ `LLMClient` natif : complete + stream SSE
+- ✅ `StructuredLLM` : boucle retry + validation Pydantic
+- ✅ Modèle `ActionProposal` : action, params, reasoning, risk_level
+- ✅ API : `POST /api/chat` (stream), `POST /api/proposals/{id}/approve`, `POST /api/proposals/{id}/reject`
+- ✅ Audit Trail : hash chaîné, stockage immuable
 
-- Application React standalone (vite + TailwindCSS + shadcn/ui)
-- `ChatPanel` : streaming SSE natif, historique de conversation
-- `ActionProposal` : carte d'approbation avec contexte et niveau de risque
-- `NodeCard` : état, métriques temps réel, logs
-- `LogViewer` : terminal lecture seule, WebSocket streaming
-- `AuditLog` : timeline des actions approuvées
-- Auth UI : login, gestion de session JWT
-- **Plugin Catalogue** : page d'accueil des plugins disponibles avec installation en 1 clic (prépare le terrain pour Sprint 5)
+### Sprint 4 — Frontend ✅
 
-### Sprint 5 — Plugin Ecosystem (Home Assistant-like)
+- ✅ Application React standalone (vite + TailwindCSS + shadcn/ui)
+- ✅ `CopilotPanel` (ChatPanel) : streaming SSE natif, historique de conversation
+- ✅ `ProposalInline` / `ProposalCard` (ActionProposal) : carte d'approbation avec contexte et niveau de risque
+- ✅ `NodeCard` : état, métriques temps réel, logs
+- ✅ `NodeDetailLogsTab` (LogViewer) : terminal lecture seule, WebSocket streaming
+- ✅ `AuditPage` (AuditLog) : timeline des actions approuvées
+- ✅ Auth UI : login, gestion de session JWT
+- ✅ **Plugin Catalogue** : page d'accueil des plugins disponibles avec installation en 1 clic
 
-- **Format de plugin standardisé** : métadonnées, dépendances, hooks, configuration
-- **Plugin Registry** : catalogue de plugins téléchargeables (GitHub / registre local)
-- **Installation frontend** : browse, install, activate, configure depuis l'UI
-- **Plugin isolation** : chaque plugin dans son propre sous-processus ou namespace
-- **Moteur d'automatisations** : déclencheur (trigger) → conditions (conditions) → actions
-  - Triggers : heartbeat, STATUS_REPORT, INTENT_RESULT, timer CRON, webhook
-  - Conditions : métrique > seuil, service down, log match, AND/OR/NOT
-  - Actions : intent Worker, webhook, notification, LLM call
-- **Plugin SDK** : documentation + template pour créer des plugins tiers
-- Exemples de plugins : backup, uptime monitoring, alerting Slack/Discord, DNS updater
+### Sprint 5 — Plugin Ecosystem (Home Assistant-like) ✅ (100%)
 
-### Sprint 6 — Production Hardening
+- ✅ **Format de plugin standardisé** : métadonnées, dépendances, hooks, configuration
+- ✅ **Plugin Registry** : catalogue de plugins téléchargeables (GitHub / registre local) — endpoints API et fallback résilient hors-ligne validés
+- ✅ **Installation frontend** : browse, install, activate, configure depuis l'UI
+- ✅ **Plugin isolation** : chaque plugin dans son propre sous-processus (sandbox) avec proxy DB transparent
+- ✅ **Moteur d'automatisations** : déclencheur (trigger) → conditions (conditions) → actions
+  - Triggers : heartbeat, STATUS_REPORT, INTENT_RESULT, timer, webhook
+  - Conditions : métrique > seuil, service down, log match, time window
+  - Actions : intent Worker, webhook, notification, logs
+- ✅ **Plugin SDK** : documentation + template pour créer des plugins tiers (`docs/PLUGIN_SDK.md`)
+- ✅ Exemples de plugins : Discord Alert, Slack Alert, Clean Logs (propositions de nettoyage de disque)
 
-- Rate limiting sur les endpoints sensibles
-- Rotation automatique WORKER_TOKEN
-- Mode offline (binaires préchargés pour réseau isolé)
-- Build pipeline : cross-compile Worker pour Linux/Darwin/FreeBSD × x86_64/arm64/armv7
-- Health checks, métriques Master (`/metrics` Prometheus-compatible, natif)
-- Documentation déploiement
+### Sprint 6 — Production Hardening ⚠️
+
+Le passage en production nécessite de verrouiller les limites du système et d'automatiser le cycle de vie des credentials.
+
+#### 1. Rate Limiting Multi-Niveaux (FastAPI Middleware)
+- **Middleware IP & Token** : Limitation du nombre de requêtes à l'aide d'un algorithme de *sliding-window* stocké en mémoire locale (avec option d'extension Redis).
+- **Limites configurables via `settings`** :
+  - Authentification (`/api/auth/login`) : max 5 requêtes par minute par IP.
+  - Endpoints de script (`/api/nodes/kickstart.sh`) : max 10 requêtes par minute par IP.
+  - API de contrôle des Workers : max 100 requêtes par minute par utilisateur.
+
+#### 2. Rotation Automatique des `WORKER_TOKEN`
+- **Mécanisme** : Lors du heartbeat, si `rotation_due` (7 jours écoulés depuis `issued_at`), le Master génère un nouveau token et l'envoie dans une payload asynchrone :
+  ```json
+  { "type": "TOKEN_ROTATION_COMMAND", "new_worker_token": "JWT..." }
+  ```
+- **Validation** : Le Worker stocke le nouveau binaire de clé/token, recharge sa configuration, répond avec un message `TOKEN_ROTATION_ACK`, puis bascule sur le nouveau token. Le Master marque l'ancien token comme `revoked`.
+
+#### 3. Mode Offline & Distribution Hermétique
+- **Binaires préchargés** : Option `OFFLINE_MODE=true` dans `settings` forçant le Master à servir des binaires compilés localement sous `data/binaries/` au lieu de tenter un téléchargement distant.
+- **Script `kickstart.sh` hors-ligne** : Support des certificats CA personnalisés pour les environnements d'entreprise isolés.
+
+#### 4. Pipeline de Build Cross-Platform (`scripts/build_worker.sh`)
+- Script Go de compilation croisée ciblant :
+  - `GOOS=linux GOARCH=amd64` (Linux standard)
+  - `GOOS=linux GOARCH=arm64` (Raspberry Pi 4/5, serveurs ARM)
+  - `GOOS=darwin GOARCH=arm64` (macOS Apple Silicon)
+  - `GOOS=freebsd GOARCH=amd64` (Homelabs TrueNAS Core)
+
+#### 5. Métriques & Health Checks Master
+- Point d'entrée `/metrics` exposant des métriques natives au format Prometheus :
+  - `vigile_connected_workers_total` : Nombre de connexions WebSocket actives.
+  - `vigile_proposals_pending_total` : Actions en attente d'approbation humaine.
+  - `vigile_database_latency_seconds` : Temps de réponse des requêtes aiosqlite.
 
 ---
 
 ## Vision Long Terme — Système Autonome Dirigé par l'IA
 
-Le chemin vers un système entièrement autonome où l'IA gère les opérations
-courantes et n'escalade que l'inconnu.
+Le chemin vers un système entièrement autonome où l'IA gère les opérations courantes et n'escalade que l'inconnu.
 
 ### Sprint 7 — Autonomie Graduée
 
-- **Niveaux de confiance par action** : LOW=auto, MEDIUM=notification, HIGH=approbation humaine
-- **Profiling du comportement humain** : l'IA apprend des patterns d'approbation/rejet pour
-  ajuster ses futurs niveaux de confiance
-- **Escalade intelligente** : l'IA sait quand déranger l'humain et quand agir seule
-- **Table `confidence_history`** : enregistre chaque décision (proposé → approuvé/rejeté → appris)
+L'IA passe d'un rôle d'assistant passif à un rôle d'acteur régulé, avec trois niveaux d'autonomie paramétrables.
+
+#### 1. Niveaux de Confiance et Approbation
+- **`LOW_RISK`** : Actions d'observation ou de maintenance mineure (ex: `GET_STATS`, nettoyage temporaire). Exécution automatique immédiate sans intervention humaine.
+- **`MEDIUM_RISK`** : Actions modifiant des ressources non-critiques (ex: restart d'un container de dev, vidage de cache). Notification SSE/WebSocket instantanée dans l'UI avec possibilité d'annulation sous 10 secondes.
+- **`HIGH_RISK`** : Actions affectant l'infrastructure globale ou le réseau (ex: reboot de node, restart de service systemd critique). Requiert une double validation explicite par un Admin ou Operator.
+
+#### 2. Profiling Comportemental & Apprentissage
+- Stockage de l'historique des interactions avec les propositions dans la table `confidence_history` :
+  ```sql
+  CREATE TABLE confidence_history (
+      id TEXT PRIMARY KEY,
+      action_type TEXT NOT NULL,
+      confidence_score REAL NOT NULL,
+      human_decision TEXT NOT NULL, -- APPROVED, REJECTED, AUTO_EXECUTED
+      decided_at REAL NOT NULL,
+      feedback_text TEXT
+  );
+  ```
+- Un score d'évaluation dynamique réajuste le niveau de risque d'un type d'action selon le ratio d'acceptation de l'utilisateur (ex: si l'administrateur rejette systématiquement le nettoyage de disque automatique, l'action bascule de `LOW_RISK` à `HIGH_RISK`).
+
+---
 
 ### Sprint 8 — Détection Proactive
 
-- **Anomaly detection** : baseline automatique des métriques (CPU, RAM, disque, processus)
-  → écart = alerte avant la panne
-- **Analyse de logs temps réel** : l'IA scanne les logs en continu et remonte les patterns suspects
-- **Prédiction saturation** : extrapolation courbe d'utilisation → "disque plein dans 3 jours"
-- **Alerting prédictif** : notifications avant que le problème n'arrive, pas après
+Le système n'attend pas la panne pour proposer des remédiations. Il surveille en continu et extrait des signaux faibles.
+
+#### 1. Calcul Automatique des Baselines (EMA & Anomaly Detection)
+- Utilisation de moyennes mobiles exponentielles (EMA) locales sur les rapports de métriques (CPU, RAM, Load) :
+  $$\text{Baseline}_{t} = \alpha \times \text{Metric}_{t} + (1 - \alpha) \times \text{Baseline}_{t-1}$$
+- En cas de déviation majeure (> 3 écarts-types) pendant plus de 5 minutes, une proposition d'investigation est générée de manière proactive.
+
+#### 2. Log Scanner Intelligent sur le Worker
+- Le Worker Go intègre un scanner de fichier de logs léger en streaming avec correspondance d'expressions régulières (configuré dynamiquement par le Master).
+- En cas de détection de patterns comme `FATAL`, `OutOfMemoryError` ou `Connection reset by peer`, le Worker lève immédiatement un évènement `LOG_PATTERN_MATCHED` vers le Master, qui lance une analyse contextuelle avec l'IA.
+
+#### 3. Prédiction de Saturation de Disque
+- Modèle linéaire d'extrapolations temporelles sur le disque dur. L'IA avertit l'utilisateur : *"Le disque dur de node-1 sera saturé dans 48h au rythme actuel d'écriture (12 Go/jour)."* et propose une action de nettoyage ciblée.
+
+---
 
 ### Sprint 9 — Runbooks & Auto-Healing
 
-- **Bibliothèque de runbooks** : scénarios de résolution pré-approuvés stockés en base
-  (exemple : "si nginx down → restart → si toujours down → appeler l'humain")
-- **Auto-healing des pannes courantes** : l'IA exécute les runbooks sans intervention
-- **Rolling remediation** : cascade d'actions (si X → alors Y → puis Z) avec arrêt sécurisé
-  si une étape échoue
-- **Rollback automatique** : si une action de restauration empire la situation, retour à l'état
-  précédent
+Les diagnostics de l'IA sont codifiés sous forme de runbooks dynamiques auto-exécutés.
+
+#### 1. Moteur de Runbooks en Base
+- Définition de graphes d'actions conditionnels (YAML stocké en DB) :
+  ```yaml
+  name: Auto-healing Nginx 502
+  trigger:
+    metric: http_response_code
+    condition: "== 502"
+  steps:
+    - action: RESTART_CONTAINER
+      params: { container_name: "nginx-prod" }
+    - action: CHECK_HEALTH
+      delay: 5
+    - if_failed:
+        - action: SEND_DISCORD_NOTIFICATION
+          params: { level: "CRITICAL", msg: "Remediation failed. Nginx is still down." }
+  ```
+- **Moteur d'exécution asynchrone** capable de gérer les temps de pause, les boucles de vérification et les cascades conditionnelles.
+
+#### 2. Rollback Automatique en Cas d'Échec
+- Avant toute remédiation destructive, le Worker sauvegarde l'état actuel de la configuration. Si le service ciblé ne valide pas ses health checks après action, le Worker effectue un rollback sur l'état valide précédent et lève une alerte.
+
+---
 
 ### Sprint 10 — Coordination Multi-Nœuds
 
-- **Gestion des dépendances inter-services** : l'IA comprend que "si je restart docker.service,
-  tous les containers seront impactés"
-- **Déploiement gradué** : actions sur un worker test → validation → propagation à la flotte
-- **Coordination de flotte** : actions simultanées sur plusieurs nœuds avec gestion des conflits
-- **Topologie de service** : graphe des dépendances découvert automatiquement
+L'IA gère la topologie de l'infrastructure globale comme un ensemble cohérent et interdépendant.
+
+#### 1. Graphe de Dépendances Automatique
+- Analyse des connexions réseau ouvertes par les containers/processus pour dresser une topologie (ex: *le container Web sur le node-1 dépend de PostgreSQL sur le node-2*).
+- Empêche les arrêts en cascade non planifiés et planifie intelligemment l'ordre des redémarrages (Database d'abord, puis API, puis Frontend).
+
+#### 2. Déploiement Gradué (Canary Operations)
+- Application d'une modification de configuration ou d'une mise à jour de plugin sur un unique nœud "canari".
+- Monitoring automatique de ses performances et métriques d'erreur pendant 1 heure avant de valider et de propager la modification sur le reste des serveurs de la flotte.
+
+---
 
 ### Sprint 11 — Apprentissage & Mémoire
 
-- **Base de connaissances** : indexation de tous les incidents passés (cause → action → résultat)
-- **Fine-tuning du LLM** : adaptation du modèle sur l'historique du projet (privé, pas de données
-  envoyées à l'extérieur)
-- **Feedback loop continue** : chaque action exécutée enrichit la base de connaissances
-- **Mémoire conversationnelle** : l'IA se souvient des conversations précédentes et du contexte
-  de chaque nœud
-- **Auto-évaluation** : l'IA analyse ses propres décisions passées et ajuste sa stratégie
+L'IA tire parti de l'expérience opérationnelle passée pour affiner ses analyses et résolutions.
+
+#### 1. Indexation et Base de Connaissances Locale (FTS5 / Vector DB)
+- Chaque incident résolu (avec ses logs associés, la cause racine identifiée et l'action corrective validée) est archivé et indexé à l'aide de SQLite FTS5 ou d'une base vectorielle locale légère.
+- Lors d'une nouvelle alerte, l'IA interroge la base locale pour retrouver les cas similaires : *"Incident similaire résolu le 12 juin sur node-3 en redémarrant le service Docker daemon."*
+
+#### 2. Mémoire Conversationnelle & Contextuelle
+- Maintien d'un historique enrichi par node détaillant les pannes passées, les surcharges régulières et les particularités de l'OS. Le LLM adapte ses propositions de commande en fonction de ces spécificités matérielles et logicielles propres à chaque serveur.
 
 ---
 

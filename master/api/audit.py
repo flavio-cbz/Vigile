@@ -78,19 +78,19 @@ async def list_audit_entries(
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    count_sql = f"SELECT COUNT(*) as cnt FROM audit_log {where}"
+    count_sql = "SELECT COUNT(*) as cnt FROM audit_log " + where
     async with db.execute(count_sql, params) as cursor:
         row = await cursor.fetchone()
         total = row["cnt"] if row else 0
 
-    sql = f"""
-        SELECT id, sequence, timestamp, user_id, action, node_id,
-               details_json, previous_hash, entry_hash
-        FROM audit_log
-        {where}
-        ORDER BY sequence DESC
-        LIMIT ? OFFSET ?
-    """
+    sql = (
+        "SELECT id, sequence, timestamp, user_id, action, node_id, "
+        "details_json, previous_hash, entry_hash "
+        "FROM audit_log "
+        + where
+        + " ORDER BY sequence DESC "
+        "LIMIT ? OFFSET ?"
+    )
     response_entries = []
     query_params = params + [limit, offset]
     async with db.execute(sql, query_params) as cursor:

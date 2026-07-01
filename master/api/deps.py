@@ -70,9 +70,9 @@ def get_bus() -> Any:
 
 def get_settings() -> Any:
     """Return the settings singleton (lazy import to prevent module-level coupling)."""
-    from master.config import settings
+    import master.config
 
-    return settings
+    return master.config.settings
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +197,10 @@ def get_llm_client() -> "LLMClient":  # noqa: F821
     global _llm_client
     with _init_lock:
         if _llm_client is None:
-            from master.config import settings
+            import master.config
             from master.core.llm_client import LLMClient
 
+            settings = master.config.settings
             if not settings.llm_base_url:
                 raise RuntimeError("LLM not configured. Set LLM_BASE_URL environment variable.")
             _llm_client = LLMClient(

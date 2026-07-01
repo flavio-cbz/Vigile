@@ -46,7 +46,7 @@ export const ServersSection: React.FC<ServersSectionProps> = ({
         const stats = bulkStatus[node.id];
         const nodeInsights = insightsByNode[node.id];
         const topInsight = getTopInsight(nodeInsights);
-        const hasFullMetrics = stats && stats.cpu !== undefined && stats.mem !== undefined && stats.disk !== undefined;
+        const hasFullMetrics = stats && stats.cpu != null && stats.mem != null && stats.disk != null;
         return (
           <ServerCard
             key={node.id}

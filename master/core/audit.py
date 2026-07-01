@@ -61,6 +61,11 @@ class AuditAction(StrEnum):
     DEMO_RESET = "DEMO_RESET"
     RESTART_SERVICE = "RESTART_SERVICE"
     RESTART_CONTAINER = "RESTART_CONTAINER"
+    CREATE_AUTOMATION_RULE = "CREATE_AUTOMATION_RULE"
+    UPDATE_AUTOMATION_RULE = "UPDATE_AUTOMATION_RULE"
+    DELETE_AUTOMATION_RULE = "DELETE_AUTOMATION_RULE"
+    TOGGLE_AUTOMATION_RULE = "TOGGLE_AUTOMATION_RULE"
+    AUTOMATION_TRIGGERED = "AUTOMATION_TRIGGERED"
 
 
 # Serialize writes to prevent sequence collision
@@ -123,6 +128,7 @@ async def log_action(
     details_json = json.dumps(details or {}, separators=(",", ":"), ensure_ascii=False)
     timestamp = time.time()
     entry_id = str(uuid.uuid4())
+    in_trans = db.in_transaction
 
     # Serialized via asyncio.Lock to prevent sequence collision under concurrency.
     # (BEGIN IMMEDIATE alone isn't sufficient because await points inside the
@@ -169,7 +175,8 @@ async def log_action(
                 entry_hash,
             ),
         )
-        await db.commit()
+        if not in_trans:
+            await db.commit()
 
     logger.info(
         "AUDIT seq=%d action=%s user=%s node=%s",

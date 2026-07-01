@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,9 +35,12 @@ type MetricsSnapshot struct {
 	CollectedAt   float64 `json:"collected_at"`
 }
 
-// collectMetrics gathers all system metrics from /proc (Linux).
+// collectMetrics gathers all system metrics from /proc (Linux) or sysctl/ps (macOS).
 func collectMetrics() MetricsSnapshot {
 	now := float64(time.Now().UnixMicro()) / 1_000_000
+	if runtime.GOOS == "darwin" {
+		return collectDarwinMetrics(now)
+	}
 	return MetricsSnapshot{
 		CPUPercent:    getCPUPercent(),
 		CPULoad1m:     getLoadAvg(0),
@@ -114,20 +119,7 @@ func getLoadAvg(index int) float64 {
 }
 
 func getCPUCores() int {
-	data, err := os.ReadFile("/proc/cpuinfo")
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "processor") {
-			count++
-		}
-	}
-	if count == 0 {
-		count = 1
-	}
-	return count
+	return runtime.NumCPU()
 }
 
 // ── Memory ───────────────────────────────────────────────────────────
@@ -285,4 +277,234 @@ func buildStatusReport() map[string]interface{} {
 		"processes":       m.Processes,
 		"collected_at":    m.CollectedAt,
 	}
+}
+
+// ── Darwin (macOS) Fallback Metrics Helpers ──────────────────────────
+
+func collectDarwinMetrics(now float64) MetricsSnapshot {
+	cores := runtime.NumCPU()
+	diskTotal := getDiskTotal()
+	diskUsed := getDiskUsed()
+	diskPercent := getDiskPercent()
+
+	cpuPercent := getDarwinCPUPercent()
+	load1, load5, load15 := getDarwinLoadAvg()
+	memTotal, memUsed, memPercent := getDarwinMem()
+	swapTotal, swapUsed := getDarwinSwap()
+	uptime := getDarwinUptime()
+	procCount := getDarwinProcessCount()
+
+	return MetricsSnapshot{
+		CPUPercent:    cpuPercent,
+		CPULoad1m:     load1,
+		CPULoad5m:     load5,
+		CPULoad15m:    load15,
+		CPUCores:      cores,
+		MemTotalBytes: memTotal,
+		MemUsedBytes:  memUsed,
+		MemPercent:    memPercent,
+		SwapTotal:     swapTotal,
+		SwapUsed:      swapUsed,
+		DiskTotal:     diskTotal,
+		DiskUsed:      diskUsed,
+		DiskPercent:   diskPercent,
+		UptimeSeconds: uptime,
+		Processes:     procCount,
+		CollectedAt:   now,
+	}
+}
+
+func getDarwinCPUPercent() float64 {
+	cmd := exec.Command("ps", "-A", "-o", "%cpu")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	lines := strings.Split(string(out), "\n")
+	var sum float64
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "%CPU" {
+			continue
+		}
+		val, err := strconv.ParseFloat(line, 64)
+		if err == nil {
+			sum += val
+		}
+	}
+	cores := float64(runtime.NumCPU())
+	if cores <= 0 {
+		cores = 1
+	}
+	percent := sum / cores
+	if percent > 100.0 {
+		percent = 100.0
+	}
+	return math.Round(percent*100) / 100
+}
+
+func getDarwinLoadAvg() (float64, float64, float64) {
+	cmd := exec.Command("sysctl", "-n", "vm.loadavg")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+	s := strings.TrimSpace(string(out))
+	s = strings.Trim(s, "{}")
+	fields := strings.Fields(s)
+	if len(fields) < 3 {
+		return 0, 0, 0
+	}
+	l1, _ := strconv.ParseFloat(fields[0], 64)
+	l5, _ := strconv.ParseFloat(fields[1], 64)
+	l15, _ := strconv.ParseFloat(fields[2], 64)
+	return l1, l5, l15
+}
+
+func getDarwinMem() (int64, int64, float64) {
+	cmd := exec.Command("sysctl", "-n", "hw.memsize")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+	total, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	cmdStats := exec.Command("vm_stat")
+	statsOut, err := cmdStats.Output()
+	if err != nil {
+		return total, 0, 0
+	}
+
+	pageSize := int64(4096)
+	var freePages, inactivePages, speculativePages int64
+
+	scanner := bufio.NewScanner(strings.NewReader(string(statsOut)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "page size of") {
+			parts := strings.Fields(line)
+			if len(parts) >= 5 {
+				ps, err := strconv.ParseInt(parts[4], 10, 64)
+				if err == nil {
+					pageSize = ps
+				}
+			}
+		} else if strings.HasPrefix(line, "Pages free:") {
+			freePages = extractVmStatValue(line)
+		} else if strings.HasPrefix(line, "Pages inactive:") {
+			inactivePages = extractVmStatValue(line)
+		} else if strings.HasPrefix(line, "Pages speculative:") {
+			speculativePages = extractVmStatValue(line)
+		}
+	}
+
+	freeBytes := (freePages + inactivePages + speculativePages) * pageSize
+	usedBytes := total - freeBytes
+	if usedBytes < 0 {
+		usedBytes = 0
+	}
+	percent := float64(usedBytes) / float64(total) * 100
+	return total, usedBytes, math.Round(percent*10) / 10
+}
+
+func extractVmStatValue(line string) int64 {
+	parts := strings.Fields(line)
+	if len(parts) < 2 {
+		return 0
+	}
+	valStr := strings.TrimSuffix(parts[len(parts)-1], ".")
+	val, _ := strconv.ParseInt(valStr, 10, 64)
+	return val
+}
+
+func getDarwinSwap() (int64, int64) {
+	cmd := exec.Command("sysctl", "-n", "vm.swapusage")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	s := strings.TrimSpace(string(out))
+	fields := strings.Fields(s)
+	var totalBytes, usedBytes int64
+	for i, f := range fields {
+		if f == "total" && i+2 < len(fields) {
+			totalBytes = parseSwapVal(fields[i+2])
+		}
+		if f == "used" && i+2 < len(fields) {
+			usedBytes = parseSwapVal(fields[i+2])
+		}
+	}
+	return totalBytes, usedBytes
+}
+
+func parseSwapVal(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	unit := s[len(s)-1]
+	valStr := s[:len(s)-1]
+	val, err := strconv.ParseFloat(valStr, 64)
+	if err != nil {
+		return 0
+	}
+	switch unit {
+	case 'G', 'g':
+		return int64(val * 1024 * 1024 * 1024)
+	case 'M', 'm':
+		return int64(val * 1024 * 1024)
+	case 'K', 'k':
+		return int64(val * 1024)
+	default:
+		return int64(val)
+	}
+}
+
+func getDarwinUptime() float64 {
+	cmd := exec.Command("sysctl", "-n", "kern.boottime")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	s := string(out)
+	idx := strings.Index(s, "sec =")
+	if idx == -1 {
+		return 0
+	}
+	sub := s[idx+5:]
+	comma := strings.Index(sub, ",")
+	if comma == -1 {
+		return 0
+	}
+	secStr := strings.TrimSpace(sub[:comma])
+	sec, err := strconv.ParseInt(secStr, 10, 64)
+	if err != nil {
+		return 0
+	}
+	uptime := time.Now().Unix() - sec
+	if uptime < 0 {
+		return 0
+	}
+	return float64(uptime)
+}
+
+func getDarwinProcessCount() int {
+	cmd := exec.Command("ps", "-A")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	lines := strings.Split(string(out), "\n")
+	count := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			count++
+		}
+	}
+	if count > 0 {
+		count-- // exclude header
+	}
+	return count
 }

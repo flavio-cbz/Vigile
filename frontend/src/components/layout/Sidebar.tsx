@@ -19,6 +19,7 @@ import {
   Settings as SettingsIcon,
   ChevronDown,
   ChevronRight,
+  Zap,
 } from 'lucide-react';
 import { useLocale } from '../../i18n';
 
@@ -116,6 +117,7 @@ export const Sidebar: React.FC = () => {
     ];
 
     const adminItems = [
+      { to: '/automations', label: t('nav.automations'), icon: Zap },
       { to: '/plugins', label: t('nav.plugins'), icon: Grid },
       { to: '/audit', label: t('nav.audit'), icon: Activity },
       { to: '/settings', label: t('nav.settings'), icon: SettingsIcon },

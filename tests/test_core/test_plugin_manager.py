@@ -30,7 +30,8 @@ async def test_hook_dispatch_async(plugin_manager: PluginManager):
     assert out == [12]
 
 
-def test_plugin_load_from_dir():
+@pytest.mark.asyncio
+async def test_plugin_load_from_dir():
     with tempfile.TemporaryDirectory() as plugin_dir:
         plugin_code = """
 def register(pm):
@@ -39,12 +40,12 @@ def register(pm):
         with open(os.path.join(plugin_dir, "test_plugin.py"), "w") as f:
             f.write(plugin_code)
         pm = PluginManager()
-        loaded = pm.load_plugins_from_dir(plugin_dir)
+        loaded = await pm.load_plugins_from_dir(plugin_dir)
         assert "test_plugin" in loaded
         assert pm.call("file_hook") == ["from_file"]
 
         # Test dedup (already loaded)
-        loaded_again = pm.load_plugins_from_dir(plugin_dir)
+        loaded_again = await pm.load_plugins_from_dir(plugin_dir)
         assert "test_plugin" not in loaded_again
 
 
@@ -133,13 +134,15 @@ async def test_async_call_exceptions_and_sync_runs_in_executor(caplog):
         assert "raised: Async error" in caplog.text
 
 
-def test_load_plugins_from_invalid_dir():
+@pytest.mark.asyncio
+async def test_load_plugins_from_invalid_dir():
     pm = PluginManager()
-    res = pm.load_plugins_from_dir("/invalid/directory/path/that/doesnt/exist")
+    res = await pm.load_plugins_from_dir("/invalid/directory/path/that/doesnt/exist")
     assert res == []
 
 
-def test_load_plugin_errors():
+@pytest.mark.asyncio
+async def test_load_plugin_errors():
     with tempfile.TemporaryDirectory() as plugin_dir:
         # Plugin with no register function
         plugin_no_reg = "def not_register(pm): pass"
@@ -156,7 +159,7 @@ def test_load_plugin_errors():
             f.write("text")
 
         pm = PluginManager()
-        loaded = pm.load_plugins_from_dir(plugin_dir)
+        loaded = await pm.load_plugins_from_dir(plugin_dir)
         # noreg_plugin is loaded but skipped (not in loaded return list)
         # broken_plugin raised ValueError (not in loaded return list)
         # ignored.txt is skipped (not in loaded return list)

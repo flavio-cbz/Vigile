@@ -137,6 +137,9 @@ Le code était correct avant la détection dans l'audit. La doc LIMITS.md était
 10. **Registre de Plugins (Sprint 5 — Étape 1)** ✅ Fait
     Ajout d'un système de registre d'extensions officiel dynamique (`/api/admin/plugins/registry`) permettant de lister les plugins disponibles, de les télécharger en un clic de manière asynchrone, d'effectuer des vérifications de syntaxe et de contrat AST (fonction `register(pm)`), et de basculer automatiquement sur un registre local résilient (fallback hors-ligne) en cas d'absence d'accès à Internet.
 
+11. **Moteur d'Automatisations (Sprint 6)** ✅ Fait
+    Mise en place d'un moteur autonome Trigger→Condition→Action. Il supporte les triggers de métriques (seuils CPU/RAM/disque) et d'état de nœud (CONNECTED/LOST/STALE), des filtres temporels (time window), et des actions configurables (envoi de commandes Worker en un-clic, webhooks HTTP sortants avec placeholders dynamiques, ou logs de message simples). Comprend un cooldown in-memory pour éviter le spam, un historique d'exécution paginé persistant, et une couverture de tests unitaires et REST de 100% sur le moteur.
+
 ---
 
 ## Security Deployment Notes

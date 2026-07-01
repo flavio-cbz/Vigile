@@ -140,7 +140,9 @@ async def update_llm_settings(
     override_path = Path(settings.database_path).parent / "settings_override.json"
     override_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
+    import anyio
+
+    def _write_overrides() -> None:
         with override_path.open("w", encoding="utf-8") as f:
             json.dump(
                 {
@@ -152,6 +154,9 @@ async def update_llm_settings(
                 indent=2,
                 ensure_ascii=False,
             )
+
+    try:
+        await anyio.to_thread.run_sync(_write_overrides)
     except Exception as e:
         logger.error("Failed to write settings overrides: %s", e)
         raise HTTPException(
@@ -318,6 +323,10 @@ async def list_plugins(
                     meta.update(mod.get_config_schema())
                 except Exception:
                     pass
+        elif plugin_manager._sandbox and plugin_id in plugin_manager.loaded_plugins:
+            wrapper = plugin_manager._wrappers.get(plugin_id)
+            if wrapper and wrapper.schema:
+                meta.update(wrapper.schema)
 
         # Find hooks registered by this plugin
         plugin_hooks = []
@@ -512,7 +521,7 @@ async def install_plugin(
     await db.commit()
 
     # 8. Load the plugin into PluginManager
-    success = plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
+    success = await plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
     if not success:
         if os.path.exists(plugin_path):
             try:
@@ -589,9 +598,14 @@ async def upload_plugin(
     plugin_path = os.path.join(settings.plugins_dir, file.filename)
     os.makedirs(settings.plugins_dir, exist_ok=True)
 
-    try:
+    import anyio
+
+    def _write_uploaded_plugin() -> None:
         with open(plugin_path, "wb") as f:
             f.write(content)
+
+    try:
+        await anyio.to_thread.run_sync(_write_uploaded_plugin)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Échec de l'écriture du fichier: {str(e)}")
 
@@ -602,7 +616,7 @@ async def upload_plugin(
     )
     await db.commit()
 
-    success = plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
+    success = await plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
     if not success:
         if os.path.exists(plugin_path):
             try:
@@ -703,7 +717,7 @@ async def toggle_plugin(
 
     # Reload or Unload dynamically
     if new_state:
-        plugin_manager.load_plugin(plugin_stem, settings.plugins_dir)
+        await plugin_manager.load_plugin(plugin_stem, settings.plugins_dir)
     else:
         await plugin_manager.unload_plugin(plugin_stem)
 

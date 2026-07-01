@@ -26,7 +26,15 @@ async def reset_demo(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Demo reset only available in demo mode",
         )
+    from master.core.audit import AuditAction, log_action
+
     await db.execute("DELETE FROM action_proposals")
     await db.commit()
+    await log_action(
+        db,
+        user_id=claims["sub"],
+        action=AuditAction.DEMO_RESET,
+        details={},
+    )
     reset_demo_state()
     return {"success": True, "message": "Demo state reset successfully"}

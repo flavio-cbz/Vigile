@@ -103,6 +103,14 @@ export const NodeDetail: React.FC = () => {
     }
   };
 
+  const tabs = useNodeDetailTabs({
+    insightsCount: displayInsights?.length ?? 0,
+    servicesCount: services?.length ?? 0,
+    servicesLoading: loadingServices,
+    containersCount: containers?.length ?? 0,
+    containersLoading: loadingContainers,
+  });
+
   if (loadingNode) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs select-none">
@@ -127,14 +135,6 @@ export const NodeDetail: React.FC = () => {
       </div>
     );
   }
-
-  const tabs = useNodeDetailTabs({
-    insightsCount: displayInsights.length,
-    servicesCount: services.length,
-    servicesLoading: loadingServices,
-    containersCount: containers.length,
-    containersLoading: loadingContainers,
-  });
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">

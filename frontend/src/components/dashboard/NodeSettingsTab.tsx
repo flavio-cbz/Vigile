@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { RefreshCw, Check, X, Trash2, Power, KeyRound, AlertTriangle, Copy } from 'lucide-react';
+import { RefreshCw, Check, X, Trash2, Power, KeyRound, AlertTriangle, Copy, ArrowUpCircle } from 'lucide-react';
 import { type Node } from '../../store/nodeStore';
 import { nodeMutations, type NodeWithMeta, type RegenerateTokenResult } from '../../store/nodeMutations';
 import { useAuthStore } from '../../store/authStore';
@@ -38,6 +38,7 @@ export const NodeSettingsTab = ({ node }: NodeSettingsTabProps) => {
   const [groupState, setGroupState] = useState<SaveState>('idle');
 
   const [toggling, setToggling] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   const [regen, setRegen] = useState<RegenerateTokenResult | null>(null);
   const [regenLoading, setRegenLoading] = useState(false);
@@ -127,6 +128,19 @@ export const NodeSettingsTab = ({ node }: NodeSettingsTabProps) => {
     await nodeMutations.deleteNode(n.id);
     addToast('success', t('servers.toast.deleted'), n.hostname || n.name);
     navigate('/nodes');
+  };
+
+  const handleUpdate = async () => {
+    setUpdating(true);
+    try {
+      await nodeMutations.updateWorker(n.id);
+      addToast('success', t('settings.update_success_title'), t('settings.update_success_message'));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast('error', t('settings.update_error_title'), msg);
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const renderFieldStatus = (state: SaveState) => {
@@ -258,6 +272,22 @@ export const NodeSettingsTab = ({ node }: NodeSettingsTabProps) => {
                 <>
                   <Power className="w-3.5 h-3.5" />
                   <span>{n.disabled ? t('settings.enable') : t('settings.disable')}</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleUpdate}
+              disabled={updating}
+              className="btn btn-secondary py-2 text-[0.625rem]"
+            >
+              {updating ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <>
+                  <ArrowUpCircle className="w-3.5 h-3.5" />
+                  <span>{t('settings.update_worker')}</span>
                 </>
               )}
             </button>

@@ -45,6 +45,7 @@ class WorkerAction(StrEnum):
     LIST_CONTAINERS = "LIST_CONTAINERS"
     RESTART_CONTAINER = "RESTART_CONTAINER"
     READ_LOGS = "READ_LOGS"
+    UPDATE_WORKER = "UPDATE_WORKER"
 
 
 # ---------------------------------------------------------------------------

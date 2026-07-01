@@ -32,6 +32,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from master.api.admin import router as admin_router
 from master.api.audit import router as audit_router
 from master.api.auth import router as auth_router
+from master.api.automations import router as automations_router
 from master.api.chat import router as chat_router
 from master.api.demo import router as demo_router
 from master.api.nodes import router as nodes_router
@@ -39,11 +40,13 @@ from master.api.nodes_events import router as nodes_events_router
 from master.api.services import router as services_router
 from master.api.worker_binary import router as worker_binary_router
 from master.config import settings
+from master.core.enums import NodeState
+from master.core.automation_engine import automation_engine
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import plugin_manager
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import init_security, load_or_generate_master_key
-from master.db.database import close_db, init_db
+from master.db.database import close_db, init_db, transaction
 from master.db.migrations import run_migrations
 from master.ws.worker_handler import worker_join_handler
 
@@ -63,6 +66,76 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("passlib").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Worker Auto-Update Task
+# ---------------------------------------------------------------------------
+
+
+async def auto_update_workers_task(db, nm, settings_obj) -> None:
+    """
+    Background loop that checks for worker updates and dispatches them if AUTO_UPDATE_WORKERS is enabled.
+    """
+    logger.info("Auto-update workers task started.")
+    # Wait a bit on startup to let things settle down
+    await asyncio.sleep(30.0)
+
+    while True:
+        try:
+            if settings_obj.auto_update_workers:
+                logger.info("Auto-update: Checking connected nodes for updates...")
+                from master.api.worker_binary import _fetch_manifest
+                try:
+                    manifest = await _fetch_manifest(settings_obj)
+                except Exception as exc:
+                    logger.error("Auto-update: Failed to fetch manifest: %s", exc)
+                    manifest = None
+
+                if manifest:
+                    latest_version = manifest.get("version")
+                    if latest_version:
+                        logger.info("Auto-update: Latest available worker version: %s", latest_version)
+
+                        # Get all registered nodes (exclude revoked)
+                        async with db.execute(
+                            "SELECT id, name, version, state FROM nodes WHERE state != 'REVOKED'"
+                        ) as cursor:
+                            nodes = await cursor.fetchall()
+
+                        for node in nodes:
+                            node_id = node["id"]
+                            # Check if node is online/connected
+                            if await nm.is_connected(node_id):
+                                current_version = node["version"]
+                                # If version is empty (legacy) or doesn't match latest_version, trigger update
+                                if not current_version or current_version != latest_version:
+                                    logger.info(
+                                        "Auto-update: Node %s (%s) has version %s (latest is %s). Dispatching update...",
+                                        node_id, node["name"], current_version, latest_version
+                                    )
+                                    try:
+                                        # Run intent dispatch asynchronously in a separate task so it doesn't block the loop
+                                        async def do_update(nid=node_id):
+                                            try:
+                                                from master.core.enums import WorkerAction
+                                                await nm.send_intent(
+                                                    nid,
+                                                    {"action": WorkerAction.UPDATE_WORKER, "params": {}},
+                                                    timeout=30.0,
+                                                )
+                                                logger.info("Auto-update: Node %s successfully updated and restarted.", nid)
+                                            except Exception as e:
+                                                logger.error("Auto-update: Node %s update failed: %s", nid, e)
+
+                                        asyncio.create_task(do_update())
+                                    except Exception as exc:
+                                        logger.error("Auto-update: Failed to spawn update task for node %s: %s", node_id, exc)
+        except Exception as exc:
+            logger.exception("Error in auto-update workers task: %s", exc)
+
+        # Check every 1 hour (3600 seconds)
+        await asyncio.sleep(3600.0)
 
 
 # ---------------------------------------------------------------------------
@@ -90,21 +163,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # ── Startup ───────────────────────────────────────────────────────────
     # Load LLM settings override if exists (files I/O belongs to edge)
-    override_path = Path(settings.database_path).parent / "settings_override.json"
-    if override_path.exists():
-        try:
-            import json
+    import anyio
+    import json
 
+    override_path = Path(settings.database_path).parent / "settings_override.json"
+
+    def _read_overrides() -> dict | None:
+        if override_path.exists():
             with override_path.open("r", encoding="utf-8") as f:
-                overrides = json.load(f)
+                return json.load(f)
+        return None
+
+    try:
+        overrides = await anyio.to_thread.run_sync(_read_overrides)
+        if overrides:
             settings.apply_overrides(
                 base_url=overrides.get("llm_base_url", settings.llm_base_url),
                 api_key=overrides.get("llm_api_key", settings.llm_api_key),
                 model=overrides.get("llm_model", settings.llm_model),
             )
             logger.info("Loaded LLM settings overrides from %s", override_path)
-        except Exception as e:
-            logger.error("Failed to load settings overrides: %s", e)
+    except Exception as e:
+        logger.error("Failed to load settings overrides: %s", e)
 
     logger.info("=" * 60)
     logger.info("Vigile — Master Node starting up")
@@ -129,6 +209,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Migrations
     await run_migrations(db)
 
+    # Reset any nodes left in CONNECTED, ENROLLING, or RECONNECTING states to LOST on startup
+    async with transaction(db):
+        await db.execute(
+            "UPDATE nodes SET state = ? WHERE state IN (?, ?, ?)",
+            (NodeState.LOST.value, NodeState.CONNECTED.value, NodeState.ENROLLING.value, NodeState.RECONNECTING.value)
+        )
+    logger.info("Stale node states reset to LOST on startup.")
+
     # 3. (Jinja2 templates removed in favor of React SPA)
 
     # 4. Initialize SecurityManager (with explicit DI from settings)
@@ -145,10 +233,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         master_private_key=master_key,
     )
     # 4.5. Initialize PluginManager
-    await plugin_manager.initialize(db)
+    await plugin_manager.initialize(db, sandbox=settings.plugin_sandbox)
 
     # 5. Load plugins
-    loaded = plugin_manager.load_plugins_from_dir(settings.plugins_dir)
+    loaded = await plugin_manager.load_plugins_from_dir(settings.plugins_dir)
     logger.info("Plugins loaded: %s", loaded or "none")
 
     # 6. Node Manager
@@ -160,6 +248,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         cache_update_interval=settings.cache_update_interval,
     )
 
+    # 7. Automation Engine
+    await automation_engine.initialize(db)
+    node_manager.register_state_change_callback(automation_engine.evaluate_state_trigger)
+    plugin_manager.register(
+        "on_status_report",
+        automation_engine.evaluate_metric_trigger,
+        plugin_name="automation_engine",
+    )
+    logger.info("Automation Engine initialized and state-change callback registered.")
+
     app.state.startup_time = time.time()
     app.state.master_url = settings.master_url
     app.state.trusted_proxies = settings.trusted_proxies
@@ -168,6 +266,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 7. Start Rate Limiter Cleanup Task
     cleanup_task = rate_limiter.start_cleanup_task(app)
 
+    # 8. Start Worker Auto-Update Task
+    auto_update_task = asyncio.create_task(auto_update_workers_task(db, node_manager, settings))
+
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
@@ -175,9 +276,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Shutdown ──────────────────────────────────────────────────────────
     logger.info("Master Node shutting down...")
     cleanup_task.cancel()
+    auto_update_task.cancel()
     try:
-        await cleanup_task
-    except asyncio.CancelledError:
+        await asyncio.gather(cleanup_task, auto_update_task, return_exceptions=True)
+    except Exception:
         pass
     await node_manager.stop()
     await close_db()
@@ -287,13 +389,7 @@ app.include_router(audit_router)
 app.include_router(admin_router)
 app.include_router(demo_router)
 app.include_router(worker_binary_router)
-
-# ---------------------------------------------------------------------------
-# Static Files
-# ---------------------------------------------------------------------------
-
-os.makedirs("master/static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="master/static"), name="static")
+app.include_router(automations_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes
@@ -334,22 +430,23 @@ async def health_check() -> JSONResponse:
     )
 
 
+# ---------------------------------------------------------------------------
+# Static Files (mounted last so API/WS/health routes take precedence)
+# ---------------------------------------------------------------------------
+
+os.makedirs("master/static", exist_ok=True)
+app.mount("/", StaticFiles(directory="master/static", html=True), name="static")
+
+
 @app.exception_handler(404)
 async def spa_fallback_exception_handler(request: Request, exc: HTTPException) -> Response:
-    """Serve static assets if they exist, otherwise fall back to SPA index.html."""
+    """Exclude API/WebSocket endpoints; fall back to SPA index.html for client-side routing."""
     path = request.url.path.lstrip("/")
 
-    # 1. Exclude API and WebSocket endpoints
-    if path.startswith("api/") or path.startswith("ws/"):
+    if path.startswith("api/") or path.startswith("ws/") or path == "health":
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    # 2. Check if requested file exists in the SPA dist folder
-    file_path = Path("frontend/dist") / path
-    if file_path.is_file():
-        return FileResponse(file_path)
-
-    # 3. Fallback to index.html for client-side routing
-    index_path = Path("frontend/dist/index.html")
+    index_path = Path("master/static/index.html")
     if index_path.exists():
         return FileResponse(index_path)
 

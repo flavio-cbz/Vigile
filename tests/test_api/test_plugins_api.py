@@ -41,7 +41,7 @@ def clear_rate_limiter():
 
 
 @pytest.fixture(autouse=True)
-def setup_temp_plugins_dir(tmp_path):
+async def setup_temp_plugins_dir(tmp_path):
     # Backup original plugins dir setting
     old_plugins_dir = settings.plugins_dir
     temp_dir = tmp_path / "plugins"
@@ -62,7 +62,7 @@ def setup_temp_plugins_dir(tmp_path):
     # Reset plugin_manager in-memory lists
     plugin_manager._loaded_plugins.clear()
     plugin_manager._hooks.clear()
-    plugin_manager.load_plugins_from_dir(str(temp_dir))
+    await plugin_manager.load_plugins_from_dir(str(temp_dir))
 
     yield temp_dir
 

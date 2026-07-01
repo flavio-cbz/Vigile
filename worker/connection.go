@@ -115,8 +115,12 @@ func (wc *WorkerConn) runEnrollment() error {
 		if err != nil {
 			return fmt.Errorf("read success (reconnect): %w", err)
 		}
-		wc.workerToken, _ = success["worker_token"].(string)
-		wc.nodeID, _ = success["node_id"].(string)
+		if token, ok := success["worker_token"].(string); ok {
+			wc.workerToken = token
+		}
+		if id, ok := success["node_id"].(string); ok {
+			wc.nodeID = id
+		}
 		if wc.nodeID == "" {
 			return fmt.Errorf("no node_id in success message (reconnect)")
 		}
@@ -136,7 +140,10 @@ func (wc *WorkerConn) runEnrollment() error {
 	if err != nil {
 		return fmt.Errorf("read challenge: %w", err)
 	}
-	challenge, _ := challengeMsg["challenge"].(string)
+	var challenge string
+	if chal, ok := challengeMsg["challenge"].(string); ok {
+		challenge = chal
+	}
 	if challenge == "" {
 		return fmt.Errorf("empty challenge")
 	}
@@ -164,8 +171,12 @@ func (wc *WorkerConn) runEnrollment() error {
 		return fmt.Errorf("read success: %w", err)
 	}
 
-	wc.workerToken, _ = success["worker_token"].(string)
-	wc.nodeID, _ = success["node_id"].(string)
+	if token, ok := success["worker_token"].(string); ok {
+		wc.workerToken = token
+	}
+	if id, ok := success["node_id"].(string); ok {
+		wc.nodeID = id
+	}
 
 	if wc.nodeID == "" {
 		return fmt.Errorf("no node_id in success message")
@@ -269,7 +280,7 @@ func (wc *WorkerConn) RunOperational() error {
 				// Heartbeat acknowledged by Master
 
 			case "INTENT":
-				result := dispatchIntent(msg.data)
+				result := dispatchIntent(wc, msg.data)
 				var resObj map[string]interface{}
 				if err := json.Unmarshal(result, &resObj); err != nil {
 					logger.Printf("Failed to parse intent result: %v", err)

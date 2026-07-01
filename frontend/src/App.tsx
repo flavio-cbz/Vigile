@@ -9,6 +9,7 @@ import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ServersPage } from './pages/ServersPage';
 import { PluginsPage } from './pages/PluginsPage';
+import { AutomationsPage } from './pages/AutomationsPage';
 
 import { useTheme } from './hooks/useTheme';
 import { useUiStore } from './store/uiStore';
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="servers" element={<ServersPage />} />
         <Route path="plugins" element={<PluginsPage />} />
+        <Route path="automations" element={<AutomationsPage />} />
         <Route path="chat/new" element={<ChatRedirect />} />
       </Route>
 

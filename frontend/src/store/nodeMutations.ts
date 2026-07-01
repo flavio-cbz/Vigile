@@ -21,6 +21,7 @@ interface NodeStateWithActions {
   setNodeDisabled?: (id: string, disabled: boolean) => Promise<void>;
   deleteNode?: (id: string) => Promise<void>;
   regenerateToken?: (id: string) => Promise<RegenerateTokenResult>;
+  updateWorker?: (id: string) => Promise<void>;
 }
 
 function patchNodes(updater: (nodes: BaseNode[]) => BaseNode[]) {
@@ -103,11 +104,21 @@ async function regenerateToken(id: string): Promise<RegenerateTokenResult> {
   return tryStoreAction<RegenerateTokenResult>('regenerateToken', [id], fallback);
 }
 
+async function updateWorker(id: string): Promise<void> {
+  const fallback = async () => {
+    await api(`/api/nodes/${id}/update`, {
+      method: 'POST',
+    });
+  };
+  return tryStoreAction<void>('updateWorker', [id], fallback);
+}
+
 export const nodeMutations = {
   renameNode,
   setNodeGroup,
   setNodeDisabled,
   deleteNode,
   regenerateToken,
+  updateWorker,
   asNode,
 };

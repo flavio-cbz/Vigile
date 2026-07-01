@@ -62,10 +62,13 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "disabled" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
         mutated = True
+    if "version" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN version TEXT DEFAULT NULL")
+        mutated = True
 
     if mutated:
         await db.commit()
-        logger.info("Added insights/caching/group/disabled columns to nodes table.")
+        logger.info("Added insights/caching/group/disabled/version columns to nodes table.")
 
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_disabled ON nodes(disabled)")
@@ -80,7 +83,7 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     )
     await db.execute(
         "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
-        ("006",),
+        ("007",),
     )
     await db.commit()
 
@@ -101,9 +104,10 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
 
     logger.info("Dropping legacy FK join_tokens.node_id -> nodes.id (migration 006).")
     await db.execute("PRAGMA foreign_keys=OFF")
+    await db.execute("DROP TABLE IF EXISTS join_tokens_new")
     await db.execute(
         """
-    CREATE TABLE join_tokens_new (
+    CREATE TABLE IF NOT EXISTS join_tokens_new (
         id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
         token_hash TEXT NOT NULL UNIQUE, payload_b64 TEXT NOT NULL,
         consumed INTEGER NOT NULL DEFAULT 0, expires_at REAL NOT NULL, created_at REAL NOT NULL

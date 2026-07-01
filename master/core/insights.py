@@ -477,9 +477,14 @@ class InsightsManager:
         free_gb = free_bytes / (1024**3)
         used_percent = round(disk_percent, 1)
 
-        # Calculate slope if we have enough snapshots (need at least 2)
+        # Calculate slope only with enough snapshots AND sufficient time span.
+        # With fewer points (or a very short window), filesystem noise yields
+        # absurd extrapolations (e.g. +39000 GB/day from a 60s delta).
         slope = 0.0  # GB per day
-        if len(snapshots) >= 2:
+        min_snapshots = 5
+        min_timespan_seconds = 1800  # 30 minutes
+        timespan = (snapshots[-1]["collected_at"] - snapshots[0]["collected_at"]) if len(snapshots) >= 2 else 0
+        if len(snapshots) >= min_snapshots and timespan >= min_timespan_seconds:
             t0 = snapshots[0]["collected_at"]
             # Convert collected_at to days relative to first snapshot to avoid floating overflow
             x = [(s["collected_at"] - t0) / 86400.0 for s in snapshots]

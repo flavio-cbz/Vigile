@@ -89,6 +89,7 @@ class Settings(BaseModel):
         "PLUGIN_REGISTRY_URL",
         "https://raw.githubusercontent.com/flavio-cbz/Vigile-Plugins/main/registry.json",
     )
+    plugin_sandbox: bool = os.getenv("PLUGIN_SANDBOX", "true").lower() == "true"
 
     # --- Allowed dependencies (X-06) ---
     allowed_dependencies: list[str] = (
@@ -120,6 +121,7 @@ class Settings(BaseModel):
         os.getenv("WORKER_BINARY_REVOCATION_TTL_SECONDS", "300")
     )
     worker_binary_github_token: str = os.getenv("WORKER_BINARY_GITHUB_TOKEN", "")
+    auto_update_workers: bool = os.getenv("AUTO_UPDATE_WORKERS", "false").lower() in ("true", "1")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

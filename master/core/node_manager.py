@@ -136,6 +136,8 @@ class NodeManager:
         self._default_intent_max_age: float = 300.0
         self._monitor_task: asyncio.Task | None = None
         self._cache_task: asyncio.Task | None = None
+        # Callbacks invoked after every successful state transition (e.g. automation engine)
+        self._state_change_callbacks: list = []
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -162,6 +164,10 @@ class NodeManager:
             name="cache_updater",
         )
         logger.info("NodeManager started. Heartbeat monitor and cache updater running.")
+
+    def register_state_change_callback(self, callback) -> None:
+        """Register an async callback(node_id, new_state, db) invoked after every state transition."""
+        self._state_change_callbacks.append(callback)
 
     async def stop(self) -> None:
         """Stop the heartbeat monitor and cache updater. Called at app shutdown."""
@@ -213,6 +219,7 @@ class NodeManager:
             return
 
         logger.debug("Cache updater: starting update for nodes: %s", connected)
+        node_updates = []
         for nid in connected:
             try:
                 # 1. Get services
@@ -241,86 +248,99 @@ class NodeManager:
                         "Cache updater: failed to get containers for node %s: %s", nid, ex
                     )
 
-                # 3. Save cache to DB
                 if services_json is not None or containers_json is not None:
-                    fields = []
-                    params = []
-                    if services_json is not None:
-                        fields.append("cached_services_json = ?")
-                        params.append(services_json)
-                    if containers_json is not None:
-                        fields.append("cached_containers_json = ?")
-                        params.append(containers_json)
+                    node_updates.append((nid, services_json, containers_json))
+            except Exception as ex:
+                logger.warning("Cache updater: failed to process cache gathering for node %s: %s", nid, ex)
 
-                    params.append(nid)
-                    query = f"UPDATE nodes SET {', '.join(fields)} WHERE id = ?"
-                    await db.execute(query, params)
-                    await db.commit()
-                    logger.debug("Cache updater: successfully updated cache for node %s", nid)
-                    try:
-                        await log_action(
-                            db,
-                            user_id="system",
-                            action=AuditAction.CACHE_REFRESH,
-                            node_id=nid,
-                            details={
-                                "services_updated": services_json is not None,
-                                "containers_updated": containers_json is not None,
-                            },
-                        )
-                    except Exception:
-                        logger.warning("Cache updater: failed to log audit trail for node %s", nid)
+        # 3. Save cache to DB in a single transaction
+        if node_updates:
+            from master.db.database import transaction
+            try:
+                async with transaction(db) as tx_db:
+                    for nid, services_json, containers_json in node_updates:
+                        fields = []
+                        params = []
+                        if services_json is not None:
+                            fields.append("cached_services_json = ?")
+                            params.append(services_json)
+                        if containers_json is not None:
+                            fields.append("cached_containers_json = ?")
+                            params.append(containers_json)
 
-                # 4. Check profile expiration and new container detection for auto-regeneration
-                try:
-                    async with db.execute(
-                        "SELECT insight_profile, insight_profile_generated_at FROM nodes WHERE id = ?",
-                        (nid,),
-                    ) as cursor:
-                        row = await cursor.fetchone()
-
-                    if row and row["insight_profile"]:
-                        profile_dict = json.loads(row["insight_profile"])
-                        generated_at = row["insight_profile_generated_at"] or 0.0
-                        now = time.time()
-
-                        # 7-day expiration check
-                        expired_time = (now - generated_at) > 7 * 86400
-
-                        # New containers check (with 24h cooldown to avoid LLM spam)
-                        new_apps_detected = False
-                        cooldown_ok = (now - generated_at) > 86400
-
-                        if cooldown_ok and not expired_time and containers_json:
-                            fresh_conts = parse_container_list(json.loads(containers_json))
-                            fresh_running = [
-                                c.get("name")
-                                for c in fresh_conts or []
-                                if c.get("state") == "running"
-                                or "up" in c.get("status", "").lower()
-                            ]
-                            known_conts = [
-                                p.get("container_name")
-                                for p in profile_dict.get("known_heavy_processes", [])
-                                if p.get("container_name")
-                            ]
-                            new_apps_detected = any(fc not in known_conts for fc in fresh_running)
-
-                        if expired_time or new_apps_detected:
-                            logger.info(
-                                "Profile expiration / new apps detected for node %s (expired=%s, new_apps=%s). Regenerating profile...",
-                                nid,
-                                expired_time,
-                                new_apps_detected,
+                        params.append(nid)
+                        query = "UPDATE nodes SET " + ", ".join(fields) + " WHERE id = ?"
+                        await tx_db.execute(query, params)
+                        logger.debug("Cache updater: successfully updated cache for node %s", nid)
+                        try:
+                            await log_action(
+                                tx_db,
+                                user_id="system",
+                                action=AuditAction.CACHE_REFRESH,
+                                node_id=nid,
+                                details={
+                                    "services_updated": services_json is not None,
+                                    "containers_updated": containers_json is not None,
+                                },
                             )
-                            from master.api.deps import get_insights_manager
+                        except Exception:
+                            logger.warning("Cache updater: failed to log audit trail for node %s", nid)
+            except Exception as ex:
+                logger.error("Cache updater: transaction failed: %s", ex)
 
-                            im = get_insights_manager()
-                            asyncio.create_task(im.generate_profile(nid, db, self, force=True))
-                except Exception as ex:
-                    logger.warning(
-                        "Cache updater: failed to check profile expiration for node %s: %s", nid, ex
-                    )
+        # 4. Check profile expiration and new container detection for auto-regeneration
+        containers_by_node = {nid: containers_json for nid, _, containers_json in node_updates}
+        for nid in connected:
+            try:
+                async with db.execute(
+                    "SELECT insight_profile, insight_profile_generated_at FROM nodes WHERE id = ?",
+                    (nid,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+
+                if row and row["insight_profile"]:
+                    profile_dict = json.loads(row["insight_profile"])
+                    generated_at = row["insight_profile_generated_at"] or 0.0
+                    now = time.time()
+
+                    # 7-day expiration check
+                    expired_time = (now - generated_at) > 7 * 86400
+
+                    # New containers check (with 24h cooldown to avoid LLM spam)
+                    new_apps_detected = False
+                    cooldown_ok = (now - generated_at) > 86400
+
+                    node_containers_json = containers_by_node.get(nid)
+                    if cooldown_ok and not expired_time and node_containers_json:
+                        fresh_conts = parse_container_list(json.loads(node_containers_json))
+                        fresh_running = [
+                            c.get("name")
+                            for c in fresh_conts or []
+                            if c.get("state") == "running"
+                            or "up" in c.get("status", "").lower()
+                        ]
+                        known_conts = [
+                            p.get("container_name")
+                            for p in profile_dict.get("known_heavy_processes", [])
+                            if p.get("container_name")
+                        ]
+                        new_apps_detected = any(fc not in known_conts for fc in fresh_running)
+
+                    if expired_time or new_apps_detected:
+                        logger.info(
+                            "Profile expiration / new apps detected for node %s (expired=%s, new_apps=%s). Regenerating profile...",
+                            nid,
+                            expired_time,
+                            new_apps_detected,
+                        )
+                        from master.api.deps import get_insights_manager
+
+                        im = get_insights_manager()
+                        asyncio.create_task(im.generate_profile(nid, db, self, force=True))
+            except Exception as ex:
+                logger.warning(
+                    "Cache updater: failed to check profile expiration for node %s: %s", nid, ex
+                )
             except Exception as ex:
                 logger.exception("Cache updater: error updating node %s: %s", nid, ex)
 
@@ -417,7 +437,7 @@ class NodeManager:
         values = list(updates.values()) + [node_id]
 
         await db.execute(
-            f"UPDATE nodes SET {set_clause} WHERE id = ?",
+            "UPDATE nodes SET " + set_clause + " WHERE id = ?",
             values,
         )
         await db.commit()
@@ -437,6 +457,10 @@ class NodeManager:
             )
         except Exception:
             logger.exception("Failed to publish node.state event")
+
+        # Notify registered callbacks (e.g. automation engine) without blocking
+        for cb in self._state_change_callbacks:
+            asyncio.create_task(cb(node_id, new_state, db))
 
     async def delete_node(
         self,
@@ -639,9 +663,13 @@ class NodeManager:
             details["group"] = group
         if len(fields) == 1:
             return
+        _ALLOWED_UPDATE_FIELDS = {"updated_at", "name", "node_group"}
+        for k in fields:
+            if k not in _ALLOWED_UPDATE_FIELDS:
+                raise ValueError(f"Invalid update field: {k}")
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values()) + [node_id]
-        await db.execute(f"UPDATE nodes SET {set_clause} WHERE id = ?", values)
+        await db.execute("UPDATE nodes SET " + set_clause + " WHERE id = ?", values)
         await db.commit()
         await log_action(
             db,
@@ -664,9 +692,9 @@ class NodeManager:
             ids = [row["id"] for row in await cursor.fetchall()]
         if not ids:
             return 0
-        placeholders = ",".join("?" for _ in ids)
+        placeholders = ", ".join("?" * len(ids))
         await db.execute(
-            f"UPDATE join_tokens SET consumed = 1, expires_at = ? WHERE id IN ({placeholders})",
+            "UPDATE join_tokens SET consumed = 1, expires_at = ? WHERE id IN (" + placeholders + ")",
             [now, *ids],
         )
         await db.commit()
@@ -969,7 +997,7 @@ class NodeManager:
             clauses.append("state != ?")
             params.append(NodeState.REVOKED.value)
         where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = f"SELECT * FROM nodes{where_sql} ORDER BY created_at DESC"
+        sql = "SELECT * FROM nodes" + where_sql + " ORDER BY created_at DESC"
 
         if limit is not None:
             sql += " LIMIT ?"

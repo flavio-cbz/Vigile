@@ -3,13 +3,15 @@ Vigile — SQL Schema Definitions
 All table DDL in one place. No ORM — pure aiosqlite SQL.
 
 Tables:
-  - nodes             : registered worker nodes
-  - join_tokens       : single-use enrollment tokens (HMAC-SHA256)
-  - worker_tokens     : operational JWT tokens with rotation lifecycle
-  - users             : human operators with RBAC roles
-  - audit_log         : append-only action log with chained SHA256 hashes
-  - metrics_snapshots : periodic status reports from Workers
-  - action_proposals  : Human-in-the-Loop action lifecycle
+  - nodes               : registered worker nodes
+  - join_tokens         : single-use enrollment tokens (HMAC-SHA256)
+  - worker_tokens       : operational JWT tokens with rotation lifecycle
+  - users               : human operators with RBAC roles
+  - audit_log           : append-only action log with chained SHA256 hashes
+  - metrics_snapshots   : periodic status reports from Workers
+  - action_proposals    : Human-in-the-Loop action lifecycle
+  - automation_rules    : Trigger→Condition→Action automation rules
+  - automation_logs     : Execution history for automation rules
 """
 
 # ---------------------------------------------------------------------------
@@ -35,7 +37,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     insight_profile              TEXT,                       -- Profile JSON for smart insights
     insight_profile_generated_at REAL,                       -- Timestamp when profile was generated
     cached_services_json         TEXT,                       -- Cached services JSON from background task
-    cached_containers_json       TEXT                        -- Cached containers JSON from background task
+    cached_containers_json       TEXT,                       -- Cached containers JSON from background task
+    version                      TEXT                        -- Worker binary version reported by Worker
 )
 """
 
@@ -220,6 +223,47 @@ CREATE TABLE IF NOT EXISTS plugin_configs (
 """
 
 # ---------------------------------------------------------------------------
+# automation_rules  (Trigger → Condition → Action automation engine)
+# ---------------------------------------------------------------------------
+CREATE_AUTOMATION_RULES = """
+CREATE TABLE IF NOT EXISTS automation_rules (
+    id                   TEXT PRIMARY KEY,          -- UUID
+    name                 TEXT NOT NULL,             -- Human-readable label
+    description          TEXT NOT NULL DEFAULT '',  -- Optional description
+    enabled              INTEGER NOT NULL DEFAULT 1,
+    trigger_type         TEXT NOT NULL,             -- metric_threshold | node_state
+    trigger_config_json  TEXT NOT NULL DEFAULT '{}',-- Trigger params (metric, operator, threshold, state)
+    conditions_json      TEXT NOT NULL DEFAULT '[]',-- List of condition dicts [{type, ...}]
+    actions_json         TEXT NOT NULL DEFAULT '[]',-- List of action dicts [{type, ...}]
+    target_node_id       TEXT,                      -- Scope: specific node (NULL = all nodes)
+    target_group         TEXT,                      -- Scope: node group (NULL = all groups)
+    cooldown_seconds     INTEGER NOT NULL DEFAULT 300, -- Anti-spam: min seconds between triggers
+    created_by           TEXT NOT NULL,             -- user_id of the creator
+    created_at           REAL NOT NULL,
+    updated_at           REAL NOT NULL,
+    FOREIGN KEY (target_node_id) REFERENCES nodes(id) ON DELETE SET NULL
+)
+"""
+
+# ---------------------------------------------------------------------------
+# automation_logs  (Execution history for automation rules)
+# ---------------------------------------------------------------------------
+CREATE_AUTOMATION_LOGS = """
+CREATE TABLE IF NOT EXISTS automation_logs (
+    id               TEXT PRIMARY KEY,  -- UUID
+    rule_id          TEXT NOT NULL,     -- FK → automation_rules.id
+    node_id          TEXT,              -- Target node at time of trigger (nullable)
+    triggered_at     REAL NOT NULL,     -- Unix timestamp
+    status           TEXT NOT NULL DEFAULT 'TRIGGERED'
+                     CHECK(status IN ('SUCCESS','FAILED','SKIPPED','COOLDOWN')),
+    trigger_data_json TEXT NOT NULL DEFAULT '{}', -- Snapshot of the data that triggered the rule
+    result_json      TEXT NOT NULL DEFAULT '{}',  -- Results of each action execution
+    FOREIGN KEY (rule_id) REFERENCES automation_rules(id) ON DELETE CASCADE,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE SET NULL
+)
+"""
+
+# ---------------------------------------------------------------------------
 # Indexes for common query patterns
 # ---------------------------------------------------------------------------
 CREATE_INDEXES = [
@@ -239,6 +283,10 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_node ON chat_sessions(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_plugin_configs_enabled ON plugin_configs(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_automation_rules_enabled ON automation_rules(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules(trigger_type)",
+    "CREATE INDEX IF NOT EXISTS idx_automation_logs_rule ON automation_logs(rule_id, triggered_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_automation_logs_node ON automation_logs(node_id)",
 ]
 
 # All CREATE statements in dependency order
@@ -253,4 +301,6 @@ ALL_TABLES = [
     CREATE_PROPOSALS,
     CREATE_CHAT_SESSIONS,
     CREATE_PLUGIN_CONFIGS,
+    CREATE_AUTOMATION_RULES,
+    CREATE_AUTOMATION_LOGS,
 ]

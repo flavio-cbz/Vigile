@@ -163,7 +163,7 @@ async def _run_enrollment(
 
     # ── Step 1.5: Reconnect mode — skip JOIN_TOKEN + Ed25519 challenge ─────
     if reconnect and worker_token:
-        return await _run_reconnect(websocket, db, remote, worker_token, public_key_b64)
+        return await _run_reconnect(websocket, db, remote, worker_token, public_key_b64, fingerprint)
 
     # Regular enrollment: require join_token
     if not join_token:
@@ -264,6 +264,7 @@ async def _run_enrollment(
     machine_id = fingerprint.get("machine_id", "")
     arch = fingerprint.get("arch", "")
     os_name = fingerprint.get("os", "")
+    version = fingerprint.get("version", "")
     # Name and group are carried in the JOIN_TOKEN payload (set by generate-join).
     # On first enrollment, we need them to satisfy the NOT NULL `name` column.
     pending_name = payload.get("name", "") or hostname
@@ -291,9 +292,9 @@ async def _run_enrollment(
                 """
                 INSERT INTO nodes (
                     id, name, hostname, machine_id, arch, os, public_key,
-                    state, ip_prefix, node_group,
+                    state, ip_prefix, node_group, version,
                     enrolled_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node_id,
@@ -306,6 +307,7 @@ async def _run_enrollment(
                     NodeState.CONNECTED.value,
                     ip_prefix,
                     pending_group,
+                    version,
                     now,
                     now,
                     now,
@@ -320,11 +322,12 @@ async def _run_enrollment(
                     arch = ?,
                     os = ?,
                     public_key = ?,
+                    version = ?,
                     enrolled_at = ?,
                     updated_at = ?
                 WHERE id = ?
                 """,
-                (hostname, machine_id, arch, os_name, public_key_b64, now, now, node_id),
+                (hostname, machine_id, arch, os_name, public_key_b64, version, now, now, node_id),
             )
 
         worker_token, lifecycle = get_security_instance().generate_worker_token(node_id)
@@ -420,8 +423,10 @@ async def _run_reconnect(
     remote: str,
     worker_token: str,
     public_key_b64: str,
+    fingerprint: dict | None = None,
 ) -> str:
     """Handle reconnect enrollment: validate worker_token, verify public_key match, skip challenge."""
+    fingerprint = fingerprint or {}
     security = get_security_instance()
 
     # ── R1: Verify worker_token (JWT validity + DB revocation) ──────────────
@@ -476,7 +481,26 @@ async def _run_reconnect(
 
     # ── R5: Generate fresh worker_token, update DB ─────────────────────────
     now = time.time()
+    hostname = fingerprint.get("hostname", "")
+    machine_id = fingerprint.get("machine_id", "")
+    arch = fingerprint.get("arch", "")
+    os_name = fingerprint.get("os", "")
+    version = fingerprint.get("version", "")
     async with transaction(db):
+        # Update node fingerprint/version on reconnect
+        await db.execute(
+            """
+            UPDATE nodes SET
+                hostname = ?,
+                machine_id = ?,
+                arch = ?,
+                os = ?,
+                version = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (hostname, machine_id, arch, os_name, version, now, node_id),
+        )
         # Revoke old token
         old_token_hash = security.worker_token_hash(worker_token)
         await db.execute(
@@ -633,7 +657,7 @@ async def _run_operational(
 
         elif msg_type == "STATUS_REPORT":
             # Normalize and store metrics snapshot via plugin system
-            snapshot = plugin_manager.call_first("normalize_status_report", raw_report=msg)
+            snapshot = await plugin_manager.async_call_first("normalize_status_report", raw_report=msg)
             if snapshot:
                 await plugin_manager.async_call(
                     "on_status_report", node_id=node_id, snapshot=snapshot, db=db

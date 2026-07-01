@@ -38,3 +38,9 @@ func TestCPUStatsAtomicDirectAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestCollectMetrics(t *testing.T) {
+	m := collectMetrics()
+	t.Logf("Collected: %+v", m)
+}
+

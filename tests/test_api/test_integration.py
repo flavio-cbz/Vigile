@@ -113,30 +113,25 @@ async def test_api_integration_flow():
         assert "token" in data
         assert "curl_command" in data
 
-        # List Nodes
+        # List Nodes (should NOT contain the non-persisted pending node)
         r = await client.get("/api/nodes", headers=headers)
         assert r.status_code == 200
         nodes = r.json()
         assert isinstance(nodes, list)
         found = any(n["id"] == node_id for n in nodes)
-        assert found, "Newly created node not found in nodes list"
+        assert not found, "Pending node should not be persisted yet (anti-phantom)"
 
-        # Get Single Node
+        # Get Single Node (should return 404 since it's not enrolled)
         r = await client.get(f"/api/nodes/{node_id}", headers=headers)
-        assert r.status_code == 200
-        assert r.json()["state"] == "PENDING"
+        assert r.status_code == 404
 
         # Get Kickstart Script (Public)
         r = await client.get("/api/nodes/kickstart.sh")
         assert r.status_code == 200
         assert r.text.startswith("#!/usr/env bash") or r.text.startswith("#!/usr/bin/env bash")
 
-        # Delete Node
+        # Delete Node (should return 404 since it does not exist)
         r = await client.delete(f"/api/nodes/{node_id}", headers=headers)
-        assert r.status_code == 204
-
-        # Verify Hard Delete (row gone)
-        r = await client.get(f"/api/nodes/{node_id}", headers=headers)
         assert r.status_code == 404
 
         # 4. Admin, Audit, and Debug Endpoints
