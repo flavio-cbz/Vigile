@@ -28,7 +28,7 @@ const colorForLine = (log: string): string => {
   if (log.includes('validated') || log.includes('initialized') || log.includes('loaded')) {
     return 'text-severity-ok';
   }
-  return 'text-text-3';
+  return 'text-text-2';
 };
 
 export const BootLogs: React.FC = () => {
@@ -60,8 +60,8 @@ export const BootLogs: React.FC = () => {
   }, [logs]);
 
   return (
-    <div className="font-mono text-[11px] text-text-3 leading-relaxed p-4 bg-black/40 border border-border rounded-lg h-44 overflow-hidden flex flex-col justify-end relative shadow-inner">
-      <div className="absolute top-2 left-3 flex items-center gap-1.5 text-[8px] text-text-3 uppercase tracking-wider font-semibold pointer-events-none select-none">
+    <div className="font-mono text-[11px] text-text-2 leading-relaxed p-4 bg-surface-2 border border-border rounded-lg h-44 overflow-hidden flex flex-col justify-end relative shadow-inner">
+      <div className="absolute top-2 left-3 flex items-center gap-1.5 text-[8px] text-text-2 uppercase tracking-wider font-semibold pointer-events-none select-none">
         <TerminalIcon className="w-3 h-3 text-accent animate-pulse" />
         <span>{t('login.boot_logs_title')}</span>
       </div>

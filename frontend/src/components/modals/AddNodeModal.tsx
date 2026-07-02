@@ -362,7 +362,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
               </div>
               <pre
                 className={[
-                  'p-4 bg-[#08080d] border border-border border-t-0 rounded-b-lg overflow-x-auto',
+                  'p-4 bg-surface-2 border border-border border-t-0 rounded-b-lg overflow-x-auto',
                   'font-mono text-[0.6875rem] leading-relaxed text-ink-primary',
                   'whitespace-pre-wrap break-all select-all',
                   expired ? 'opacity-50' : '',

@@ -288,10 +288,10 @@ export const Sidebar: React.FC = () => {
               <div className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 ${
                 isAdmin
                   ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15'
-                  : 'border-[#2dd4bf] shadow-[0_0_8px_rgba(45,212,191,0.15)] bg-teal-500/5'
+                  : 'border-accent/40 bg-accent-muted/5'
               }`}>
                 <span className={`text-[11px] font-bold uppercase font-mono ${
-                  isAdmin ? 'text-accent' : 'text-[#2dd4bf]'
+                  isAdmin ? 'text-accent' : 'text-text-2'
                 }`}>
                   {user?.username?.charAt(0) || 'U'}
                 </span>
@@ -303,7 +303,7 @@ export const Sidebar: React.FC = () => {
                 <div className={`text-[8px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
                   isAdmin
                     ? 'text-accent border-accent/20 bg-accent-muted/5'
-                    : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
+                    : 'text-text-2 border-border bg-surface-2'
                 }`}>
                   {user?.role || t('sidebar.default_role')}
                 </div>
@@ -365,10 +365,10 @@ export const Sidebar: React.FC = () => {
             } ${
               isAdmin
                 ? 'border-accent shadow-[0_0_8px_var(--color-accent-glow)] bg-accent-muted/15'
-                : 'border-[#2dd4bf] shadow-[0_0_8px_rgba(45,212,191,0.15)] bg-teal-500/5'
+                : 'border-accent/40 bg-accent-muted/5'
             }`}>
               <span className={`text-[11px] xl:text-[13px] font-bold uppercase font-mono ${
-                isAdmin ? 'text-accent' : 'text-[#2dd4bf]'
+                isAdmin ? 'text-accent' : 'text-text-2'
               }`}>
                 {user?.username?.charAt(0) || 'U'}
               </span>
@@ -382,7 +382,7 @@ export const Sidebar: React.FC = () => {
                 <div className={`text-[8px] xl:text-[9.5px] font-extrabold uppercase tracking-wider font-mono mt-0.5 inline-block px-1 rounded-sm leading-none py-0.5 border ${
                   isAdmin
                     ? 'text-accent border-accent/20 bg-accent-muted/5'
-                    : 'text-[#2dd4bf] border-[#2dd4bf]/20 bg-teal-500/5'
+                    : 'text-text-2 border-border bg-surface-2'
                 }`}>
                   {user?.role || t('sidebar.default_role')}
                 </div>

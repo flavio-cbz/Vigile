@@ -95,7 +95,7 @@ export const NodeDetailLogsTab: React.FC<{
         )}
         <div
           ref={consoleRef}
-          className="font-mono text-[10.5px] leading-relaxed p-5 bg-black text-text-2 border border-border rounded-lg h-[460px] overflow-y-auto whitespace-pre-wrap select-text scrollbar-thin shadow-inner"
+          className="font-mono text-[10.5px] leading-relaxed p-5 bg-surface-2 text-text-2 border border-border rounded-lg h-[460px] overflow-y-auto whitespace-pre-wrap select-text scrollbar-thin shadow-inner"
         >
           {logs || t('node_detail.logs_empty')}
         </div>

@@ -31,7 +31,7 @@ function StatusBadge({ status }: { status: string }) {
   const config: Record<string, { color: string; icon: React.ReactNode }> = {
     SUCCESS: { color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30', icon: <CheckCircle size={12} /> },
     FAILED: { color: 'text-red-400 bg-red-500/10 border-red-500/30', icon: <XCircle size={12} /> },
-    SKIPPED: { color: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30', icon: <AlertTriangle size={12} /> },
+    SKIPPED: { color: 'text-text-2 bg-surface-2 border-border', icon: <AlertTriangle size={12} /> },
     COOLDOWN: { color: 'text-amber-400 bg-amber-500/10 border-amber-500/30', icon: <Clock size={12} /> },
   };
   const { color, icon } = config[status] ?? config.SKIPPED;
@@ -46,39 +46,39 @@ function StatusBadge({ status }: { status: string }) {
 function LogRow({ log }: { log: AutomationLog }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="border border-zinc-800 rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-hidden">
       <button
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-800/40 transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <StatusBadge status={log.status} />
-        <span className="text-xs text-zinc-400 flex-1">
+        <span className="text-xs text-text-2 flex-1">
           {log.node_id ? (
-            <span className="font-mono text-zinc-300">{log.node_id.slice(0, 8)}…</span>
+            <span className="font-mono text-text-1">{log.node_id.slice(0, 8)}…</span>
           ) : (
-            <span className="text-zinc-500">—</span>
+            <span className="text-text-3">—</span>
           )}
         </span>
-        <span className="text-xs text-zinc-500">{formatDate(log.triggered_at)}</span>
+        <span className="text-xs text-text-3">{formatDate(log.triggered_at)}</span>
         {expanded ? (
-          <ChevronUp size={12} className="text-zinc-500 shrink-0" />
+          <ChevronUp size={12} className="text-text-3 shrink-0" />
         ) : (
-          <ChevronDown size={12} className="text-zinc-500 shrink-0" />
+          <ChevronDown size={12} className="text-text-3 shrink-0" />
         )}
       </button>
 
       {expanded && (
-        <div className="border-t border-zinc-800 px-4 py-3 bg-zinc-900/30 space-y-2">
+        <div className="border-t border-border px-4 py-3 bg-surface-2 space-y-2">
           <div>
-            <div className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1">Données de déclenchement</div>
-            <pre className="text-xs text-zinc-300 font-mono bg-black/30 rounded p-2 overflow-x-auto">
+            <div className="text-xs font-medium text-text-3 uppercase tracking-wide mb-1">Données de déclenchement</div>
+            <pre className="text-xs text-text-1 font-mono bg-bg rounded p-2 overflow-x-auto border border-border">
               {JSON.stringify(log.trigger_data, null, 2)}
             </pre>
           </div>
           {Object.keys(log.result).length > 0 && (
             <div>
-              <div className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-1">Résultat des actions</div>
-              <pre className="text-xs text-zinc-300 font-mono bg-black/30 rounded p-2 overflow-x-auto">
+              <div className="text-xs font-medium text-text-3 uppercase tracking-wide mb-1">Résultat des actions</div>
+              <pre className="text-xs text-text-1 font-mono bg-bg rounded p-2 overflow-x-auto border border-border">
                 {JSON.stringify(log.result, null, 2)}
               </pre>
             </div>
@@ -124,16 +124,16 @@ export const AutomationLogDrawer: React.FC<Props> = ({ rule, onClose }) => {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="fixed right-0 top-0 h-full w-full max-w-lg bg-zinc-900 border-l border-zinc-800 shadow-2xl flex flex-col"
+        className="fixed right-0 top-0 h-full w-full max-w-lg bg-bg border-l border-border shadow-2xl flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <ScrollText size={18} className="text-sky-400" />
             <div>
-              <h2 className="text-sm font-semibold text-white">Historique d'exécution</h2>
-              <p className="text-xs text-zinc-500 truncate max-w-[280px]">{rule.name}</p>
+              <h2 className="text-sm font-semibold text-text-1">Historique d'exécution</h2>
+              <p className="text-xs text-text-3 truncate max-w-[280px]">{rule.name}</p>
             </div>
           </div>
           <button className="icon-btn" onClick={onClose}>
@@ -142,9 +142,9 @@ export const AutomationLogDrawer: React.FC<Props> = ({ rule, onClose }) => {
         </div>
 
         {/* Stats strip */}
-        <div className="grid grid-cols-3 border-b border-zinc-800">
+        <div className="grid grid-cols-3 border-b border-border">
           {[
-            { label: 'Total', value: rule.total_executions, color: 'text-white' },
+            { label: 'Total', value: rule.total_executions, color: 'text-text-1' },
             {
               label: 'Succès',
               value: logs.filter(l => l.status === 'SUCCESS').length,
@@ -156,9 +156,9 @@ export const AutomationLogDrawer: React.FC<Props> = ({ rule, onClose }) => {
               color: 'text-red-400',
             },
           ].map(stat => (
-            <div key={stat.label} className="px-4 py-3 text-center border-r border-zinc-800 last:border-r-0">
-              <div className={clsx('text-xl font-bold', stat.color)}>{stat.value}</div>
-              <div className="text-xs text-zinc-500">{stat.label}</div>
+            <div key={stat.label} className="px-4 py-3 text-center border-r border-border last:border-r-0">
+              <div className={clsx("text-xl font-bold", stat.color)}>{stat.value}</div>
+              <div className="text-xs text-text-3">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -170,7 +170,7 @@ export const AutomationLogDrawer: React.FC<Props> = ({ rule, onClose }) => {
               <Spinner />
             </div>
           ) : logs.length === 0 ? (
-            <div className="text-center py-12 text-zinc-500 text-sm">
+            <div className="text-center py-12 text-text-3 text-sm">
               Aucune exécution enregistrée.
             </div>
           ) : (

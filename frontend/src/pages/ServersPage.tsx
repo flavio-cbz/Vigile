@@ -325,7 +325,7 @@ export const ServersPage: React.FC = () => {
             role="button"
             tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter') setAddNodeModalOpen(true); }}
-            className="bg-surface-2 border-2 border-dashed border-border-strong/20 hover:bg-surface-2/80 rounded-xl p-4 text-center transition-all duration-200 cursor-pointer group flex flex-col items-center justify-center min-h-[200px] w-full card-glow-accent"
+            className="bg-surface border-2 border-dashed border-accent/30 hover:bg-surface-2 rounded-xl p-4 text-center transition-all duration-200 cursor-pointer group flex flex-col items-center justify-center min-h-[200px] w-full card-glow-accent"
           >
             <div className="flex flex-col items-center justify-center space-y-3">
               <div className="p-3 rounded-full bg-accent/5 group-hover:bg-accent/10 transition-colors">

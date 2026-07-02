@@ -36,7 +36,7 @@ export const LoginFormPanel: React.FC<LoginFormPanelProps> = ({
   };
 
   return (
-    <div className="w-full lg:w-1/2 xl:w-2/5 flex items-center justify-center p-6 sm:p-12 bg-[#0a0a0f] relative overflow-hidden shrink-0">
+    <div className="w-full lg:w-1/2 xl:w-2/5 flex items-center justify-center p-6 sm:p-12 bg-bg relative overflow-hidden shrink-0">
       <div className="absolute inset-0 block lg:hidden">
         <ParticleCanvas />
       </div>

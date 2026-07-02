@@ -101,9 +101,9 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
       'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
       enabled
         ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-        : 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/30',
+        : 'bg-surface-2 text-text-2 border border-border',
     )}>
-      <span className={clsx('w-1.5 h-1.5 rounded-full', enabled ? 'bg-emerald-400' : 'bg-zinc-500')} />
+      <span className={clsx('w-1.5 h-1.5 rounded-full', enabled ? 'bg-emerald-400' : 'bg-text-3')} />
       {enabled ? 'Actif' : 'Désactivé'}
     </span>
   );
@@ -313,11 +313,11 @@ export const AutomationsPage: React.FC = () => {
           <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-4">
               <Play size={18} className="text-amber-400" />
-              <h2 className="text-lg font-semibold text-white">
+              <h2 className="text-lg font-semibold text-text-1">
                 Tester la règle
               </h2>
             </div>
-            <p className="text-sm text-zinc-400 mb-4">
+            <p className="text-sm text-text-2 mb-4">
               Choisissez un nœud cible. Le cooldown et les conditions seront ignorés.
             </p>
             <div className="mb-4">
@@ -377,8 +377,8 @@ function StatCard({
         {icon}
       </div>
       <div>
-        <div className="text-2xl font-bold text-white">{value}</div>
-        <div className="text-xs text-zinc-500">{label}</div>
+        <div className="text-2xl font-bold text-text-1">{value}</div>
+        <div className="text-xs text-text-3">{label}</div>
       </div>
     </div>
   );
@@ -406,13 +406,13 @@ function RuleCard({
   return (
     <div className={clsx(
       'card border transition-all duration-200',
-      rule.enabled ? 'border-zinc-700/60' : 'border-zinc-800/60 opacity-70',
+      rule.enabled ? 'border-border' : 'border-border opacity-70',
     )}>
       {/* Main row */}
       <div className="flex items-center gap-4 p-4">
         {/* Expand toggle */}
         <button
-          className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+          className="text-text-3 hover:text-text-1 transition-colors shrink-0"
           onClick={() => setExpanded(!expanded)}
         >
           <ChevronRight
@@ -424,18 +424,18 @@ function RuleCard({
         {/* Rule info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-white text-sm truncate">{rule.name}</span>
+            <span className="font-semibold text-text-1 text-sm truncate">{rule.name}</span>
             <TriggerBadge type={rule.trigger_type} />
             <StatusBadge enabled={rule.enabled} />
           </div>
           <div className="flex items-center gap-4 mt-1 flex-wrap">
-            <span className="text-xs text-zinc-400 font-mono">{formatTrigger(rule)}</span>
-            <span className="text-xs text-zinc-500">•</span>
-            <span className="text-xs text-zinc-500">{formatScope(rule)}</span>
+            <span className="text-xs text-text-2 font-mono">{formatTrigger(rule)}</span>
+            <span className="text-xs text-text-3">•</span>
+            <span className="text-xs text-text-3">{formatScope(rule)}</span>
             {rule.cooldown_seconds > 0 && (
               <>
-                <span className="text-xs text-zinc-500">•</span>
-                <span className="flex items-center gap-1 text-xs text-zinc-500">
+                <span className="text-xs text-text-3">•</span>
+                <span className="flex items-center gap-1 text-xs text-text-3">
                   <Clock size={10} />
                   {rule.cooldown_seconds}s cooldown
                 </span>
@@ -446,14 +446,14 @@ function RuleCard({
 
         {/* Stats */}
         <div className="hidden md:flex flex-col items-end shrink-0">
-          <span className="text-sm font-medium text-white">{rule.total_executions}</span>
-          <span className="text-xs text-zinc-500">exécutions</span>
+          <span className="text-sm font-medium text-text-1">{rule.total_executions}</span>
+          <span className="text-xs text-text-3">exécutions</span>
         </div>
 
         {/* Last run */}
         <div className="hidden lg:flex flex-col items-end shrink-0 min-w-[100px]">
-          <span className="text-xs text-zinc-400">{formatDate(rule.last_triggered_at)}</span>
-          <span className="text-xs text-zinc-600">dernier run</span>
+          <span className="text-xs text-text-2">{formatDate(rule.last_triggered_at)}</span>
+          <span className="text-xs text-text-3">dernier run</span>
         </div>
 
         {/* Actions */}
@@ -475,7 +475,7 @@ function RuleCard({
                 <Play size={14} />
               </button>
               <button
-                className="icon-btn icon-btn-sm text-zinc-400 hover:text-white"
+                className="icon-btn icon-btn-sm text-text-2 hover:text-text-1"
                 title="Éditer"
                 onClick={() => onEdit(rule)}
               >
@@ -484,7 +484,7 @@ function RuleCard({
               <button
                 className={clsx(
                   'icon-btn icon-btn-sm',
-                  rule.enabled ? 'text-emerald-400 hover:text-red-400' : 'text-zinc-500 hover:text-emerald-400',
+                  rule.enabled ? 'text-emerald-400 hover:text-red-400' : 'text-text-3 hover:text-emerald-400',
                 )}
                 title={rule.enabled ? 'Désactiver' : 'Activer'}
                 onClick={() => onToggle(rule)}
@@ -499,7 +499,7 @@ function RuleCard({
                 )}
               </button>
               <button
-                className="icon-btn icon-btn-sm text-zinc-500 hover:text-red-400"
+                className="icon-btn icon-btn-sm text-text-3 hover:text-red-400"
                 title="Supprimer"
                 onClick={() => onDelete(rule)}
                 disabled={deletingId === rule.id}
@@ -513,10 +513,10 @@ function RuleCard({
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="border-t border-zinc-800 px-4 py-3 grid grid-cols-1 md:grid-cols-3 gap-4 bg-zinc-900/30">
+        <div className="border-t border-border px-4 py-3 grid grid-cols-1 md:grid-cols-3 gap-4 bg-surface-2">
           <DetailSection title="Conditions">
             {rule.conditions.length === 0 ? (
-              <span className="text-xs text-zinc-500">Toujours</span>
+              <span className="text-xs text-text-3">Toujours</span>
             ) : rule.conditions.map((c, i) => (
               <ConditionChip key={i} condition={c} />
             ))}
@@ -527,11 +527,11 @@ function RuleCard({
             ))}
           </DetailSection>
           <DetailSection title="Métadonnées">
-            <div className="text-xs text-zinc-500 space-y-1">
-              <div>Créée par <span className="text-zinc-300">{rule.created_by}</span></div>
-              <div>Créée le <span className="text-zinc-300">{formatDate(rule.created_at)}</span></div>
+            <div className="text-xs text-text-3 space-y-1">
+              <div>Créée par <span className="text-text-1">{rule.created_by}</span></div>
+              <div>Créée le <span className="text-text-1">{formatDate(rule.created_at)}</span></div>
               {rule.description && (
-                <div className="text-zinc-400 italic mt-1">{rule.description}</div>
+                <div className="text-text-2 italic mt-1">{rule.description}</div>
               )}
             </div>
           </DetailSection>
@@ -544,7 +544,7 @@ function RuleCard({
 function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">{title}</div>
+      <div className="text-xs font-medium text-text-2 uppercase tracking-wider mb-2">{title}</div>
       <div className="space-y-1">{children}</div>
     </div>
   );
@@ -554,14 +554,14 @@ function ConditionChip({ condition }: { condition: Record<string, unknown> }) {
   const ctype = condition.type as string;
   if (ctype === 'time_window') {
     return (
-      <span className="flex items-center gap-1 text-xs text-zinc-300">
+      <span className="flex items-center gap-1 text-xs text-text-1">
         <Clock size={10} className="text-sky-400" />
         Fenêtre : {condition.window as string}
       </span>
     );
   }
   return (
-    <span className="text-xs text-zinc-400">{ctype}</span>
+    <span className="text-xs text-text-2">{ctype}</span>
   );
 }
 
@@ -570,7 +570,7 @@ function ActionChip({ action }: { action: Record<string, unknown> }) {
   const icons: Record<string, React.ReactNode> = {
     send_intent: <Zap size={10} className="text-amber-400" />,
     call_webhook: <Globe size={10} className="text-blue-400" />,
-    log_message: <MessageSquare size={10} className="text-zinc-400" />,
+    log_message: <MessageSquare size={10} className="text-text-3" />,
   };
   const labels: Record<string, string> = {
     send_intent: `Commande : ${action.action}`,
@@ -578,7 +578,7 @@ function ActionChip({ action }: { action: Record<string, unknown> }) {
     log_message: `Log : ${String(action.message ?? '').slice(0, 40)}`,
   };
   return (
-    <span className="flex items-center gap-1 text-xs text-zinc-300">
+    <span className="flex items-center gap-1 text-xs text-text-1">
       {icons[atype] ?? <AlertTriangle size={10} />}
       {labels[atype] ?? atype}
     </span>

@@ -8,7 +8,7 @@ export const LoginHero: React.FC = () => {
   const { t } = useLocale();
 
   return (
-    <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-[#0e0b09] to-[#161210] border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
+    <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-surface-2 to-surface-3 border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
       <ParticleCanvas />
 
       <div className="z-10 flex items-center gap-3">

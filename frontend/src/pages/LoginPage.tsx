@@ -155,14 +155,14 @@ const BootLogs: React.FC = () => {
   }, [logs]);
 
   return (
-    <div className="font-mono text-[11px] text-text-3 leading-relaxed p-4 bg-black/40 border border-border rounded-lg h-44 overflow-hidden flex flex-col justify-end relative shadow-inner">
-      <div className="absolute top-2 left-3 flex items-center gap-1.5 text-[8px] text-text-3 uppercase tracking-wider font-semibold pointer-events-none select-none">
+    <div className="font-mono text-[11px] text-text-2 leading-relaxed p-4 bg-surface-2 border border-border rounded-lg h-44 overflow-hidden flex flex-col justify-end relative shadow-inner">
+      <div className="absolute top-2 left-3 flex items-center gap-1.5 text-[8px] text-text-2 uppercase tracking-wider font-semibold pointer-events-none select-none">
         <TerminalIcon className="w-3 h-3 text-accent animate-pulse" />
         <span>{t('login.boot_logs_title')}</span>
       </div>
       <div ref={ref} className="overflow-y-auto max-h-[140px] space-y-1 pr-1 no-scrollbar">
         {logs.map((log, i) => {
-          let c = 'text-text-3';
+          let c = 'text-text-2';
           if (log.includes('SECURE') || log.includes('AUDIT') || log.includes('Integrity')) c = 'text-accent';
           else if (log.includes('validated') || log.includes('initialized') || log.includes('loaded')) c = 'text-severity-ok';
           return <div key={i} className={c}>{log}</div>;
@@ -298,8 +298,8 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-[#0a0a0f] flex flex-col lg:flex-row overflow-hidden relative">
-      <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-[#0e0b09] to-[#161210] border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
+    <div className="min-h-screen w-screen bg-bg flex flex-col lg:flex-row overflow-hidden relative">
+      <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-surface-2 to-surface-3 border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
         <ParticleCanvas />
 
         <div className="z-10 flex items-center gap-3">
@@ -354,7 +354,7 @@ export const LoginPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="w-full lg:w-1/2 xl:w-2/5 flex items-center justify-center p-6 sm:p-12 bg-[#0a0a0f] relative overflow-hidden shrink-0">
+      <div className="w-full lg:w-1/2 xl:w-2/5 flex items-center justify-center p-6 sm:p-12 bg-bg relative overflow-hidden shrink-0">
         <div className="absolute inset-0 block lg:hidden">
           <ParticleCanvas />
         </div>

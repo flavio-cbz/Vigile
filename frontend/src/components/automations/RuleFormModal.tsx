@@ -188,7 +188,7 @@ export const RuleFormModal: React.FC<Props> = ({ rule, onClose, onSaved }) => {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             <Zap size={20} className="text-amber-400" />
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-text-1">
               {isEdit ? 'Éditer la règle' : 'Nouvelle règle d\'automatisation'}
             </h2>
           </div>
@@ -267,7 +267,7 @@ export const RuleFormModal: React.FC<Props> = ({ rule, onClose, onSaved }) => {
           {/* Section: Conditions */}
           <Section title="Conditions (optionnel)" icon={<Clock size={14} className="text-sky-400" />}>
             {conditions.length === 0 && (
-              <p className="text-xs text-zinc-500 italic">Sans condition, la règle s'exécute toujours.</p>
+              <p className="text-xs text-text-3 italic">Sans condition, la règle s'exécute toujours.</p>
             )}
             {conditions.map((cond, i) => (
               <div key={i} className="flex items-start gap-2">
@@ -306,7 +306,7 @@ export const RuleFormModal: React.FC<Props> = ({ rule, onClose, onSaved }) => {
               <p className="text-xs text-red-400 italic">Au moins une action est requise.</p>
             )}
             {actions.map((action, i) => (
-              <div key={i} className="border border-zinc-700/60 rounded-lg p-3 space-y-2 bg-zinc-900/30">
+              <div key={i} className="border border-border rounded-lg p-3 space-y-2 bg-surface-2">
                 <div className="flex items-center gap-2">
                   <select
                     className="form-select flex-1"
@@ -421,7 +421,7 @@ export const RuleFormModal: React.FC<Props> = ({ rule, onClose, onSaved }) => {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-zinc-800">
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
           <button className="btn btn-ghost" onClick={onClose}>
             Annuler
           </button>
@@ -450,7 +450,7 @@ function Section({
     <div>
       <div className="flex items-center gap-1.5 mb-3">
         {icon}
-        <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">{title}</h3>
+        <h3 className="text-sm font-semibold text-text-1 uppercase tracking-wider">{title}</h3>
       </div>
       <div className="space-y-3">
         {children}

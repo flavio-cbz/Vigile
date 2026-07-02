@@ -76,7 +76,7 @@ const ProposalRow: React.FC<{
         </p>
 
         {prop.params?.result && (
-          <div className="p-3 rounded bg-black/35 border border-border font-mono text-[10px] text-text-3 leading-relaxed max-h-24 overflow-y-auto mt-2">
+          <div className="p-3 rounded bg-surface-2 border border-border font-mono text-[10px] text-text-2 leading-relaxed max-h-24 overflow-y-auto mt-2">
             Result: {prop.params.result}
           </div>
         )}
