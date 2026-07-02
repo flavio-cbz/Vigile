@@ -101,3 +101,14 @@ AGENTS.md
 scratch/
 interview/
 opencode.json
+
+## Local development artifacts
+.codegraph/
+.vite/
+
+## Local screenshots (debug/visual QA)
+light-*.png
+*.tmp.png
+
+## Worker build cache
+worker-cache/
