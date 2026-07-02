@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -16,21 +18,32 @@ var b64enc = base64.URLEncoding
 
 // KeyPaths for the Ed25519 keypair.
 var (
-	keyDir          = "/etc/vigile"
-	privateKeyPath  = keyDir + "/worker.key"
-	publicKeyPath   = keyDir + "/worker.key.pub"
-	tokenPath       = keyDir + "/enrollment.token"
-	masterURLPath   = keyDir + "/master_url"
-	workerTokenPath = keyDir + "/worker_token"
+	keyDir          = defaultKeyDir()
+	privateKeyPath  = filepath.Join(keyDir, "worker.key")
+	publicKeyPath   = filepath.Join(keyDir, "worker.key.pub")
+	tokenPath       = filepath.Join(keyDir, "enrollment.token")
+	masterURLPath   = filepath.Join(keyDir, "master_url")
+	workerTokenPath = filepath.Join(keyDir, "worker_token")
 )
+
+func defaultKeyDir() string {
+	if runtime.GOOS == "windows" {
+		programData := os.Getenv("ProgramData")
+		if programData == "" {
+			programData = `C:\ProgramData`
+		}
+		return filepath.Join(programData, "vigile")
+	}
+	return "/etc/vigile"
+}
 
 func setKeyDir(dir string) {
 	keyDir = dir
-	privateKeyPath = keyDir + "/worker.key"
-	publicKeyPath = keyDir + "/worker.key.pub"
-	tokenPath = keyDir + "/enrollment.token"
-	masterURLPath = keyDir + "/master_url"
-	workerTokenPath = keyDir + "/worker_token"
+	privateKeyPath = filepath.Join(keyDir, "worker.key")
+	publicKeyPath = filepath.Join(keyDir, "worker.key.pub")
+	tokenPath = filepath.Join(keyDir, "enrollment.token")
+	masterURLPath = filepath.Join(keyDir, "master_url")
+	workerTokenPath = filepath.Join(keyDir, "worker_token")
 }
 
 // loadOrGenerateKeypair loads the Ed25519 keypair from disk, or generates a new one.

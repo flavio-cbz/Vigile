@@ -414,6 +414,9 @@ export const en = {
   "add_node.warning_privileges": "Run this command on the target server with root privileges. Token expires in {time}.",
   "add_node.copy_command": "Copy command",
   "add_node.deploy_command_aria": "Deployment command",
+  "add_node.os_linux_mac": "Linux / macOS",
+  "add_node.os_windows": "Windows",
+  "add_node.windows_privileges": "Open PowerShell as Administrator and run these commands to set up the Windows service.",
 
   // Server Config Modal
   "server_config.title": "Configure server",

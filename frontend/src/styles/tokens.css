@@ -40,9 +40,6 @@
   --bg-surface-hover: rgba(255, 255, 255, 0.05);
   --color-surface-alt: rgba(255, 255, 255, 0.03);
 
-  --gradient-hero-ok: linear-gradient(135deg, #0f2a1a, #0a0a0f);
-  --gradient-hero-warn: linear-gradient(135deg, #2a1f0a, #0a0a0f);
-  --gradient-hero-crit: linear-gradient(135deg, #2a0f0f, #0a0a0f);
   --gradient-fade-x: linear-gradient(to right, transparent, black 15%, black 85%, transparent);
 
   --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;

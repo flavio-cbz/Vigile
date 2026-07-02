@@ -411,9 +411,12 @@ export const fr = {
   "add_node.token_expired_msg": "Ce jeton a expiré. Générez-en un nouveau :",
   "add_node.expires_in_title": "Temps restant avant expiration du jeton",
   "add_node.refresh": "Rafraîchir",
-  "add_node.warning_privileges": "Exécutez cette commande sur le serveur cible avec les privilèges root. Le jeton expire dans {time}.",
+  "add_node.warning_privileges": "Exécutez cette commande sur le serveur cible avec les privilèges root. Le binaire s'exécutera automatiquement. Le jeton expire dans {time}.",
   "add_node.copy_command": "Copier la commande",
   "add_node.deploy_command_aria": "Commande de déploiement",
+  "add_node.os_linux_mac": "Linux / macOS",
+  "add_node.os_windows": "Windows",
+  "add_node.windows_privileges": "Ouvrez PowerShell en tant qu'Administrateur et exécutez ces commandes pour configurer le service Windows.",
 
   // Server Config Modal
   "server_config.title": "Configurer le serveur",

@@ -12,6 +12,9 @@ export const themes = {
     '--text-1':       '#e8e4f0',   // Lavande primary
     '--text-2':       '#9a97b0',   // Lavande secondary
     '--text-3':       '#52506b',   // Lavande muted
+    '--gradient-hero-ok': 'linear-gradient(135deg, #0f2a1a, #0a0a0f)',
+    '--gradient-hero-warn': 'linear-gradient(135deg, #2a1f0a, #0a0a0f)',
+    '--gradient-hero-crit': 'linear-gradient(135deg, #2a0f0f, #0a0a0f)',
   },
   'cool-dark': {
     '--bg':           '#090B0E',
@@ -26,6 +29,9 @@ export const themes = {
     '--text-1':       '#E8F0F5',
     '--text-2':       '#7A9AB0',
     '--text-3':       '#3A5060',
+    '--gradient-hero-ok': 'linear-gradient(135deg, #092c25, #090B0E)',
+    '--gradient-hero-warn': 'linear-gradient(135deg, #26200e, #090B0E)',
+    '--gradient-hero-crit': 'linear-gradient(135deg, #2c0e0e, #090B0E)',
   },
   'gray-dark': {
     '--bg':           '#0A0A0C',
@@ -40,6 +46,9 @@ export const themes = {
     '--text-1':       '#F0F0F5',
     '--text-2':       '#8080A0',
     '--text-3':       '#404060',
+    '--gradient-hero-ok': 'linear-gradient(135deg, #0d2c16, #0A0A0C)',
+    '--gradient-hero-warn': 'linear-gradient(135deg, #2c200d, #0A0A0C)',
+    '--gradient-hero-crit': 'linear-gradient(135deg, #2c0d0d, #0A0A0C)',
   },
   'light': {
     '--bg':           '#F5F0EB',
@@ -54,6 +63,9 @@ export const themes = {
     '--text-1':       '#1A1210',
     '--text-2':       '#6A5C50',
     '--text-3':       '#A09080',
+    '--gradient-hero-ok': 'linear-gradient(135deg, #e6f4ea, #FFFFFF)',
+    '--gradient-hero-warn': 'linear-gradient(135deg, #fef7e0, #FFFFFF)',
+    '--gradient-hero-crit': 'linear-gradient(135deg, #fce8e6, #FFFFFF)',
   },
 } as const;
 

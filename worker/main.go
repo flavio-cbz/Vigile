@@ -31,7 +31,7 @@ func main() {
 	// ── CLI flags ────────────────────────────────────────────────────────
 	masterURL := flag.String("master", os.Getenv("MASTER_URL"), "Master WebSocket URL (e.g. https://master:8443)")
 	joinToken := flag.String("token", os.Getenv("JOIN_TOKEN"), "JOIN_TOKEN for enrollment")
-	keyDir := flag.String("key-dir", os.Getenv("VIGILE_KEY_DIR"), "Directory for keys and config (default: /etc/vigile)")
+	keyDir := flag.String("key-dir", os.Getenv("VIGILE_KEY_DIR"), "Directory for keys and config (default: /etc/vigile or %ProgramData%\\vigile on Windows)")
 	flag.Parse()
 
 	if *keyDir != "" {

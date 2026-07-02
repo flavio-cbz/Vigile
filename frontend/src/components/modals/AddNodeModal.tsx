@@ -134,17 +134,32 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
     };
   }, []);
 
+  const [activeOS, setActiveOS] = useState<'linux_mac' | 'windows'>('linux_mac');
+
   // ---- Clipboard copy ----
+  const windowsCommand = useMemo(() => {
+    if (!joinData) return '';
+    // Extract base URL of the master from the curl command or request context.
+    // Example curl: curl -sSL http://localhost:8000/api/nodes/kickstart.sh | sudo sh -s -- --token TOKEN --master MASTER
+    // Let's parse master_url or generate dynamic command using the token
+    const token = joinData.token;
+    // Fallback to extraction from curl_command if master_url isn't easily parsed
+    const match = joinData.curl_command.match(/--master\s+([^\s]+)/);
+    const masterUrl = match ? match[1] : 'http://localhost:8000';
+    return `Invoke-WebRequest -Uri "${masterUrl}/api/nodes/kickstart.ps1" -OutFile kickstart.ps1\n.\\kickstart.ps1 -Token ${token} -Master ${masterUrl}`;
+  }, [joinData]);
+
   const handleCopy = useCallback(async () => {
-    if (!joinData?.curl_command) return;
+    const textToCopy = activeOS === 'windows' ? windowsCommand : (joinData?.curl_command || '');
+    if (!textToCopy) return;
     try {
-      await navigator.clipboard.writeText(joinData.curl_command);
+      await navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       window.setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
     } catch {
       // Clipboard can fail in non-secure contexts; fall back to a hidden textarea.
       const ta = document.createElement('textarea');
-      ta.value = joinData.curl_command;
+      ta.value = textToCopy;
       ta.style.position = 'fixed';
       ta.style.opacity = '0';
       document.body.appendChild(ta);
@@ -159,7 +174,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
         document.body.removeChild(ta);
       }
     }
-  }, [joinData]);
+  }, [joinData, activeOS, windowsCommand]);
 
   // ---- Manual refresh: re-issue token with the same name ----
   const handleRefresh = useCallback(async () => {
@@ -307,13 +322,43 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
               )}
             </div>
 
+            {/* OS Selection Tabs */}
+            <div className="flex border-b border-border">
+              <button
+                type="button"
+                onClick={() => setActiveOS('linux_mac')}
+                className={[
+                  'px-4 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                  activeOS === 'linux_mac'
+                    ? 'border-accent-primary text-accent-primary'
+                    : 'border-transparent text-ink-secondary hover:text-ink-primary'
+                ].join(' ')}
+              >
+                {t('add_node.os_linux_mac')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveOS('windows')}
+                className={[
+                  'px-4 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                  activeOS === 'windows'
+                    ? 'border-accent-primary text-accent-primary'
+                    : 'border-transparent text-ink-secondary hover:text-ink-primary'
+                ].join(' ')}
+              >
+                {t('add_node.os_windows')}
+              </button>
+            </div>
+
             <div className="relative group">
               <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-1 to-transparent pointer-events-none rounded-t-lg" />
               <div className="flex items-center gap-1.5 px-3 py-2 bg-surface-2 border border-border border-b-0 rounded-t-lg">
                 <span className="w-2.5 h-2.5 rounded-full bg-danger/60" />
                 <span className="w-2.5 h-2.5 rounded-full bg-warning/60" />
                 <span className="w-2.5 h-2.5 rounded-full bg-success/60" />
-                <span className="ml-2 text-[0.5625rem] font-mono text-ink-muted uppercase tracking-wider">sh</span>
+                <span className="ml-2 text-[0.5625rem] font-mono text-ink-muted uppercase tracking-wider">
+                  {activeOS === 'windows' ? 'powershell' : 'sh'}
+                </span>
               </div>
               <pre
                 className={[
@@ -324,7 +369,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
                 ].join(' ')}
                 aria-label={t('add_node.deploy_command_aria')}
               >
-                {joinData.curl_command}
+                {activeOS === 'windows' ? windowsCommand : joinData.curl_command}
               </pre>
             </div>
 
@@ -381,7 +426,7 @@ export const AddNodeModal = ({ onClose }: AddNodeModalProps) => {
                 <>
                   <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>
-                    {t('add_node.warning_privileges', { time: countdownLabel })}
+                    {activeOS === 'windows' ? t('add_node.windows_privileges') : t('add_node.warning_privileges', { time: countdownLabel })}
                   </span>
                 </>
               )}

@@ -117,6 +117,14 @@ async def test_get_kickstart_script(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_get_kickstart_ps1_script(client: AsyncClient):
+    response = await client.get("/api/nodes/kickstart.ps1")
+    assert response.status_code == status.HTTP_200_OK
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "Windows PowerShell Kickstart Script for Vigile Worker Node" in response.text
+
+
+@pytest.mark.asyncio
 async def test_list_nodes(client: AsyncClient, db, auth_headers):
     # Insert a couple of nodes
     await db.execute(

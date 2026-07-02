@@ -38,6 +38,7 @@ SUPPORTED: dict[str, list[str]] = {
     "linux": ["amd64", "arm64", "armv7"],
     "darwin": ["amd64", "arm64"],
     "freebsd": ["amd64", "arm64", "armv7"],
+    "windows": ["amd64"],
 }
 
 # ---------------------------------------------------------------------------
@@ -347,10 +348,11 @@ async def get_worker_binary(
                     status_code=status.HTTP_410_GONE,
                     detail=f"Version {version} has been revoked. Upgrade required.",
                 )
+            filename = f"vigile-worker-{os}-{arch}.exe" if os == "windows" else f"vigile-worker-{os}-{arch}"
             return FileResponse(
                 binary_path,
                 media_type="application/octet-stream",
-                filename=f"vigile-worker-{os}-{arch}",
+                filename=filename,
                 headers={"ETag": f'"{hashlib.sha256(binary_path.read_bytes()).hexdigest()}"'},
             )
 
@@ -365,10 +367,11 @@ async def get_worker_binary(
             detail=f"Version {version} has been revoked. Upgrade required.",
         )
 
+    filename = f"vigile-worker-{os}-{arch}.exe" if os == "windows" else f"vigile-worker-{os}-{arch}"
     return FileResponse(
         binary_path,
         media_type="application/octet-stream",
-        filename=f"vigile-worker-{os}-{arch}",
+        filename=filename,
         headers={"ETag": f'"{hashlib.sha256(binary_path.read_bytes()).hexdigest()}"'},
     )
 
