@@ -59,8 +59,7 @@ async def test_audit_trail_empty_db(temp_dir):
     # Create empty database to test empty cases
     db_path = os.path.join(temp_dir, "empty_audit.db")
     async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            """
+        await db.execute("""
             CREATE TABLE audit_log (
                 id TEXT PRIMARY KEY,
                 sequence INTEGER UNIQUE,
@@ -72,8 +71,7 @@ async def test_audit_trail_empty_db(temp_dir):
                 previous_hash TEXT,
                 entry_hash TEXT
             )
-            """
-        )
+            """)
         await db.commit()
 
         # 1. verify_chain on empty DB

@@ -35,7 +35,7 @@ class DatabaseConnectionPool:
             await self._pool.put(conn)
 
     async def _create_connection(self) -> aiosqlite.Connection:
-        conn = await aiosqlite.connect(self._path, timeout=getattr(self, '_timeout', 30.0))
+        conn = await aiosqlite.connect(self._path, timeout=getattr(self, "_timeout", 30.0))
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA foreign_keys=ON")
         await conn.execute("PRAGMA synchronous=NORMAL")
@@ -80,7 +80,9 @@ async def database_session() -> AsyncGenerator[aiosqlite.Connection, None]:
         await _pool.release(conn)
 
 
-async def init_db(database_path: str, timeout: float = 30.0, pool_size: int = 5) -> aiosqlite.Connection:
+async def init_db(
+    database_path: str, timeout: float = 30.0, pool_size: int = 5
+) -> aiosqlite.Connection:
     """
     Open the SQLite database and configure it for production use.
     Called once at application startup via the FastAPI lifespan.

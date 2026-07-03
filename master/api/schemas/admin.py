@@ -36,5 +36,6 @@ class RegistryPluginResponse(BaseModel):
 class RegistryResponse(BaseModel):
     """Response schema for listing registry plugins."""
 
-    plugins: list[RegistryPluginResponse] = Field(..., description="List of plugins available in the registry")
-
+    plugins: list[RegistryPluginResponse] = Field(
+        ..., description="List of plugins available in the registry"
+    )

@@ -53,8 +53,7 @@ def _with_help_type(name: str) -> str:
     help_text = HELP_LINES.get(name, "")
     type_text = TYPE_LINES.get(name, "gauge")
     return (
-        f"# HELP {METRIC_PREFIX}_{name} {help_text}\n"
-        f"# TYPE {METRIC_PREFIX}_{name} {type_text}"
+        f"# HELP {METRIC_PREFIX}_{name} {help_text}\n" f"# TYPE {METRIC_PREFIX}_{name} {type_text}"
     )
 
 
@@ -100,9 +99,7 @@ async def render_prometheus(connected_count: int, startup_time: float, version: 
     lines.append("")
 
     # 4. vigile_nodes_total (by state)
-    async with db.execute(
-        "SELECT state, COUNT(*) AS cnt FROM nodes GROUP BY state"
-    ) as cursor:
+    async with db.execute("SELECT state, COUNT(*) AS cnt FROM nodes GROUP BY state") as cursor:
         node_rows = await cursor.fetchall()
     lines.append(_with_help_type("nodes_total"))
     for node_row in node_rows:

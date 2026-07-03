@@ -47,6 +47,10 @@ class Settings(BaseModel):
     heartbeat_lost_threshold: int = int(os.getenv("HEARTBEAT_LOST_THRESHOLD", "300"))
     heartbeat_stale_threshold: int = int(os.getenv("HEARTBEAT_STALE_THRESHOLD", "86400"))
 
+    # --- Rate Limiting ---
+    rate_limit_max_requests: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "300"))
+    rate_limit_window_seconds: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+
     # --- Master Ed25519 Keypair ---
     master_key_path: str = os.getenv("MASTER_KEY_PATH", "./data/master_ed25519.key")
 
@@ -93,12 +97,23 @@ class Settings(BaseModel):
 
     # --- Allowed dependencies (X-06) ---
     allowed_dependencies: list[str] = (
-        os.getenv("ALLOWED_DEPENDENCIES", "aiosqlite,httpx,pydantic,passlib,bcrypt,fastapi,uvicorn,starlette,python-multipart,anyio,pydantic-settings").split(",")
+        os.getenv(
+            "ALLOWED_DEPENDENCIES",
+            "aiosqlite,httpx,pydantic,passlib,bcrypt,fastapi,uvicorn,starlette,python-multipart,anyio,pydantic-settings",
+        ).split(",")
         if os.getenv("ALLOWED_DEPENDENCIES")
         else [
-            "aiosqlite", "httpx", "pydantic", "passlib", "bcrypt",
-            "fastapi", "uvicorn", "starlette", "python-multipart",
-            "anyio", "pydantic-settings",
+            "aiosqlite",
+            "httpx",
+            "pydantic",
+            "passlib",
+            "bcrypt",
+            "fastapi",
+            "uvicorn",
+            "starlette",
+            "python-multipart",
+            "anyio",
+            "pydantic-settings",
         ]
     )
 
@@ -122,6 +137,8 @@ class Settings(BaseModel):
     )
     worker_binary_github_token: str = os.getenv("WORKER_BINARY_GITHUB_TOKEN", "")
     auto_update_workers: bool = os.getenv("AUTO_UPDATE_WORKERS", "false").lower() in ("true", "1")
+    offline_mode: bool = os.getenv("OFFLINE_MODE", "false").lower() == "true"
+    worker_binary_local_dir: str = os.getenv("WORKER_BINARY_LOCAL_DIR", "/var/cache/vigile/worker")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

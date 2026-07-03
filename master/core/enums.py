@@ -12,13 +12,14 @@ Conventions:
 
 from enum import Enum, IntEnum, StrEnum
 
-
 # ---------------------------------------------------------------------------
 # Node state machine
 # ---------------------------------------------------------------------------
 
+
 class NodeState(str, Enum):
     """Worker lifecycle states as stored in `nodes.state` column."""
+
     PENDING = "PENDING"
     ENROLLING = "ENROLLING"
     UNCONFIGURED = "UNCONFIGURED"
@@ -34,8 +35,10 @@ class NodeState(str, Enum):
 # Worker action names (wire protocol between Master ↔ Worker)
 # ---------------------------------------------------------------------------
 
+
 class WorkerAction(StrEnum):
     """Actions the Master can send to a Worker via intent dispatch."""
+
     PING = "PING"
     GET_STATS = "GET_STATS"
     STATUS_REPORT = "STATUS_REPORT"
@@ -52,8 +55,10 @@ class WorkerAction(StrEnum):
 # Proposal / action risk levels
 # ---------------------------------------------------------------------------
 
+
 class RiskLevel(StrEnum):
     """Risk classification for AI-proposed actions."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -64,8 +69,10 @@ class RiskLevel(StrEnum):
 # Proposal lifecycle status
 # ---------------------------------------------------------------------------
 
+
 class ProposalStatus(StrEnum):
     """State machine for ActionProposal lifecycle."""
+
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -87,8 +94,10 @@ class ProposalStatus(StrEnum):
 # WebSocket close codes (Vigile-specific range 44xx)
 # ---------------------------------------------------------------------------
 
+
 class WebSocketCloseCode(IntEnum):
     """Vigile-specific WebSocket close codes sent by the Master."""
+
     SERVER_SHUTDOWN = 1001
     REPLACED_BY_NEW = 4400
     DELETED_BY_OPERATOR = 4403
@@ -101,8 +110,10 @@ class WebSocketCloseCode(IntEnum):
 # User role hierarchy
 # ---------------------------------------------------------------------------
 
+
 class UserRole(StrEnum):
     """RBAC roles sorted by privilege level."""
+
     VIEWER = "viewer"
     OPERATOR = "operator"
     ADMIN = "admin"

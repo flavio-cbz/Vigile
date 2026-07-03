@@ -25,7 +25,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -35,13 +35,14 @@ from master.api.auth import router as auth_router
 from master.api.automations import router as automations_router
 from master.api.chat import router as chat_router
 from master.api.demo import router as demo_router
+from master.api.metrics import render_prometheus
 from master.api.nodes import router as nodes_router
 from master.api.nodes_events import router as nodes_events_router
 from master.api.services import router as services_router
 from master.api.worker_binary import router as worker_binary_router
 from master.config import settings
-from master.core.enums import NodeState
 from master.core.automation_engine import automation_engine
+from master.core.enums import NodeState
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import plugin_manager
 from master.core.rate_limiter import rate_limiter
@@ -83,9 +84,15 @@ async def auto_update_workers_task(db, nm, settings_obj) -> None:
 
     while True:
         try:
+            if settings_obj.offline_mode:
+                logger.info("Offline mode: skipping auto-update check.")
+                await asyncio.sleep(3600.0)
+                continue
+
             if settings_obj.auto_update_workers:
                 logger.info("Auto-update: Checking connected nodes for updates...")
                 from master.api.worker_binary import _fetch_manifest
+
                 try:
                     manifest = await _fetch_manifest(settings_obj)
                 except Exception as exc:
@@ -95,7 +102,9 @@ async def auto_update_workers_task(db, nm, settings_obj) -> None:
                 if manifest:
                     latest_version = manifest.get("version")
                     if latest_version:
-                        logger.info("Auto-update: Latest available worker version: %s", latest_version)
+                        logger.info(
+                            "Auto-update: Latest available worker version: %s", latest_version
+                        )
 
                         # Get all registered nodes (exclude revoked)
                         async with db.execute(
@@ -112,25 +121,41 @@ async def auto_update_workers_task(db, nm, settings_obj) -> None:
                                 if not current_version or current_version != latest_version:
                                     logger.info(
                                         "Auto-update: Node %s (%s) has version %s (latest is %s). Dispatching update...",
-                                        node_id, node["name"], current_version, latest_version
+                                        node_id,
+                                        node["name"],
+                                        current_version,
+                                        latest_version,
                                     )
                                     try:
                                         # Run intent dispatch asynchronously in a separate task so it doesn't block the loop
                                         async def do_update(nid=node_id):
                                             try:
                                                 from master.core.enums import WorkerAction
+
                                                 await nm.send_intent(
                                                     nid,
-                                                    {"action": WorkerAction.UPDATE_WORKER, "params": {}},
+                                                    {
+                                                        "action": WorkerAction.UPDATE_WORKER,
+                                                        "params": {},
+                                                    },
                                                     timeout=30.0,
                                                 )
-                                                logger.info("Auto-update: Node %s successfully updated and restarted.", nid)
+                                                logger.info(
+                                                    "Auto-update: Node %s successfully updated and restarted.",
+                                                    nid,
+                                                )
                                             except Exception as e:
-                                                logger.error("Auto-update: Node %s update failed: %s", nid, e)
+                                                logger.error(
+                                                    "Auto-update: Node %s update failed: %s", nid, e
+                                                )
 
                                         asyncio.create_task(do_update())
                                     except Exception as exc:
-                                        logger.error("Auto-update: Failed to spawn update task for node %s: %s", node_id, exc)
+                                        logger.error(
+                                            "Auto-update: Failed to spawn update task for node %s: %s",
+                                            node_id,
+                                            exc,
+                                        )
         except Exception as exc:
             logger.exception("Error in auto-update workers task: %s", exc)
 
@@ -163,8 +188,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # ── Startup ───────────────────────────────────────────────────────────
     # Load LLM settings override if exists (files I/O belongs to edge)
-    import anyio
     import json
+
+    import anyio
 
     override_path = Path(settings.database_path).parent / "settings_override.json"
 
@@ -213,7 +239,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with transaction(db):
         await db.execute(
             "UPDATE nodes SET state = ? WHERE state IN (?, ?, ?)",
-            (NodeState.LOST.value, NodeState.CONNECTED.value, NodeState.ENROLLING.value, NodeState.RECONNECTING.value)
+            (
+                NodeState.LOST.value,
+                NodeState.CONNECTED.value,
+                NodeState.ENROLLING.value,
+                NodeState.RECONNECTING.value,
+            ),
         )
     logger.info("Stale node states reset to LOST on startup.")
 
@@ -296,7 +327,7 @@ app = FastAPI(
     description=(
         "Fleet Manager for servers and homelabs. " "Zero-Trust. Zero SSH. Human-in-the-Loop AI."
     ),
-    version="0.5.0",
+    version="0.7.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -348,6 +379,8 @@ if "*" in settings.cors_origins:
 
 
 # Rate limiter (global middleware — excludes WebSocket)
+rate_limiter.max_requests = settings.rate_limit_max_requests
+rate_limiter.window = settings.rate_limit_window_seconds
 rate_limiter.middleware(app)
 logger.info(
     "Rate limiter active: %d req/%ds per IP per route",
@@ -423,11 +456,24 @@ async def health_check() -> JSONResponse:
     return JSONResponse(
         {
             "status": "ok",
-            "version": "0.5.0",
+            "version": "0.7.0",
             "uptime_seconds": round(uptime, 1),
             "connected_nodes": len(node_manager.connected_node_ids()),
         }
     )
+
+
+@app.get("/metrics", tags=["system"], summary="Prometheus metrics")
+async def metrics() -> PlainTextResponse:
+    """
+    Expose Prometheus-format metrics for scraping.
+    Returns text/plain content compatible with the Prometheus exposition format.
+    """
+    connected_count = len(node_manager.connected_node_ids())
+    startup_time = getattr(app.state, "startup_time", time.time())
+    version = "0.7.0"
+    body = await render_prometheus(connected_count, startup_time, version)
+    return PlainTextResponse(content=body, media_type="text/plain; version=0.0.4")
 
 
 # ---------------------------------------------------------------------------

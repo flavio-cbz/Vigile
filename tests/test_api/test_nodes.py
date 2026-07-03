@@ -658,7 +658,11 @@ async def test_update_worker_success(client: AsyncClient, db, auth_headers):
     await db.commit()
 
     # Mock node manager's send_intent to return success
-    with mock.patch.object(node_manager, "send_intent", return_value={"success": True, "output": "updated successfully"}) as mock_send:
+    with mock.patch.object(
+        node_manager,
+        "send_intent",
+        return_value={"success": True, "output": "updated successfully"},
+    ) as mock_send:
         response = await client.post(
             "/api/nodes/n-update-1/update",
             headers=auth_headers("admin"),

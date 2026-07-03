@@ -19,7 +19,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from master.api.deps import get_db, require_role
+from master.api.deps import require_role
 from master.api.schemas.automations import (
     AutomationLogResponse,
     AutomationRuleCreate,
@@ -74,9 +74,7 @@ async def _row_to_response(row: dict) -> AutomationRuleResponse:
 
 async def _get_rule_or_404(rule_id: str) -> dict:
     db = get_db_conn()
-    async with db.execute(
-        "SELECT * FROM automation_rules WHERE id = ?", (rule_id,)
-    ) as cursor:
+    async with db.execute("SELECT * FROM automation_rules WHERE id = ?", (rule_id,)) as cursor:
         row = await cursor.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rule not found.")
@@ -424,6 +422,7 @@ async def test_rule(
     rule_dict["cooldown_seconds"] = 0  # bypass cooldown for manual test
 
     import asyncio
+
     asyncio.create_task(
         automation_engine._fire_rule(rule_dict, body.node_id, trigger_data, db),
         name=f"automation:test:{rule_id}",

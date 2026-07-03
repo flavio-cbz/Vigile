@@ -6,13 +6,13 @@ Communicates with the Master parent process over stdin/stdout using JSON lines.
 Logs and errors are output to stderr so they don't corrupt the JSON stream.
 """
 
-import sys
-import os
-import json
 import asyncio
-import logging
 import importlib.util
-from typing import Any, Callable
+import json
+import logging
+import os
+import sys
+from typing import Any, Callable, cast
 
 # Configure logging to go to stderr so stdout is purely JSON-RPC messages
 logging.basicConfig(
@@ -25,6 +25,7 @@ logger = logging.getLogger("plugin_worker")
 
 class CursorProxy:
     """Mock SQLite cursor returned by DatabaseProxy.execute."""
+
     def __init__(self, result_data: dict):
         self.rowcount = result_data.get("rowcount", -1)
         self.lastrowid = result_data.get("lastrowid")
@@ -55,6 +56,7 @@ class DatabaseProxy:
     """
     Proxies database execute and commit calls back to the parent process.
     """
+
     def __init__(self, call_id: str, request_fn: Callable):
         self._call_id = call_id
         self._request_fn = request_fn
@@ -73,6 +75,7 @@ class WorkerPluginManager:
     """
     Local PluginManager stub passed to the plugin's register() function.
     """
+
     def __init__(self):
         self._hooks: dict[str, Callable] = {}
 
@@ -126,12 +129,9 @@ class PluginWorker:
         fut = asyncio.get_running_loop().create_future()
         self._pending_db_calls[db_call_id] = fut
 
-        await self.send_to_parent({
-            "type": op_type,
-            "call_id": call_id,
-            "db_call_id": db_call_id,
-            **kwargs
-        })
+        await self.send_to_parent(
+            {"type": op_type, "call_id": call_id, "db_call_id": db_call_id, **kwargs}
+        )
 
         try:
             return await fut
@@ -141,18 +141,19 @@ class PluginWorker:
     async def run(self) -> None:
         """Main JSON-RPC reading loop on stdin."""
         loop = asyncio.get_running_loop()
-        queue = asyncio.Queue()
+        queue: asyncio.Queue[str] = asyncio.Queue()
 
         def read_stdin():
             try:
                 for line in sys.stdin:
                     loop.call_soon_threadsafe(queue.put_nowait, line)
-            except Exception as e:
+            except Exception:
                 logger.exception("Error in stdin reader thread")
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, "")
 
         import threading
+
         reader_thread = threading.Thread(target=read_stdin, daemon=True)
         reader_thread.start()
 
@@ -184,31 +185,31 @@ class PluginWorker:
 
                 logger.warning("Unknown message type: %s", msg_type)
 
-            except Exception as e:
+            except Exception:
                 logger.exception("Failed to parse/handle message line: %r", line)
 
     async def handle_call_hook(self, msg: dict) -> None:
         """Invokes the requested hook callback."""
-        call_id = msg.get("call_id")
-        hook_name = msg.get("hook_name")
+        call_id = cast(str, msg.get("call_id"))
+        hook_name = cast(str, msg.get("hook_name"))
         kwargs = msg.get("kwargs", {})
 
         fn = self.pm._hooks.get(hook_name)
         if fn is None:
             # Hook not registered by this plugin
-            await self.send_to_parent({
-                "type": "response",
-                "call_id": call_id,
-                "status": "success",
-                "result": None
-            })
+            await self.send_to_parent(
+                {"type": "response", "call_id": call_id, "status": "success", "result": None}
+            )
             return
 
         # If the hook expects a 'db' parameter, pass our DatabaseProxy
         import inspect
+
         sig = inspect.signature(fn)
         if "db" in sig.parameters:
-            kwargs["db"] = DatabaseProxy(call_id, lambda op, **kw: self.db_request(call_id, op, **kw))
+            kwargs["db"] = DatabaseProxy(
+                call_id, lambda op, **kw: self.db_request(call_id, op, **kw)
+            )
 
         try:
             if asyncio.iscoroutinefunction(fn):
@@ -216,20 +217,14 @@ class PluginWorker:
             else:
                 res = fn(**kwargs)
 
-            await self.send_to_parent({
-                "type": "response",
-                "call_id": call_id,
-                "status": "success",
-                "result": res
-            })
+            await self.send_to_parent(
+                {"type": "response", "call_id": call_id, "status": "success", "result": res}
+            )
         except Exception as e:
             logger.exception("Exception raised during hook '%s' execution", hook_name)
-            await self.send_to_parent({
-                "type": "response",
-                "call_id": call_id,
-                "status": "error",
-                "error": str(e)
-            })
+            await self.send_to_parent(
+                {"type": "response", "call_id": call_id, "status": "error", "error": str(e)}
+            )
 
 
 def main():
@@ -243,7 +238,7 @@ def main():
     worker = PluginWorker(plugin_name, plugin_path)
     try:
         worker.load_and_register()
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to initialize plugin worker")
         sys.exit(2)
 

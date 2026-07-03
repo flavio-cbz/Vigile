@@ -15,6 +15,32 @@ import (
 	"time"
 )
 
+var ignoredDiskFilesystemTypes = map[string]struct{}{
+	"autofs":       {},
+	"binfmt_misc":  {},
+	"bpf":          {},
+	"cgroup":       {},
+	"cgroup2":      {},
+	"configfs":     {},
+	"debugfs":      {},
+	"devpts":       {},
+	"devtmpfs":     {},
+	"fusectl":      {},
+	"hugetlbfs":    {},
+	"mqueue":       {},
+	"nsfs":         {},
+	"overlay":      {},
+	"pstore":       {},
+	"proc":         {},
+	"ramfs":        {},
+	"rpc_pipefs":   {},
+	"securityfs":   {},
+	"squashfs":     {},
+	"sysfs":        {},
+	"tmpfs":        {},
+	"tracefs":      {},
+}
+
 // MetricsSnapshot contains the system metrics collected from /proc.
 type MetricsSnapshot struct {
 	CPUPercent    float64 `json:"cpu_percent"`
@@ -41,6 +67,7 @@ func collectMetrics() MetricsSnapshot {
 	if runtime.GOOS == "darwin" {
 		return collectDarwinMetrics(now)
 	}
+	diskTotal, diskUsed, diskPercent := getDiskMetrics()
 	return MetricsSnapshot{
 		CPUPercent:    getCPUPercent(),
 		CPULoad1m:     getLoadAvg(0),
@@ -52,9 +79,9 @@ func collectMetrics() MetricsSnapshot {
 		MemPercent:    getMemPercent(),
 		SwapTotal:     getMemField("SwapTotal"),
 		SwapUsed:      getSwapUsed(),
-		DiskTotal:     getDiskTotal(),
-		DiskUsed:      getDiskUsed(),
-		DiskPercent:   getDiskPercent(),
+		DiskTotal:     diskTotal,
+		DiskUsed:      diskUsed,
+		DiskPercent:   diskPercent,
 		UptimeSeconds: getUptime(),
 		Processes:     getProcessCount(),
 		CollectedAt:   now,
@@ -100,7 +127,7 @@ func getCPUPercent() float64 {
 		if diffTotal == 0 {
 			return 0
 		}
-		return math.Round((1-float64(diffIdle)/float64(diffTotal))*100) / 100
+		return math.Round((1-float64(diffIdle)/float64(diffTotal))*1000) / 10
 	}
 	return 0
 }
@@ -171,33 +198,84 @@ func getSwapUsed() int64 {
 	return total - free
 }
 
-// ── Disk (root partition) ────────────────────────────────────────────
+// ── Disk (all mounted filesystems on Linux, root fallback elsewhere) ──────
 
-func getDiskTotal() int64 {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return 0
+func getDiskMetrics() (int64, int64, float64) {
+	if runtime.GOOS == "darwin" {
+		return getDarwinDiskMetrics()
 	}
-	return int64(stat.Blocks) * int64(stat.Bsize)
+	return getLinuxDiskMetrics()
 }
 
-func getDiskUsed() int64 {
+func getDarwinDiskMetrics() (int64, int64, float64) {
+	return getRootDiskMetrics("/")
+}
+
+func getLinuxDiskMetrics() (int64, int64, float64) {
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return getRootDiskMetrics("/")
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	seenMounts := make(map[string]struct{})
+	var total, used int64
+
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 {
+			continue
+		}
+		mountPoint := unescapeMountField(fields[1])
+		fsType := fields[2]
+		if _, ignored := ignoredDiskFilesystemTypes[fsType]; ignored {
+			continue
+		}
+		if _, exists := seenMounts[mountPoint]; exists {
+			continue
+		}
+		seenMounts[mountPoint] = struct{}{}
+
+		mountTotal, mountUsed, _ := getRootDiskMetrics(mountPoint)
+		if mountTotal <= 0 {
+			continue
+		}
+		total += mountTotal
+		used += mountUsed
+	}
+
+	if total <= 0 {
+		return getRootDiskMetrics("/")
+	}
+	return total, used, math.Round(float64(used)/float64(total)*1000) / 10
+}
+
+func getRootDiskMetrics(path string) (int64, int64, float64) {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return 0
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, 0, 0
 	}
 	total := int64(stat.Blocks) * int64(stat.Bsize)
 	free := int64(stat.Bavail) * int64(stat.Bsize)
-	return total - free
+	used := total - free
+	if used < 0 {
+		used = 0
+	}
+	if total == 0 {
+		return 0, 0, 0
+	}
+	return total, used, math.Round(float64(used)/float64(total)*1000) / 10
 }
 
-func getDiskPercent() float64 {
-	total := getDiskTotal()
-	if total == 0 {
-		return 0
-	}
-	used := getDiskUsed()
-	return math.Round(float64(used)/float64(total)*1000) / 10
+func unescapeMountField(value string) string {
+	replacer := strings.NewReplacer(
+		`\040`, " ",
+		`\011`, "\t",
+		`\012`, "\n",
+		`\134`, `\`,
+	)
+	return replacer.Replace(value)
 }
 
 // ── System ───────────────────────────────────────────────────────────
@@ -283,9 +361,7 @@ func buildStatusReport() map[string]interface{} {
 
 func collectDarwinMetrics(now float64) MetricsSnapshot {
 	cores := runtime.NumCPU()
-	diskTotal := getDiskTotal()
-	diskUsed := getDiskUsed()
-	diskPercent := getDiskPercent()
+	diskTotal, diskUsed, diskPercent := getDiskMetrics()
 
 	cpuPercent := getDarwinCPUPercent()
 	load1, load5, load15 := getDarwinLoadAvg()

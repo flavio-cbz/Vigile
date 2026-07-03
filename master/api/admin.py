@@ -44,7 +44,25 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 def _resolve_plugin_stem(plugin_id: str, plugins_dir: str) -> str:
-    for candidate in (plugin_file_stem(plugin_id), plugin_id):
+    # Try progressively normalized candidates to tolerate display names,
+    # title-cased labels, or mixed input as the plugin_id.
+    candidates = [
+        plugin_file_stem(plugin_id),
+        plugin_id,
+        plugin_id.lower(),
+        plugin_id.replace(" ", "_"),
+        plugin_id.lower().replace(" ", "_"),
+        plugin_id.replace("-", "_"),
+        plugin_id.lower().replace(" ", "_").replace("-", "_"),
+    ]
+    seen: set[str] = set()
+    unique_candidates: list[str] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique_candidates.append(c)
+
+    for candidate in unique_candidates:
         if os.path.isfile(os.path.join(plugins_dir, f"{candidate}.py")):
             return candidate
     return plugin_file_stem(plugin_id)
@@ -358,7 +376,11 @@ async def list_plugins(
     )
 
 
-@router.get("/plugins/registry", response_model=RegistryResponse, summary="Get available plugins from registry")
+@router.get(
+    "/plugins/registry",
+    response_model=RegistryResponse,
+    summary="Get available plugins from registry",
+)
 async def get_plugin_registry(
     claims=Depends(require_role("admin")),
     settings=Depends(get_settings),
@@ -404,12 +426,14 @@ async def get_plugin_registry(
             if r.status_code == 200:
                 data = r.json()
                 if isinstance(data, dict) and "plugins" in data:
-                    return RegistryResponse(plugins=data["plugins"])
+                    return RegistryResponse(
+                        plugins=[RegistryPluginResponse(**p) for p in data["plugins"]]
+                    )
             logger.warning("Remote registry returned status %d. Using fallback.", r.status_code)
     except Exception as e:
         logger.warning("Failed to fetch remote registry (%s). Using fallback.", e)
 
-    return RegistryResponse(plugins=fallback_data["plugins"])
+    return RegistryResponse(plugins=[RegistryPluginResponse(**p) for p in fallback_data["plugins"]])
 
 
 @router.post("/plugins/registry/{plugin_id}/install", summary="Install a plugin from registry")
@@ -441,6 +465,7 @@ async def install_plugin(
 
     # 2. Fetch the source code
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(target_plugin.download_url)
@@ -469,6 +494,7 @@ async def install_plugin(
 
     # 4. AST validation for register contract
     import ast
+
     try:
         tree = ast.parse(source)
         has_register = False
@@ -491,7 +517,9 @@ async def install_plugin(
 
     # 5. Sanitize and build paths
     if "/" in plugin_id or "\\" in plugin_id or ".." in plugin_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nom d'extension invalide.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Nom d'extension invalide."
+        )
 
     plugin_name = plugin_id
     plugin_path = os.path.join(settings.plugins_dir, f"{plugin_name}.py")
@@ -558,6 +586,8 @@ async def upload_plugin(
             detail="Installation d'extensions non autorisée en mode démonstration.",
         )
 
+    if file.filename is None:
+        raise HTTPException(status_code=400, detail="Nom de fichier manquant.")
     if not file.filename.endswith(".py"):
         raise HTTPException(
             status_code=400, detail="Seuls les fichiers Python (.py) sont autorisés."
@@ -591,11 +621,12 @@ async def upload_plugin(
             raise e
         raise HTTPException(status_code=400, detail=f"Validation AST échouée: {str(e)}")
 
-    plugin_name = file.filename[:-3]
+    filename = file.filename
+    plugin_name = filename[:-3]
     if "/" in plugin_name or "\\" in plugin_name or ".." in plugin_name:
         raise HTTPException(status_code=400, detail="Nom de fichier invalide.")
 
-    plugin_path = os.path.join(settings.plugins_dir, file.filename)
+    plugin_path = os.path.join(settings.plugins_dir, filename)
     os.makedirs(settings.plugins_dir, exist_ok=True)
 
     import anyio
@@ -628,7 +659,10 @@ async def upload_plugin(
         )
 
     await log_action(
-        db, user_id=claims["sub"], action=AuditAction.UPLOAD_PLUGIN, details={"plugin_id": plugin_name}
+        db,
+        user_id=claims["sub"],
+        action=AuditAction.UPLOAD_PLUGIN,
+        details={"plugin_id": plugin_name},
     )
 
     return JSONResponse(
@@ -780,7 +814,10 @@ async def delete_plugin(
 
     # 4. Log audit
     await log_action(
-        db, user_id=claims["sub"], action=AuditAction.DELETE_PLUGIN, details={"plugin_id": plugin_id}
+        db,
+        user_id=claims["sub"],
+        action=AuditAction.DELETE_PLUGIN,
+        details={"plugin_id": plugin_id},
     )
 
     return JSONResponse(

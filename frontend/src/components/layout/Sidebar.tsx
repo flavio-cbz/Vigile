@@ -155,7 +155,7 @@ export const Sidebar: React.FC = () => {
               : 'px-2.5 py-2 mx-2 xl:px-3.5 xl:py-2.5 xl:mx-3'
           } ${
             isActive
-              ? 'text-accent bg-accent-soft/80 shadow-[0_0_12px_rgba(99,102,241,0.05)] border border-accent/15'
+              ? 'text-accent bg-accent-soft/80 shadow-[0_0_12px_var(--color-accent-glow)] border border-accent/15'
               : 'text-text-2 hover:text-text-1 hover:bg-surface-2/40 border border-transparent'
           }`}
         >
@@ -252,7 +252,7 @@ export const Sidebar: React.FC = () => {
           />
         )}
         <nav
-          className={`fixed top-0 left-0 h-full w-[260px] bg-surface/85 backdrop-blur-md z-50 flex flex-col transition-transform duration-300 ease-in-out overflow-hidden border-r border-border-strong/30 shadow-[0_0_24px_rgba(0,0,0,0.5)] ${
+          className={`fixed top-0 left-0 h-full w-[260px] bg-surface/85 backdrop-blur-md z-50 flex flex-col transition-transform duration-300 ease-in-out overflow-hidden border-r border-border-strong/30 shadow-[0_0_24px_var(--shadow-sidebar)] ${
             isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
@@ -317,7 +317,7 @@ export const Sidebar: React.FC = () => {
 
   return (
     <div
-      className={`relative h-full bg-surface/75 backdrop-blur-md border-r border-border-strong/30 flex flex-col shrink-0 select-none z-40 transition-[width] duration-250 ease-out shadow-[4px_0_24px_rgba(0,0,0,0.05)] ${
+      className={`relative h-full bg-surface/75 backdrop-blur-md border-r border-border-strong/30 flex flex-col shrink-0 select-none z-40 transition-[width] duration-250 ease-out shadow-[4px_0_24px_var(--shadow-sidebar)] ${
         collapsed ? 'sidebar-collapsed' : ''
       }`}
       style={{ width: 'var(--sidebar-width)' }}
@@ -402,7 +402,7 @@ export const Sidebar: React.FC = () => {
       {/* Floating toggle button - outside the overflow-hidden wrapper so it doesn't get clipped! */}
       <button
         onClick={toggleSidebarCollapse}
-        className="absolute top-7 right-0 translate-x-1/2 z-50 w-6 h-6 rounded-full border border-border-strong/80 bg-surface-2/95 backdrop-blur-md flex items-center justify-center text-text-3 hover:text-text-1 hover:border-accent/40 shadow-[0_2px_8px_rgba(0,0,0,0.3)] hover:scale-105 cursor-pointer transition-all duration-200"
+        className="absolute top-7 right-0 translate-x-1/2 z-50 w-6 h-6 rounded-full border border-border-strong/80 bg-surface-2/95 backdrop-blur-md flex items-center justify-center text-text-3 hover:text-text-1 hover:border-accent/40 shadow-[0_2px_8px_var(--shadow-toggle)] hover:scale-105 cursor-pointer transition-all duration-200"
         title={collapsed ? t('sidebar.toggle_expand') : t('sidebar.toggle_collapse')}
       >
         {collapsed ? (

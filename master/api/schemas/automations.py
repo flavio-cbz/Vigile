@@ -5,19 +5,28 @@ Pydantic models for the automation rules and logs REST API.
 """
 
 from typing import Any, Literal
-from pydantic import BaseModel, Field, field_validator
 
+from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Trigger configs
 # ---------------------------------------------------------------------------
 
+
 class MetricThresholdTrigger(BaseModel):
     """Trigger configuration for 'metric_threshold' type."""
+
     metric: Literal[
-        "cpu_percent", "cpu_load_1m", "cpu_load_5m", "cpu_load_15m",
-        "mem_percent", "disk_percent", "uptime_seconds", "processes",
-        "mem_used_bytes", "disk_used_bytes",
+        "cpu_percent",
+        "cpu_load_1m",
+        "cpu_load_5m",
+        "cpu_load_15m",
+        "mem_percent",
+        "disk_percent",
+        "uptime_seconds",
+        "processes",
+        "mem_used_bytes",
+        "disk_used_bytes",
     ]
     operator: Literal["gt", "lt", "gte", "lte", "eq"]
     threshold: float
@@ -25,12 +34,14 @@ class MetricThresholdTrigger(BaseModel):
 
 class NodeStateTrigger(BaseModel):
     """Trigger configuration for 'node_state' type."""
+
     state: Literal["CONNECTED", "LOST", "STALE", "DISCONNECTED", "RECONNECTING"]
 
 
 # ---------------------------------------------------------------------------
 # Condition configs
 # ---------------------------------------------------------------------------
+
 
 class AlwaysCondition(BaseModel):
     type: Literal["always"] = "always"
@@ -61,6 +72,7 @@ class TimeWindowCondition(BaseModel):
 # Action configs
 # ---------------------------------------------------------------------------
 
+
 class SendIntentAction(BaseModel):
     type: Literal["send_intent"] = "send_intent"
     action: str = Field(..., description="Worker intent action name (e.g. RESTART_SERVICE)")
@@ -85,6 +97,7 @@ class LogMessageAction(BaseModel):
 # ---------------------------------------------------------------------------
 # Rule CRUD
 # ---------------------------------------------------------------------------
+
 
 class AutomationRuleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)

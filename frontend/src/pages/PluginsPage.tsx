@@ -11,6 +11,7 @@ import { usePageTitle } from '../hooks/usePageTitle';
 import { clsx } from 'clsx';
 
 interface PluginInfo {
+  id: string;
   name: string;
   path: string;
   module: string;
@@ -261,7 +262,7 @@ export const PluginsPage: React.FC = () => {
           {plugins.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {plugins.map((plugin) => {
-                const isLoaded = loadedNames.includes(plugin.name);
+                const isLoaded = loadedNames.includes(plugin.id);
                 return (
                   <div
                     key={plugin.name}
@@ -295,12 +296,12 @@ export const PluginsPage: React.FC = () => {
                       </div>
                       {isAdmin && (
                         <button
-                          onClick={() => handleToggle(plugin.name)}
-                          disabled={toggling === plugin.name}
+                          onClick={() => handleToggle(plugin.id)}
+                          disabled={toggling === plugin.id}
                           className="shrink-0 p-1 rounded hover:bg-surface-3 transition-colors cursor-pointer disabled:opacity-50"
                           title={isLoaded ? t('plugins.deactivate') : t('plugins.activate')}
                         >
-                          {toggling === plugin.name ? (
+                          {toggling === plugin.id ? (
                             <Spinner size="sm" />
                           ) : isLoaded ? (
                             <ToggleRight className="w-4 h-4 text-accent" />
@@ -369,7 +370,7 @@ export const PluginsPage: React.FC = () => {
           {registryPlugins.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {registryPlugins.map((plugin) => {
-                const isInstalled = plugins.some(p => p.name === plugin.id);
+                const isInstalled = plugins.some(p => p.id === plugin.id);
                 const isInstalling = installingPlugin === plugin.id;
 
                 return (

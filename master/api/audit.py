@@ -86,9 +86,7 @@ async def list_audit_entries(
     sql = (
         "SELECT id, sequence, timestamp, user_id, action, node_id, "
         "details_json, previous_hash, entry_hash "
-        "FROM audit_log "
-        + where
-        + " ORDER BY sequence DESC "
+        "FROM audit_log " + where + " ORDER BY sequence DESC "
         "LIMIT ? OFFSET ?"
     )
     response_entries = []

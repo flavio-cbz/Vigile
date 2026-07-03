@@ -26,8 +26,10 @@ from master.api.demo_data import (
     is_demo,
 )
 from master.api.deps import DB, get_node_manager, require_role
+from master.api.rate_limits import WORKER_CONTROL_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
+from master.core.rate_limiter import rate_limiter
 from master.plugins.docker_plugin import parse_container_list
 from master.plugins.systemd_plugin import (
     parse_service_list,
@@ -122,6 +124,7 @@ class ContainerActionResponse(BaseModel):
     "/services",
     response_model=ServiceListResponse,
     summary="List systemd services on a node (Operator+)",
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def list_services(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -158,6 +161,7 @@ async def list_services(
     "/services/{service_name}",
     response_model=ServiceStatusResponse,
     summary="Get service status (Operator+)",
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def get_service_status(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -210,6 +214,7 @@ async def get_service_status(
     response_model=ServiceActionResponse,
     summary="Restart a systemd service (Admin only)",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def restart_service(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -258,6 +263,7 @@ async def restart_service(
     "/containers",
     response_model=ContainerListResponse,
     summary="List Docker containers on a node (Operator+)",
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def list_containers(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -298,6 +304,7 @@ async def list_containers(
     response_model=ContainerActionResponse,
     summary="Restart a Docker container (Admin only)",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def restart_container(
     node_id: Annotated[str, Path(description="Node UUID")],

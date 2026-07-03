@@ -163,7 +163,9 @@ async def _run_enrollment(
 
     # ── Step 1.5: Reconnect mode — skip JOIN_TOKEN + Ed25519 challenge ─────
     if reconnect and worker_token:
-        return await _run_reconnect(websocket, db, remote, worker_token, public_key_b64, fingerprint)
+        return await _run_reconnect(
+            websocket, db, remote, worker_token, public_key_b64, fingerprint
+        )
 
     # Regular enrollment: require join_token
     if not join_token:
@@ -657,7 +659,9 @@ async def _run_operational(
 
         elif msg_type == "STATUS_REPORT":
             # Normalize and store metrics snapshot via plugin system
-            snapshot = await plugin_manager.async_call_first("normalize_status_report", raw_report=msg)
+            snapshot = await plugin_manager.async_call_first(
+                "normalize_status_report", raw_report=msg
+            )
             if snapshot:
                 await plugin_manager.async_call(
                     "on_status_report", node_id=node_id, snapshot=snapshot, db=db

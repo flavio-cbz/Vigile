@@ -19,7 +19,6 @@ import pytest
 
 from master.core.automation_engine import AutomationEngine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -46,7 +45,8 @@ def make_rule(
         "id": rule_id,
         "name": f"Test Rule {rule_id}",
         "trigger_type": trigger_type,
-        "trigger_config": trigger_config or {"metric": "cpu_percent", "operator": "gt", "threshold": 50.0},
+        "trigger_config": trigger_config
+        or {"metric": "cpu_percent", "operator": "gt", "threshold": 50.0},
         "conditions": conditions or [],
         "actions": actions or [{"type": "log_message", "message": "test"}],
         "cooldown_seconds": cooldown_seconds,
@@ -90,6 +90,7 @@ def test_metric_trigger_dict_snapshot(engine: AutomationEngine):
 
 def test_metric_trigger_pydantic_like_snapshot(engine: AutomationEngine):
     """Snapshot can also be an object with attributes (Pydantic model)."""
+
     class FakeSnapshot:
         cpu_percent = 95.0
         mem_percent = 50.0

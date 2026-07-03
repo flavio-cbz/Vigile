@@ -134,7 +134,7 @@ class RateLimiter:
 
         async def _dep(request: Request) -> None:
             client_ip = self.client_ip(request)
-            key = f"{client_ip}:{request.url.path}"
+            key = f"dep:{client_ip}:{request.url.path}"
 
             allowed = await self.is_allowed(key, max_requests=effective_max)
             if not allowed:

@@ -119,6 +119,23 @@ export async function api<T = unknown>(
       }
 
       if (!response.ok) {
+        if (response.status === 429) {
+          const errorText = await response.text().catch(() => 'Erreur inconnue');
+          let displayMessage = 'Trop de requêtes. Veuillez patienter quelques secondes.';
+          try {
+            const parsed = JSON.parse(errorText);
+            if (parsed && typeof parsed === 'object') {
+              displayMessage = parsed.detail || parsed.error || displayMessage;
+            }
+          } catch {
+          }
+          if (!skipToast) {
+            useToastStore.getState().addToast('warning', 'Limite de débit atteinte', displayMessage);
+          }
+          const error = new Error(displayMessage);
+          (error as any)._toasted = true;
+          throw error;
+        }
         if (response.status >= 500 && attempt < maxAttempts) {
           continue;
         }

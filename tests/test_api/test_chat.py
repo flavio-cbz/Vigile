@@ -1,3 +1,4 @@
+import json
 import unittest.mock as mock
 
 import pytest
@@ -56,6 +57,14 @@ async def _insert_proposal(db, proposal):
             data["created_at"],
             data["updated_at"],
         ),
+    )
+    await db.commit()
+
+
+async def _set_cached_containers(db, node_id: str, containers: list[dict]) -> None:
+    await db.execute(
+        "UPDATE nodes SET cached_containers_json = ? WHERE id = ?",
+        (json.dumps(containers), node_id),
     )
     await db.commit()
 
@@ -187,6 +196,244 @@ async def test_approve_proposal(db, client, auth_headers):
         assert d["approved_by"] == "test-user"
         assert d["executed_at"] is not None
         assert d.get("result") is not None
+    finally:
+        node_manager.send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_approve_restart_container_fuzzy_resolves_from_cache(db, client, auth_headers):
+    """A misspelled container target is silently resolved from cached containers."""
+    node_id = await _setup_node(db, "test-container-fuzzy")
+    await _set_cached_containers(
+        db,
+        node_id,
+        [
+            {"id": "abc123def456", "name": "plex", "image": "plex:latest", "state": "running"},
+            {"id": "fff111222333", "name": "postgres", "image": "postgres:15", "state": "running"},
+        ],
+    )
+    p = ActionProposal(
+        node_id=node_id,
+        action="RESTART_CONTAINER",
+        params={"container_id": "plax"},
+        reasoning="restart requested",
+    )
+    await _insert_proposal(db, p)
+
+    sent_intents = []
+    orig = node_manager.send_intent
+
+    async def mock_send(node_id_arg, intent, *, timeout=30.0):
+        sent_intents.append(intent)
+        return {"success": True, "output": "Container plex restarted", "error": ""}
+
+    node_manager.send_intent = mock_send
+    try:
+        resp = await client.post(
+            f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
+        )
+        assert resp.status_code == 200
+        d = resp.json()
+        assert d["status"] == "EXECUTED"
+        assert d["params"] == {"container_id": "plex", "target": "plex"}
+        assert sent_intents == [
+            {"action": "RESTART_CONTAINER", "params": {"container_id": "plex", "target": "plex"}}
+        ]
+    finally:
+        node_manager.send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_approve_restart_container_exact_name_and_id_remain_stable(db, client, auth_headers):
+    """Exact matches by container name or ID are not fuzzy-rewritten."""
+    node_id = await _setup_node(db, "test-container-exact")
+    await _set_cached_containers(
+        db,
+        node_id,
+        [
+            {"id": "abc123def456", "name": "plex", "image": "plex:latest", "state": "running"},
+        ],
+    )
+    by_name = ActionProposal(
+        node_id=node_id,
+        action="RESTART_CONTAINER",
+        params={"name": "plex"},
+        reasoning="restart by name",
+    )
+    by_id = ActionProposal(
+        node_id=node_id,
+        action="RESTART_CONTAINER",
+        params={"container_id": "abc123def456"},
+        reasoning="restart by id",
+    )
+    await _insert_proposal(db, by_name)
+    await _insert_proposal(db, by_id)
+
+    sent_targets = []
+    orig = node_manager.send_intent
+
+    async def mock_send(node_id_arg, intent, *, timeout=30.0):
+        sent_targets.append(intent["params"]["container_id"])
+        return {"success": True, "output": "restarted", "error": ""}
+
+    node_manager.send_intent = mock_send
+    try:
+        name_resp = await client.post(
+            f"/api/chat/proposals/{by_name.id}/approve", headers=auth_headers("admin")
+        )
+        id_resp = await client.post(
+            f"/api/chat/proposals/{by_id.id}/approve", headers=auth_headers("admin")
+        )
+        assert name_resp.status_code == 200
+        assert id_resp.status_code == 200
+        assert sent_targets == ["plex", "abc123def456"]
+        assert name_resp.json()["params"] == {"container_id": "plex", "target": "plex"}
+        assert id_resp.json()["params"] == {
+            "container_id": "abc123def456",
+            "target": "abc123def456",
+        }
+    finally:
+        node_manager.send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_approve_restart_container_ambiguous_target_fails_without_restart(
+    db, client, auth_headers
+):
+    """Ambiguous fuzzy matches fail closed and do not send RESTART_CONTAINER."""
+    node_id = await _setup_node(db, "test-container-ambiguous")
+    await _set_cached_containers(
+        db,
+        node_id,
+        [
+            {"id": "aaa111", "name": "plex", "image": "plex:latest", "state": "running"},
+            {"id": "bbb222", "name": "plux", "image": "plux:latest", "state": "running"},
+        ],
+    )
+    p = ActionProposal(
+        node_id=node_id,
+        action="RESTART_CONTAINER",
+        params={"target": "plax"},
+        reasoning="restart requested",
+    )
+    await _insert_proposal(db, p)
+
+    sent_intents = []
+    orig = node_manager.send_intent
+
+    async def mock_send(node_id_arg, intent, *, timeout=30.0):
+        sent_intents.append(intent)
+        return {"success": True, "output": "should not happen", "error": ""}
+
+    node_manager.send_intent = mock_send
+    try:
+        resp = await client.post(
+            f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
+        )
+        assert resp.status_code == 200
+        d = resp.json()
+        assert d["status"] == "FAILED"
+        assert "Ambiguous container target" in d["result"]["error"]
+        assert sent_intents == []
+    finally:
+        node_manager.send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_approve_restart_container_fallbacks_to_live_container_list(
+    db, client, auth_headers
+):
+    """Empty cache falls back to LIST_CONTAINERS before restarting the resolved target."""
+    node_id = await _setup_node(db, "test-container-live-fallback")
+    await _set_cached_containers(db, node_id, [])
+    p = ActionProposal(
+        node_id=node_id,
+        action="RESTART_CONTAINER",
+        params={"container": "plax"},
+        reasoning="restart requested",
+    )
+    await _insert_proposal(db, p)
+
+    sent_actions = []
+    orig = node_manager.send_intent
+
+    async def mock_send(node_id_arg, intent, *, timeout=30.0):
+        sent_actions.append(intent["action"])
+        if intent["action"] == "LIST_CONTAINERS":
+            return {
+                "success": True,
+                "output": json.dumps(
+                    [
+                        {
+                            "id": "abc123def456",
+                            "name": "plex",
+                            "image": "plex:latest",
+                            "state": "running",
+                            "ports": [],
+                        }
+                    ]
+                ),
+                "error": "",
+            }
+        return {"success": True, "output": "Container plex restarted", "error": ""}
+
+    node_manager.send_intent = mock_send
+    try:
+        resp = await client.post(
+            f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
+        )
+        assert resp.status_code == 200
+        d = resp.json()
+        assert d["status"] == "EXECUTED"
+        assert d["params"] == {"container_id": "plex", "target": "plex"}
+        assert sent_actions == ["LIST_CONTAINERS", "RESTART_CONTAINER"]
+    finally:
+        node_manager.send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_approve_restart_container_audit_target_uses_container_id(
+    db, client, auth_headers
+):
+    """The approval audit target includes normalized container_id details."""
+    node_id = await _setup_node(db, "test-container-audit")
+    await _set_cached_containers(
+        db,
+        node_id,
+        [{"id": "abc123def456", "name": "plex", "image": "plex:latest", "state": "running"}],
+    )
+    p = ActionProposal(
+        node_id=node_id,
+        action="RESTART_CONTAINER",
+        params={"container_id": "plax"},
+        reasoning="restart requested",
+    )
+    await _insert_proposal(db, p)
+
+    orig = node_manager.send_intent
+
+    async def mock_send(node_id_arg, intent, *, timeout=30.0):
+        return {"success": True, "output": "Container plex restarted", "error": ""}
+
+    node_manager.send_intent = mock_send
+    try:
+        resp = await client.post(
+            f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
+        )
+        assert resp.status_code == 200
+
+        async with db.execute(
+            """
+            SELECT details_json FROM audit_log
+            WHERE action = 'PROPOSAL_APPROVED' AND node_id = ?
+            ORDER BY sequence DESC LIMIT 1
+            """,
+            (node_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        details = json.loads(row["details_json"])
+        assert details["target"] == "plex"
     finally:
         node_manager.send_intent = orig
 

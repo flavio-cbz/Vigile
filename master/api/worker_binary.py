@@ -335,6 +335,24 @@ async def get_worker_binary(
 ) -> Response:
     _validate_os_arch(os, arch)
 
+    # Offline mode: serve from local directory
+    if settings.offline_mode:
+        local_dir = Path(settings.worker_binary_local_dir) / os / arch
+        binary_path = local_dir / "worker"
+        if not binary_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No local binary found for {os}/{arch} in offline mode at {local_dir}",
+            )
+        filename = (
+            f"vigile-worker-{os}-{arch}.exe" if os == "windows" else f"vigile-worker-{os}-{arch}"
+        )
+        return FileResponse(
+            binary_path,
+            media_type="application/octet-stream",
+            filename=filename,
+        )
+
     cache_dir = Path(settings.worker_binary_cache_dir) / os / arch
     binary_path = cache_dir / "worker"
 
@@ -348,7 +366,11 @@ async def get_worker_binary(
                     status_code=status.HTTP_410_GONE,
                     detail=f"Version {version} has been revoked. Upgrade required.",
                 )
-            filename = f"vigile-worker-{os}-{arch}.exe" if os == "windows" else f"vigile-worker-{os}-{arch}"
+            filename = (
+                f"vigile-worker-{os}-{arch}.exe"
+                if os == "windows"
+                else f"vigile-worker-{os}-{arch}"
+            )
             return FileResponse(
                 binary_path,
                 media_type="application/octet-stream",
@@ -383,6 +405,17 @@ async def get_worker_sha256(
     settings=Depends(get_settings),
 ) -> PlainTextResponse:
     _validate_os_arch(os, arch)
+
+    if settings.offline_mode:
+        local_dir = Path(settings.worker_binary_local_dir) / os / arch
+        sha256_path = local_dir / "worker.sha256"
+        if not sha256_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No local sha256 found for {os}/{arch} in offline mode at {local_dir}",
+            )
+        sha256_content = sha256_path.read_text().strip()
+        return PlainTextResponse(content=sha256_content + "\n")
 
     cache_dir = Path(settings.worker_binary_cache_dir) / os / arch
     sha256_path = cache_dir / "worker.sha256"

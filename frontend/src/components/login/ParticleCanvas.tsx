@@ -18,6 +18,16 @@ export const ParticleCanvas: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const getCssVar = (name: string): string =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+    const hexToRgba = (hex: string, alpha: number): string => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+
     let animId: number;
     let w = (canvas.width = canvas.offsetWidth);
     let h = (canvas.height = canvas.offsetHeight);
@@ -38,14 +48,14 @@ export const ParticleCanvas: React.FC = () => {
         vx: (Math.random() - 0.5) * 0.35,
         vy: (Math.random() - 0.5) * 0.35,
         r: Math.random() * 1.5 + 1,
-        c: 'rgba(232, 101, 10, 0.25)',
+        c: hexToRgba(getCssVar('--accent') || '#6366f1', 0.25),
       });
     }
 
     const draw = () => {
       ctx.clearRect(0, 0, w, h);
 
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.008)';
+      ctx.strokeStyle = getCssVar('--border') || 'rgba(255,255,255,0.008)';
       ctx.lineWidth = 0.5;
       const size = 60;
       for (let x = 0; x < w; x += size) {
@@ -70,7 +80,7 @@ export const ParticleCanvas: React.FC = () => {
 
           if (dist < 110) {
             const alpha = (1 - dist / 110) * 0.12;
-            ctx.strokeStyle = `rgba(232, 101, 10, ${alpha})`;
+            ctx.strokeStyle = hexToRgba(getCssVar('--accent') || '#6366f1', alpha * 0.25);
             ctx.beginPath();
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);

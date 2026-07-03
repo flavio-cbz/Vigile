@@ -15,6 +15,7 @@ import json
 import logging
 import time
 import uuid
+from difflib import SequenceMatcher
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
@@ -45,6 +46,7 @@ from master.core.audit import AuditAction, log_action
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager
 from master.core.structured_llm import StructuredLLM
+from master.plugins.docker_plugin import parse_container_list
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +191,7 @@ async def chat(
                     sllm, node_id, message, token_buffer, claims["sub"]
                 )
                 if proposal:
+                    await _normalize_action_proposal(db, nm, proposal)
                     await _persist_proposal(db, proposal)
                     proposal_json = json.dumps(
                         {
@@ -197,6 +200,7 @@ async def chat(
                             "action": proposal.action,
                             "risk_level": proposal.risk_level,
                             "reasoning": proposal.reasoning,
+                            "params": proposal.params,
                         },
                         separators=(",", ":"),
                     )
@@ -377,13 +381,17 @@ async def approve_proposal(
 
     # Execute intent
     try:
-        result = await nm.send_intent(
-            proposal.node_id,
-            {"action": proposal.action, "params": proposal.params},
-            timeout=15.0,
-        )
-        success = result.get("success", False)
-        proposal.complete(success=success, result_data=result)
+        validation_error = await _normalize_action_proposal(db, nm, proposal)
+        if validation_error:
+            proposal.complete(success=False, result_data={"error": validation_error})
+        else:
+            result = await nm.send_intent(
+                proposal.node_id,
+                {"action": proposal.action, "params": proposal.params},
+                timeout=15.0,
+            )
+            success = result.get("success", False)
+            proposal.complete(success=success, result_data=result)
     except RuntimeError as exc:
         proposal.complete(success=False, result_data={"error": str(exc)})
     except TimeoutError:
@@ -395,7 +403,7 @@ async def approve_proposal(
         """
         UPDATE action_proposals SET
             status = ?, approved_by = ?, updated_at = ?,
-            executed_at = ?, result_json = ?
+            executed_at = ?, result_json = ?, params_json = ?
         WHERE id = ?
         """,
         (
@@ -404,6 +412,7 @@ async def approve_proposal(
             db_data["updated_at"],
             db_data["executed_at"],
             db_data["result_json"],
+            db_data["params_json"],
             proposal.id,
         ),
     )
@@ -419,6 +428,7 @@ async def approve_proposal(
             "proposal_id": proposal.id,
             "action": proposal.action,
             "target": proposal.params.get("target")
+            or proposal.params.get("container_id")
             or proposal.params.get("container")
             or proposal.params.get("service")
             or "",
@@ -765,6 +775,179 @@ async def _build_chat_context(
         lang_instruction=lang_instruction,
         context_lines=context_lines,
     )
+
+
+_CONTAINER_TARGET_KEYS = ("container_id", "container", "name", "target", "id")
+_FUZZY_CONTAINER_THRESHOLD = 0.75
+_FUZZY_CONTAINER_AMBIGUITY_MARGIN = 0.08
+
+
+async def _normalize_action_proposal(
+    db: DB,
+    nm: NodeManager,
+    proposal: ActionProposal,
+) -> str | None:
+    """
+    Normalize safety-sensitive proposal params before storage/execution.
+
+    Returns an operator-facing error string when the target cannot be resolved
+    safely. A non-None value means the caller must not execute the intent.
+    """
+    if proposal.action != "RESTART_CONTAINER":
+        return None
+
+    target = _extract_container_target(proposal.params)
+    if not target:
+        return "RESTART_CONTAINER requires a container target"
+
+    resolved = await _resolve_container_target(db, nm, proposal.node_id, target)
+    if resolved.get("status") == "matched":
+        value = resolved["container_id"]
+        proposal.params = {"container_id": value, "target": value}
+        return None
+    if resolved.get("status") == "ambiguous":
+        candidates = ", ".join(resolved.get("candidates", []))
+        return f"Ambiguous container target '{target}'. Candidates: {candidates}"
+    return f"Unknown container target '{target}'"
+
+
+def _extract_container_target(params: dict[str, Any]) -> str:
+    """Return the first non-empty container target from common LLM param names."""
+    for key in _CONTAINER_TARGET_KEYS:
+        value = params.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+async def _resolve_container_target(
+    db: DB,
+    nm: NodeManager,
+    node_id: str,
+    target: str,
+) -> dict[str, Any]:
+    """Resolve a requested container target against cached containers, then live data."""
+    cached_containers = await _get_cached_containers(db, node_id)
+    if cached_containers:
+        cached_match = _match_container(target, cached_containers)
+        if cached_match.get("status") != "not_found":
+            return cached_match
+
+    live_containers = await _get_live_containers(nm, node_id)
+    if live_containers:
+        return _match_container(target, live_containers)
+
+    return {"status": "not_found"}
+
+
+async def _get_cached_containers(db: DB, node_id: str) -> list[dict[str, Any]]:
+    """Read the node container cache. Invalid cache data is treated as empty."""
+    async with db.execute(
+        "SELECT cached_containers_json FROM nodes WHERE id = ?",
+        (node_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None or not row["cached_containers_json"]:
+        return []
+    try:
+        raw = json.loads(row["cached_containers_json"])
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+async def _get_live_containers(nm: NodeManager, node_id: str) -> list[dict[str, Any]]:
+    """Fetch live containers from the Worker when cache data cannot resolve a target."""
+    try:
+        result = await nm.send_intent(node_id, {"action": "LIST_CONTAINERS"}, timeout=10.0)
+    except (RuntimeError, TimeoutError):
+        return []
+    if not result.get("success"):
+        return []
+    parsed = parse_container_list(result.get("output", ""))
+    return parsed or []
+
+
+def _match_container(target: str, containers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return a single exact/fuzzy container match, or an ambiguity/not-found marker."""
+    normalized_target = _normalize_match_text(target)
+    if not normalized_target:
+        return {"status": "not_found"}
+
+    exact_matches: list[dict[str, Any]] = []
+    for container in containers:
+        for variant, value in _container_match_variants(container):
+            if normalized_target == variant:
+                exact_matches.append({"container_id": value, "display": value})
+                break
+    if len(exact_matches) == 1:
+        return {"status": "matched", **exact_matches[0]}
+    if len(exact_matches) > 1:
+        return {
+            "status": "ambiguous",
+            "candidates": [match["display"] for match in exact_matches],
+        }
+
+    scored: list[tuple[float, str]] = []
+    for container in containers:
+        best_score = 0.0
+        best_value = ""
+        for variant, value in _container_match_variants(container):
+            score = SequenceMatcher(None, normalized_target, variant).ratio()
+            if score > best_score:
+                best_score = score
+                best_value = value
+        if best_value:
+            scored.append((best_score, best_value))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if not scored or scored[0][0] < _FUZZY_CONTAINER_THRESHOLD:
+        return {"status": "not_found"}
+
+    top_score, top_value = scored[0]
+    ambiguous = [
+        value
+        for score, value in scored[1:]
+        if score >= _FUZZY_CONTAINER_THRESHOLD
+        and top_score - score <= _FUZZY_CONTAINER_AMBIGUITY_MARGIN
+    ]
+    if ambiguous:
+        return {"status": "ambiguous", "candidates": [top_value, *ambiguous]}
+
+    return {"status": "matched", "container_id": top_value, "display": top_value}
+
+
+def _container_match_variants(container: dict[str, Any]) -> list[tuple[str, str]]:
+    """Build normalized match strings paired with the value to send to Docker."""
+    variants: list[tuple[str, str]] = []
+
+    container_id = str(container.get("id") or "").strip()
+    name = str(container.get("name") or "").strip().lstrip("/")
+    preferred_name = name or container_id
+
+    if name:
+        variants.append((_normalize_match_text(name), preferred_name))
+        for part in name.replace("_", "-").replace(".", "-").split("-"):
+            normalized_part = _normalize_match_text(part)
+            if normalized_part:
+                variants.append((normalized_part, preferred_name))
+    if container_id:
+        variants.append((_normalize_match_text(container_id), container_id))
+
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, str]] = []
+    for variant in variants:
+        if variant[0] and variant not in seen:
+            seen.add(variant)
+            unique.append(variant)
+    return unique
+
+
+def _normalize_match_text(value: str) -> str:
+    """Normalize operator/LLM text for conservative container matching."""
+    return value.strip().lower().lstrip("/")
 
 
 class _ProposalRequest(BaseModel):

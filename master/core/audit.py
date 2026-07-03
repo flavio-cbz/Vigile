@@ -224,7 +224,7 @@ async def verify_chain(
             LIMIT ?
         """
         async with db.execute(sql, (max_entries,)) as cursor:
-            rows = await cursor.fetchall()
+            rows: list = list(await cursor.fetchall())
         rows.reverse()
     else:
         sql = """
@@ -234,7 +234,7 @@ async def verify_chain(
             ORDER BY sequence ASC
         """
         async with db.execute(sql) as cursor:
-            rows = await cursor.fetchall()
+            rows = list(await cursor.fetchall())
 
     if not rows:
         report["total_entries"] = 0

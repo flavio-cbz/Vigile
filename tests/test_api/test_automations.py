@@ -24,7 +24,6 @@ from master.core.automation_engine import AutomationEngine, automation_engine
 from master.core.security_manager import SecurityManager
 from master.main import app
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -143,7 +142,9 @@ async def test_create_rule_success(client: AsyncClient, auth_headers):
 @pytest.mark.asyncio
 async def test_create_rule_operator_forbidden(client: AsyncClient, auth_headers):
     payload = make_rule_payload()
-    res = await client.post("/api/admin/automations", json=payload, headers=auth_headers("operator"))
+    res = await client.post(
+        "/api/admin/automations", json=payload, headers=auth_headers("operator")
+    )
     assert res.status_code == status.HTTP_403_FORBIDDEN
 
 
@@ -262,7 +263,9 @@ async def test_delete_rule_operator_forbidden(client: AsyncClient, auth_headers,
 @pytest.mark.asyncio
 async def test_toggle_rule_disables(client: AsyncClient, auth_headers, db):
     rule_id = await create_rule_in_db(db)
-    res = await client.post(f"/api/admin/automations/{rule_id}/toggle", headers=auth_headers("admin"))
+    res = await client.post(
+        f"/api/admin/automations/{rule_id}/toggle", headers=auth_headers("admin")
+    )
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["enabled"] is False
 
@@ -271,7 +274,9 @@ async def test_toggle_rule_disables(client: AsyncClient, auth_headers, db):
 async def test_toggle_rule_twice_re_enables(client: AsyncClient, auth_headers, db):
     rule_id = await create_rule_in_db(db)
     await client.post(f"/api/admin/automations/{rule_id}/toggle", headers=auth_headers("admin"))
-    res = await client.post(f"/api/admin/automations/{rule_id}/toggle", headers=auth_headers("admin"))
+    res = await client.post(
+        f"/api/admin/automations/{rule_id}/toggle", headers=auth_headers("admin")
+    )
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["enabled"] is True
 

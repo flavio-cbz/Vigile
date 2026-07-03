@@ -7,8 +7,8 @@ import time
 import uuid
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from fastapi import status
+from httpx import ASGITransport, AsyncClient
 
 os.environ["CORS_ORIGINS"] = "*"
 
@@ -99,8 +99,16 @@ async def test_metrics_counts_reflect_db_state(db):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                proposal_id, node_id, "TEST_ACTION", "{}", "test reasoning",
-                "LOW", "PENDING", "test-user", now, now,
+                proposal_id,
+                node_id,
+                "TEST_ACTION",
+                "{}",
+                "test reasoning",
+                "LOW",
+                "PENDING",
+                "test-user",
+                now,
+                now,
             ),
         )
         await db.commit()

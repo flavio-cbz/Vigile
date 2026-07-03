@@ -119,6 +119,11 @@ export const ServersPage: React.FC = () => {
     return `il y a ${Math.floor(seconds / 86400)}j`;
   };
 
+  const formatPercent = (value: number) => {
+    if (Number.isInteger(value)) return `${value}%`;
+    return `${value.toFixed(1)}%`;
+  };
+
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -252,7 +257,7 @@ export const ServersPage: React.FC = () => {
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
                           <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> {t('card.cpu')}</span>
-                          <span className="font-mono text-text-1">{(metrics && metrics.cpu !== null && metrics.cpu !== undefined) ? `${Math.round(metrics.cpu)}%` : '—'}</span>
+                          <span className="font-mono text-text-1">{(metrics && metrics.cpu !== null && metrics.cpu !== undefined) ? formatPercent(metrics.cpu) : '—'}</span>
                         </div>
                         <div className="progress-bar-track bg-surface-3">
                           <div
@@ -264,7 +269,7 @@ export const ServersPage: React.FC = () => {
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
                           <span className="text-text-2 flex items-center gap-1"><Cpu className="w-3 h-3 text-text-3" /> {t('card.ram')}</span>
-                          <span className="font-mono text-text-1">{(metrics && metrics.mem !== null && metrics.mem !== undefined) ? `${Math.round(metrics.mem)}%` : '—'}</span>
+                          <span className="font-mono text-text-1">{(metrics && metrics.mem !== null && metrics.mem !== undefined) ? formatPercent(metrics.mem) : '—'}</span>
                         </div>
                         <div className="progress-bar-track bg-surface-3">
                           <div
@@ -276,7 +281,7 @@ export const ServersPage: React.FC = () => {
                       <div className="space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
                           <span className="text-text-2 flex items-center gap-1"><HardDrive className="w-3 h-3 text-text-3" /> {t('card.disk')}</span>
-                          <span className="font-mono text-text-1">{(metrics && metrics.disk !== null && metrics.disk !== undefined) ? `${Math.round(metrics.disk)}%` : '—'}</span>
+                          <span className="font-mono text-text-1">{(metrics && metrics.disk !== null && metrics.disk !== undefined) ? formatPercent(metrics.disk) : '—'}</span>
                         </div>
                         <div className="progress-bar-track bg-surface-3">
                           <div

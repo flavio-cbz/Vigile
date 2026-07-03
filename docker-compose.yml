@@ -22,11 +22,12 @@ services:
       dockerfile: Dockerfile.master
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8003:8000"
     volumes:
       - vigile_data:/app/data
+      - ./data/worker-dist:/var/cache/vigile/worker
     environment:
-      - MASTER_URL=http://localhost:8000
+      - MASTER_URL=https://vigile.youcloud.ovh
       - DATABASE_PATH=/app/data/vigile.db
       - MASTER_KEY_PATH=/app/data/master_ed25519.key
       - PYTHONPATH=/app
@@ -34,6 +35,8 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL=${LLM_MODEL}
+      - WORKER_BINARY_MANIFEST_URL=file:///var/cache/vigile/worker/manifest.json
+      - WORKER_BINARY_CACHE_DIR=/var/cache/vigile/worker
       # Secrets auto-generated on first start (dev mode)
     healthcheck:
       test: ["CMD", "curl", "-s", "http://localhost:8000/health"]

@@ -132,7 +132,7 @@ async def get_current_user(
 
     # Bypass DB check for volatile demo user
     if user_id == "demo-user" or claims.get("username") == "guest":
-        row = {"is_active": 1, "must_change_password": 0}
+        row: dict[str, int] | aiosqlite.Row | None = {"is_active": 1, "must_change_password": 0}
     else:
         # Check active state and must_change_password in DB
         async with db.execute(

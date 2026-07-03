@@ -78,6 +78,8 @@ for node in nodes:
     transition(node, new_state)  # if an exception occurs, subsequent items are skipped
 ```
 
+**Safety-sensitive Copilot action targets must be resolved before execution.** For `RESTART_CONTAINER`, accept common LLM target keys (`container_id`, `container`, `name`, `target`) but normalize them through the Master-side container resolver before persistence/execution. Use cached Docker inventory first, live `LIST_CONTAINERS` only as fallback, and fail closed on unknown or ambiguous fuzzy matches.
+
 ---
 
 ## 6. TYPING

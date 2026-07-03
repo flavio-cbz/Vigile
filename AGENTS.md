@@ -69,6 +69,7 @@ docs/                    # Planning, known limits, and session logs
 - **Hash Chain Audit Trail**: Cryptographically linked logs where each entry contains `SHA256(previous_hash + sequence + data)`.
 - **Two-phase WebSocket Enrollment**: challenge-response protocol with `JOIN_TOKEN` verification before operational heartbeats start.
 - **Zero-Dependency Go worker**: Raw network socket frame decoding for RFC 6455 WebSocket connectivity without standard library extensions.
+- **Copilot Target Resolution**: Before executing `RESTART_CONTAINER`, the Master resolves LLM/operator targets against cached Docker containers, with live `LIST_CONTAINERS` fallback and conservative fuzzy matching. Ambiguous or unknown targets fail closed before Worker restart intent dispatch.
 
 ## COMMANDS
 ```bash
@@ -109,6 +110,7 @@ To ensure the integrity, consistency, and long-term maintainability of the proje
 - `AGENTS.md` and `RULES.md` are gitignored to preserve developer workspace preferences.
 - SQLite WAL mode enables parallel reads but writes are serialized.
 - Auto-generated secrets (`secrets.token_hex(32)`) occur dynamically if config values are blank in development.
+- Copilot `RESTART_CONTAINER` proposals normalize `container_id`/`container`/`name`/`target` to canonical `{"container_id": ..., "target": ...}` before persistence when a single safe match exists, and revalidate at approval for legacy pending proposals.
 
 ## AUDIT FINDINGS (2026-06-04)
 File-by-file audit (4 specialists + cross-critique + Oracle verification) found **79 issues** the 8 audit documents in `docs/` missed:

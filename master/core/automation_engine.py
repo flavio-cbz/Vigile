@@ -171,17 +171,13 @@ class AutomationEngine:
 
         # snapshot can be a dict or a Pydantic model
         if isinstance(snapshot, dict):
-            value = snapshot.get(metric)
+            value: Any = snapshot.get(metric)
         else:
             value = getattr(snapshot, metric, None)
-
-        if value is None:
+        if value is None or not isinstance(value, (int, float)):
             return False
 
-        try:
-            value = float(value)
-            threshold = float(threshold)
-        except (TypeError, ValueError):
+        if threshold is None or not isinstance(threshold, (int, float)):
             return False
 
         return {
@@ -317,7 +313,9 @@ class AutomationEngine:
         except Exception:
             logger.exception("Failed to write audit log for rule %s.", rule_id)
 
-        await self._write_log(rule_id, node_id, overall_status, trigger_data, {"actions": results}, db)
+        await self._write_log(
+            rule_id, node_id, overall_status, trigger_data, {"actions": results}, db
+        )
 
     async def _execute_action(
         self, action: dict, node_id: str, trigger_data: dict, db: aiosqlite.Connection
@@ -355,9 +353,7 @@ class AutomationEngine:
         )
         return result
 
-    async def _execute_call_webhook(
-        self, action: dict, node_id: str, trigger_data: dict
-    ) -> dict:
+    async def _execute_call_webhook(self, action: dict, node_id: str, trigger_data: dict) -> dict:
         """HTTP POST to an external webhook URL."""
         import httpx
 
@@ -373,9 +369,7 @@ class AutomationEngine:
         # Build body from template if provided
         body_template = action.get("body_template", "{}")
         try:
-            body_str = body_template.replace(
-                "{node_id}", str(node_id)
-            ).replace(
+            body_str = body_template.replace("{node_id}", str(node_id)).replace(
                 "{trigger_data}", json.dumps(trigger_data)
             )
             body = json.loads(body_str)

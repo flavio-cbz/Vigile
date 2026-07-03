@@ -91,6 +91,7 @@ async def test_auto_update_skipped_in_offline_mode(monkeypatch):
 
     with patch("master.api.worker_binary._fetch_manifest", new_callable=AsyncMock) as mock_fetch:
         from master.main import auto_update_workers_task
+
         mock_db = AsyncMock()
         mock_nm = AsyncMock()
 

@@ -1,82 +1,50 @@
 :root {
+  /* ─── Layout ─────────────────────────────────────────── */
   --sidebar-width: 240px;
   --sidebar-collapsed-width: 68px;
   --copilot-width: 380px;
 
-  --color-background: #0a0a0f;
-  --color-surface-0: #12121a;
-  --color-surface-1: #1a1a26;
-  --color-surface-2: #242436;
-  --color-border: rgba(255, 255, 255, 0.025);
-  --color-border-hover: rgba(99, 102, 241, 0.15);
-  --color-border-critical: rgba(239, 68, 68, 0.15);
-  --color-border-critical-hover: rgba(239, 68, 68, 0.35);
-  --color-border-warning: rgba(245, 158, 11, 0.15);
-  --color-border-warning-hover: rgba(245, 158, 11, 0.35);
-  --color-border-success: rgba(34, 197, 94, 0.15);
-  --color-border-success-hover: rgba(34, 197, 94, 0.35);
-  --color-border-offline: rgba(92, 87, 112, 0.15);
-  --color-border-offline-hover: rgba(92, 87, 112, 0.35);
+  /* ─── Font families (fallback) ──────────────────────────── */
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
+    'Open Sans', 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular,
+    Menlo, Monaco, Consolas, monospace;
 
-  --color-ink-primary: #e8e4f0;
-  --color-ink-secondary: #8b8698;
-  --color-ink-muted: #5c5770;
+  /* ─── Font sizes ──────────────────────────────────────── */
+  --font-size-xs: 0.75rem;   /* 12px */
+  --font-size-sm: 0.875rem;  /* 14px */
+  --font-size-base: 1rem;    /* 16px */
+  --font-size-lg: 1.125rem;  /* 18px */
+  --font-size-xl: 1.25rem;   /* 20px */
+  --font-size-2xl: 1.5rem;   /* 24px */
+  --font-size-3xl: 1.875rem; /* 30px */
 
-  --color-accent-primary: #6366f1;
-  --color-accent-hover: #818cf8;
-  --color-accent-subtle: rgba(99, 102, 241, 0.12);
+  /* ─── Spacing scale ───────────────────────────────────── */
+  --spacing-1: 0.25rem;  /* 4px */
+  --spacing-2: 0.5rem;   /* 8px */
+  --spacing-3: 0.75rem;  /* 12px */
+  --spacing-4: 1rem;     /* 16px */
+  --spacing-6: 1.5rem;   /* 24px */
+  --spacing-8: 2rem;     /* 32px */
+  --spacing-12: 3rem;    /* 48px */
 
-  --color-success: #22c55e;
-  --color-success-subtle: rgba(34, 197, 94, 0.12);
-  --color-warning: #f59e0b;
-  --color-warning-subtle: rgba(245, 158, 11, 0.12);
-  --color-danger: #ef4444;
-  --color-danger-subtle: rgba(239, 68, 68, 0.12);
-
-  --color-green-custom: #22c55e;
-  --color-accent-custom: #6366f1;
-  --color-accent-border: rgba(99, 102, 241, 0.3);
-  --color-accent-soft: rgba(99, 102, 241, 0.1);
-  --bg-surface-hover: rgba(255, 255, 255, 0.05);
-  --color-surface-alt: rgba(255, 255, 255, 0.03);
-
-  --gradient-fade-x: linear-gradient(to right, transparent, var(--bg) 15%, var(--bg) 85%, transparent);
-
-  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --font-size-xs: 0.75rem;     /* 12px */
-  --font-size-sm: 0.875rem;    /* 14px */
-  --font-size-base: 1rem;      /* 16px */
-  --font-size-lg: 1.125rem;    /* 18px */
-  --font-size-xl: 1.25rem;     /* 20px */
-  --font-size-2xl: 1.5rem;     /* 24px */
-  --font-size-3xl: 1.875rem;    /* 30px */
-
-  --spacing-1: 0.25rem;
-  --spacing-2: 0.5rem;
-  --spacing-3: 0.75rem;
-  --spacing-4: 1rem;
-  --spacing-6: 1.5rem;
-  --spacing-8: 2rem;
-  --spacing-12: 3rem;
-
+  /* ─── Border radii ────────────────────────────────────── */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-full: 9999px;
 
+  /* ─── Static shadows (no color dependency) ────────────── */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  --shadow-glow-accent: 0 0 15px rgba(99, 102, 241, 0.15);
-  --shadow-glow-success: 0 0 15px rgba(34, 197, 94, 0.15);
-  --shadow-glow-danger: 0 0 15px rgba(239, 68, 68, 0.15);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -2px rgba(0, 0, 0, 0.05);
 
+  /* ─── Transitions ─────────────────────────────────────── */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
-
-  --color-green-glow: rgba(34, 197, 94, 0.15);
-  --color-accent-glow: rgba(99, 102, 241, 0.15);
 }

@@ -48,7 +48,9 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile TEXT DEFAULT NULL")
         mutated = True
     if "insight_profile_generated_at" not in columns:
-        await db.execute("ALTER TABLE nodes ADD COLUMN insight_profile_generated_at REAL DEFAULT NULL")
+        await db.execute(
+            "ALTER TABLE nodes ADD COLUMN insight_profile_generated_at REAL DEFAULT NULL"
+        )
         mutated = True
     if "cached_services_json" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_services_json TEXT DEFAULT '[]'")
@@ -105,14 +107,12 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
     logger.info("Dropping legacy FK join_tokens.node_id -> nodes.id (migration 006).")
     await db.execute("PRAGMA foreign_keys=OFF")
     await db.execute("DROP TABLE IF EXISTS join_tokens_new")
-    await db.execute(
-        """
+    await db.execute("""
     CREATE TABLE IF NOT EXISTS join_tokens_new (
         id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
         token_hash TEXT NOT NULL UNIQUE, payload_b64 TEXT NOT NULL,
         consumed INTEGER NOT NULL DEFAULT 0, expires_at REAL NOT NULL, created_at REAL NOT NULL
-    )"""
-    )
+    )""")
     await db.execute("INSERT INTO join_tokens_new SELECT * FROM join_tokens")
     await db.execute("DROP TABLE join_tokens")
     await db.execute("ALTER TABLE join_tokens_new RENAME TO join_tokens")

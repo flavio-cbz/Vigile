@@ -26,7 +26,7 @@ export interface NodeDetailData {
   displayInsights: InsightRecord[];
   statsHistory: StatsPoint[];
   loadingStats: boolean;
-  fetchStatsHistory: () => Promise<void>;
+  fetchStatsHistory: (skipToast?: boolean) => Promise<void>;
   services: ServiceRecord[];
   loadingServices: boolean;
   fetchServicesList: () => Promise<void>;
@@ -41,7 +41,7 @@ export interface NodeDetailData {
   setLogsLimit: (v: number) => void;
   logsAutoScroll: boolean;
   setLogsAutoScroll: (v: boolean) => void;
-  fetchNodeLogs: () => Promise<void>;
+  fetchNodeLogs: (skipToast?: boolean) => Promise<void>;
   restartingService: string | null;
   setRestartingService: (v: string | null) => void;
   restartingContainer: string | null;
@@ -83,11 +83,11 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     }
   }, [nodeId]);
 
-  const fetchStatsHistory = useCallback(async () => {
+  const fetchStatsHistory = useCallback(async (skipToast = false) => {
     if (!nodeId) return;
     setLoadingStats(true);
     try {
-      const data = await api<{ snapshots: StatsSnapshot[] }>(`/api/nodes/${nodeId}/stats?limit=60`);
+      const data = await api<{ snapshots: StatsSnapshot[] }>(`/api/nodes/${nodeId}/stats?limit=60`, { skipToast });
       if (data && data.snapshots) {
         const ordered = [...data.snapshots].reverse().map((snap) => ({
           time: new Date(snap.collected_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -130,16 +130,18 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     }
   }, [nodeId]);
 
-  const fetchNodeLogs = useCallback(async () => {
+  const fetchNodeLogs = useCallback(async (skipToast = false) => {
     if (!nodeId) return;
     setLoadingLogs(true);
     try {
       const query = `?lines=${logsLimit}${logsService ? `&service=${logsService}` : ''}`;
-      const data = await api<{ output: string }>(`/api/nodes/${nodeId}/logs${query}`);
+      const data = await api<{ output: string }>(`/api/nodes/${nodeId}/logs${query}`, { skipToast });
       if (data) setLogs(data.output || t('node_detail.logs_selection_empty'));
     } catch (err) {
       console.error('Failed to fetch logs:', err);
-      setLogs(t('node_detail.logs_load_error'));
+      if (!skipToast) {
+        setLogs(t('node_detail.logs_load_error'));
+      }
     } finally {
       setLoadingLogs(false);
     }

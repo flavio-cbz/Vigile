@@ -27,7 +27,7 @@ const ChartCard: React.FC<{
     <div className="h-48 w-full mt-2">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--text-3)" />
           <XAxis dataKey="time" stroke="var(--text-2)" fontSize={8} tickLine={false} />
           <YAxis stroke="var(--text-2)" fontSize={8} tickLine={false} domain={[0, 100]} />
           <Tooltip contentStyle={{ background: 'var(--surface-2)', borderColor: 'var(--border-strong)', fontSize: '10px' }} />

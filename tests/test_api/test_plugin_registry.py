@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+
 import pytest
 from fastapi import status
 from httpx import AsyncClient
@@ -40,6 +41,7 @@ def setup_temp_plugins_dir(tmp_path):
     settings.plugins_dir = str(temp_dir)
     try:
         import master.api.admin
+
         master.api.admin.settings.plugins_dir = str(temp_dir)
     except Exception:
         pass
@@ -52,22 +54,25 @@ def setup_temp_plugins_dir(tmp_path):
     settings.plugins_dir = old_plugins_dir
     try:
         import master.api.admin
+
         master.api.admin.settings.plugins_dir = old_plugins_dir
     except Exception:
         pass
 
 
 @pytest.mark.asyncio
-async def test_get_registry_fallback_on_network_error(client: AsyncClient, auth_headers, monkeypatch):
+async def test_get_registry_fallback_on_network_error(
+    client: AsyncClient, auth_headers, monkeypatch
+):
     import httpx
-    
+
     original_get = httpx.AsyncClient.get
 
     async def mock_get(self, url, *args, **kwargs):
         if "registry.json" in str(url) or "raw.githubusercontent.com" in str(url):
             raise httpx.RequestError("Network down")
         return await original_get(self, url, *args, **kwargs)
-        
+
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
 
     res = await client.get("/api/admin/plugins/registry", headers=auth_headers("admin"))
@@ -83,7 +88,7 @@ async def test_get_registry_fallback_on_network_error(client: AsyncClient, auth_
 @pytest.mark.asyncio
 async def test_get_registry_success_mock(client: AsyncClient, auth_headers, monkeypatch):
     import httpx
-    
+
     mock_data = {
         "plugins": [
             {
@@ -99,6 +104,7 @@ async def test_get_registry_success_mock(client: AsyncClient, auth_headers, monk
 
     class MockResponse:
         status_code = 200
+
         def json(self):
             return mock_data
 
@@ -158,13 +164,19 @@ def register(pm):
 
     async def mock_get(self, url, *args, **kwargs):
         url_str = str(url)
-        if "registry.json" in url_str or "raw.githubusercontent.com" in url_str or "test_install.py" in url_str:
+        if (
+            "registry.json" in url_str
+            or "raw.githubusercontent.com" in url_str
+            or "test_install.py" in url_str
+        ):
             return MockResponse(url_str)
         return await original_get(self, url, *args, **kwargs)
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
 
-    res = await client.post("/api/admin/plugins/registry/test_install/install", headers=auth_headers("admin"))
+    res = await client.post(
+        "/api/admin/plugins/registry/test_install/install", headers=auth_headers("admin")
+    )
     assert res.status_code == status.HTTP_200_OK
     assert res.json()["status"] == "success"
 
@@ -173,13 +185,17 @@ def register(pm):
     assert os.path.isfile(file_path)
 
     # Verify database insertion
-    async with db.execute("SELECT enabled FROM plugin_configs WHERE plugin_id = ?", ("test_install",)) as cur:
+    async with db.execute(
+        "SELECT enabled FROM plugin_configs WHERE plugin_id = ?", ("test_install",)
+    ) as cur:
         row = await cur.fetchone()
         assert row is not None
         assert row[0] == 1
 
     # Verify audit log contains UPLOAD_PLUGIN
-    async with db.execute("SELECT action, details_json FROM audit_log WHERE action = ?", ("UPLOAD_PLUGIN",)) as cur:
+    async with db.execute(
+        "SELECT action, details_json FROM audit_log WHERE action = ?", ("UPLOAD_PLUGIN",)
+    ) as cur:
         row = await cur.fetchone()
         assert row is not None
         details = json.loads(row[1])
@@ -222,13 +238,19 @@ async def test_install_plugin_invalid_ast(client: AsyncClient, auth_headers, mon
 
     async def mock_get(self, url, *args, **kwargs):
         url_str = str(url)
-        if "registry.json" in url_str or "raw.githubusercontent.com" in url_str or "invalid_ast.py" in url_str:
+        if (
+            "registry.json" in url_str
+            or "raw.githubusercontent.com" in url_str
+            or "invalid_ast.py" in url_str
+        ):
             return MockResponse(url_str)
         return await original_get(self, url, *args, **kwargs)
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
 
-    res = await client.post("/api/admin/plugins/registry/invalid_ast/install", headers=auth_headers("admin"))
+    res = await client.post(
+        "/api/admin/plugins/registry/invalid_ast/install", headers=auth_headers("admin")
+    )
     assert res.status_code == status.HTTP_400_BAD_REQUEST
     assert "register" in res.json()["detail"]
 
@@ -239,5 +261,7 @@ async def test_install_plugin_demo_mode_blocked(client: AsyncClient, auth_header
     token = security.create_access_token("guest", "guest", "admin")
     demo_headers = {"Authorization": f"Bearer {token}"}
 
-    res = await client.post("/api/admin/plugins/registry/test_install/install", headers=demo_headers)
+    res = await client.post(
+        "/api/admin/plugins/registry/test_install/install", headers=demo_headers
+    )
     assert res.status_code == status.HTTP_403_FORBIDDEN

@@ -68,14 +68,12 @@ export const NodeDetail: React.FC = () => {
   }, [searchParams]);
 
   useEffect(() => {
-    if (activeTab === 'metrics') fetchStatsHistory();
     if (activeTab === 'services') fetchServicesList();
     if (activeTab === 'containers') fetchContainersList();
-    if (activeTab === 'logs') fetchNodeLogs();
-  }, [activeTab, id, fetchStatsHistory, fetchServicesList, fetchContainersList, fetchNodeLogs]);
+  }, [activeTab, id, fetchServicesList, fetchContainersList]);
 
-  usePolling('detail_metrics_poll', fetchStatsHistory, 15000, activeTab === 'metrics');
-  usePolling('detail_logs_poll', fetchNodeLogs, 10000, activeTab === 'logs');
+  usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 15000, activeTab === 'metrics');
+  usePolling('detail_logs_poll', () => fetchNodeLogs(true), 10000, activeTab === 'logs');
 
   const handleRestartService = async (serviceName: string) => {
     if (!id || !isAdmin) return;

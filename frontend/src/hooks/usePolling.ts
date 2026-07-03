@@ -2,15 +2,27 @@ import { useEffect, useRef } from 'react';
 
 const activeCallbacks = new Map<string, Set<() => void>>();
 const activeIntervals = new Map<string, ReturnType<typeof setInterval>>();
+const activeRuns = new Map<string, boolean>();
 
 export function usePolling(
   key: string,
-  callback: () => void,
+  callback: () => void | Promise<void>,
   intervalMs: number,
   enabled = true,
 ) {
   const savedCallback = useRef(callback);
   savedCallback.current = callback;
+
+  const runCallback = async () => {
+    if (activeRuns.get(key)) return;
+
+    activeRuns.set(key, true);
+    try {
+      await Promise.resolve(savedCallback.current());
+    } finally {
+      activeRuns.set(key, false);
+    }
+  };
 
   useEffect(() => {
     if (!enabled) return;
@@ -22,12 +34,12 @@ export function usePolling(
 
     // Wrapper local qui pointe vers le callback à jour à chaque render
     const wrapper = () => {
-      savedCallback.current();
+      void runCallback();
     };
     callbacks.add(wrapper);
 
     if (!activeIntervals.has(key)) {
-      callback();
+      void runCallback();
       const id = setInterval(() => {
         const currentCallbacks = activeCallbacks.get(key);
         if (currentCallbacks) {
@@ -48,6 +60,7 @@ export function usePolling(
             clearInterval(id);
             activeIntervals.delete(key);
           }
+          activeRuns.delete(key);
         }
       }
     };

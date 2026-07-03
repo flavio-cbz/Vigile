@@ -17,6 +17,11 @@ export const MetricPill: React.FC<MetricPillProps> = ({
   text,
   className = '',
 }) => {
+  const formatPercent = (value: number) => {
+    if (Number.isInteger(value)) return `${value}%`;
+    return `${value.toFixed(1)}%`;
+  };
+
   const formatUptime = (seconds: number) => {
     const days = Math.floor(seconds / (24 * 3600));
     if (days > 0) return `${days}j`;
@@ -28,9 +33,9 @@ export const MetricPill: React.FC<MetricPillProps> = ({
     if (text) return text;
 
     const parts: string[] = [];
-    if (cpu !== undefined && cpu !== null) parts.push(`CPU ${Math.round(cpu)}%`);
-    if (mem !== undefined && mem !== null) parts.push(`RAM ${Math.round(mem)}%`);
-    if (disk !== undefined && disk !== null) parts.push(`DISK ${Math.round(disk)}%`);
+    if (cpu !== undefined && cpu !== null) parts.push(`CPU ${formatPercent(cpu)}`);
+    if (mem !== undefined && mem !== null) parts.push(`RAM ${formatPercent(mem)}`);
+    if (disk !== undefined && disk !== null) parts.push(`DISK ${formatPercent(disk)}`);
     if (uptime !== undefined && uptime !== null) parts.push(`UP ${formatUptime(uptime)}`);
 
     return parts.join(' · ');

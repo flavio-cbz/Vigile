@@ -46,6 +46,39 @@
   --color-danger: var(--severity-critical);
   --color-danger-subtle: rgba(239, 68, 68, 0.12);
 
+  /* Severity border colors */
+  --color-border-critical: color-mix(in srgb, var(--severity-critical) 15%, transparent);
+  --color-border-critical-hover: color-mix(in srgb, var(--severity-critical) 35%, transparent);
+  --color-border-warning: color-mix(in srgb, var(--severity-warning) 15%, transparent);
+  --color-border-warning-hover: color-mix(in srgb, var(--severity-warning) 35%, transparent);
+  --color-border-success: color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  --color-border-success-hover: color-mix(in srgb, var(--severity-ok) 35%, transparent);
+  --color-border-offline: color-mix(in srgb, var(--text-3) 15%, transparent);
+  --color-border-offline-hover: color-mix(in srgb, var(--text-3) 35%, transparent);
+
+  /* Accent border and soft backgrounds */
+  --color-accent-border: color-mix(in srgb, var(--accent) 30%, transparent);
+  --color-accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  /* Surface hover and alt */
+  --bg-surface-hover: color-mix(in srgb, var(--text-1) 5%, transparent);
+  --color-surface-alt: color-mix(in srgb, var(--text-1) 3%, transparent);
+
+  /* Shadow glows */
+  --shadow-glow-accent: 0 0 15px color-mix(in srgb, var(--accent) 15%, transparent);
+  --shadow-glow-success: 0 0 15px color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  --shadow-glow-danger: 0 0 15px color-mix(in srgb, var(--severity-critical) 15%, transparent);
+
+  /* Green and accent glow colors */
+  --color-green-glow: color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  --color-accent-glow: color-mix(in srgb, var(--accent) 15%, transparent);
+
+  /* Shadow colors for layout components */
+  --shadow-dropdown: color-mix(in srgb, var(--text-1) 50%, transparent);
+  --shadow-sidebar: color-mix(in srgb, var(--text-1) 50%, transparent);
+  --shadow-topbar: color-mix(in srgb, var(--text-1) 8%, transparent);
+  --shadow-toggle: color-mix(in srgb, var(--text-1) 30%, transparent);
+
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -86,6 +119,8 @@
 
   --color-bg: var(--bg);
   --color-surface: var(--surface);
+  --color-surface-0: var(--surface);
+  --color-surface-1: var(--surface-2);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
   --color-border: var(--border);
@@ -197,41 +232,41 @@ html, body, #root {
 }
 
 .card-glow-success {
-  box-shadow: 0 0 15px rgba(34, 197, 94, 0.05);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--severity-ok) 5%, transparent);
 }
 .card-glow-success:hover {
-  box-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.4) !important;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  border-color: color-mix(in srgb, var(--severity-ok) 40%, transparent) !important;
 }
 
 .card-glow-warning {
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.06);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--severity-warning) 6%, transparent);
 }
 .card-glow-warning:hover {
-  box-shadow: 0 0 20px rgba(245, 158, 11, 0.18);
-  border-color: rgba(245, 158, 11, 0.4) !important;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--severity-warning) 18%, transparent);
+  border-color: color-mix(in srgb, var(--severity-warning) 40%, transparent) !important;
 }
 
 .card-glow-danger {
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.06);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--severity-critical) 6%, transparent);
 }
 .card-glow-danger:hover {
-  box-shadow: 0 0 20px rgba(239, 68, 68, 0.18);
-  border-color: rgba(239, 68, 68, 0.4) !important;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--severity-critical) 18%, transparent);
+  border-color: color-mix(in srgb, var(--severity-critical) 40%, transparent) !important;
 }
 
 .card-glow-offline {
-  box-shadow: 0 0 15px rgba(92, 87, 112, 0.02);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--text-3) 2%, transparent);
 }
 .card-glow-offline:hover {
-  box-shadow: 0 0 20px rgba(92, 87, 112, 0.12);
-  border-color: rgba(92, 87, 112, 0.3) !important;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--text-3) 12%, transparent);
+  border-color: color-mix(in srgb, var(--text-3) 30%, transparent) !important;
 }
 
 .card-glow-accent {
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.05);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--accent) 5%, transparent);
 }
 .card-glow-accent:hover {
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.18);
-  border-color: rgba(99, 102, 241, 0.4) !important;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
 }

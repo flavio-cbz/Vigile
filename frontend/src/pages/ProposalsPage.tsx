@@ -244,7 +244,7 @@ export const ProposalsPage: React.FC = () => {
             <ChevronDown className={`w-3 h-3 transition-transform ${filterDropdownOpen ? 'rotate-180' : ''}`} />
           </button>
           {filterDropdownOpen && (
-            <div className="absolute left-0 mt-1 top-full w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_rgba(0,0,0,0.5)] py-1.5 z-50 animate-fade-in">
+            <div className="absolute left-0 mt-1 top-full w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_var(--shadow-dropdown)] py-1.5 z-50 animate-fade-in">
               {statusOptions.map((option) => (
                 <button
                   key={option.value}

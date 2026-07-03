@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from master.api.demo_data import DEMO_PASSWORD, DEMO_USER_ID, DEMO_USERNAME, is_demo
 from master.api.deps import DB, CurrentUser, get_security, get_settings
+from master.api.rate_limits import LOGIN_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityError, SecurityManager
@@ -140,7 +141,7 @@ def _get_refresh_token(body: RefreshRequest, request: Request) -> str:
         403: {"description": "Account deactivated"},
         429: {"description": "Too many requests"},
     },
-    dependencies=[Depends(rate_limiter.dependency(10))],
+    dependencies=[Depends(rate_limiter.dependency(LOGIN_LIMIT))],
 )
 async def login(
     body: LoginRequest,

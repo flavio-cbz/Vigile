@@ -41,7 +41,7 @@ export const NodeSelector: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 mt-2 w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_rgba(0,0,0,0.5)] py-1.5 z-50 animate-fade-in">
+        <div className="absolute left-0 mt-2 w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_var(--shadow-dropdown)] py-1.5 z-50 animate-fade-in">
           <button
             onClick={() => {
               selectNode('all');

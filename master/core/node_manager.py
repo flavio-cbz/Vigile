@@ -39,7 +39,7 @@ import aiosqlite
 from fastapi import WebSocket
 
 from master.core.audit import AuditAction, log_action
-from master.core.enums import NodeState, WebSocketCloseCode, WorkerAction
+from master.core.enums import NodeState
 from master.core.lock import LoopBoundLock
 from master.db.database import get_db_conn
 
@@ -251,11 +251,14 @@ class NodeManager:
                 if services_json is not None or containers_json is not None:
                     node_updates.append((nid, services_json, containers_json))
             except Exception as ex:
-                logger.warning("Cache updater: failed to process cache gathering for node %s: %s", nid, ex)
+                logger.warning(
+                    "Cache updater: failed to process cache gathering for node %s: %s", nid, ex
+                )
 
         # 3. Save cache to DB in a single transaction
         if node_updates:
             from master.db.database import transaction
+
             try:
                 async with transaction(db) as tx_db:
                     for nid, services_json, containers_json in node_updates:
@@ -284,7 +287,9 @@ class NodeManager:
                                 },
                             )
                         except Exception:
-                            logger.warning("Cache updater: failed to log audit trail for node %s", nid)
+                            logger.warning(
+                                "Cache updater: failed to log audit trail for node %s", nid
+                            )
             except Exception as ex:
                 logger.error("Cache updater: transaction failed: %s", ex)
 
@@ -316,8 +321,7 @@ class NodeManager:
                         fresh_running = [
                             c.get("name")
                             for c in fresh_conts or []
-                            if c.get("state") == "running"
-                            or "up" in c.get("status", "").lower()
+                            if c.get("state") == "running" or "up" in c.get("status", "").lower()
                         ]
                         known_conts = [
                             p.get("container_name")
@@ -694,7 +698,9 @@ class NodeManager:
             return 0
         placeholders = ", ".join("?" * len(ids))
         await db.execute(
-            "UPDATE join_tokens SET consumed = 1, expires_at = ? WHERE id IN (" + placeholders + ")",
+            "UPDATE join_tokens SET consumed = 1, expires_at = ? WHERE id IN ("
+            + placeholders
+            + ")",
             [now, *ids],
         )
         await db.commit()

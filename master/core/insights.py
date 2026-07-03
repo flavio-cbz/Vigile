@@ -483,7 +483,11 @@ class InsightsManager:
         slope = 0.0  # GB per day
         min_snapshots = 5
         min_timespan_seconds = 1800  # 30 minutes
-        timespan = (snapshots[-1]["collected_at"] - snapshots[0]["collected_at"]) if len(snapshots) >= 2 else 0
+        timespan = (
+            (snapshots[-1]["collected_at"] - snapshots[0]["collected_at"])
+            if len(snapshots) >= 2
+            else 0
+        )
         if len(snapshots) >= min_snapshots and timespan >= min_timespan_seconds:
             t0 = snapshots[0]["collected_at"]
             # Convert collected_at to days relative to first snapshot to avoid floating overflow

@@ -20,9 +20,8 @@ import inspect
 import json
 import logging
 import os
-import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +51,7 @@ class PluginProcessWrapper:
     Manages the lifecycle of an isolated plugin subprocess.
     Communicates via JSON-RPC lines on stdin/stdout, and handles database proxying.
     """
+
     def __init__(self, plugin_name: str, plugin_path: str):
         self.plugin_name = plugin_name
         self.plugin_path = plugin_path
@@ -66,6 +66,7 @@ class PluginProcessWrapper:
 
     async def start(self) -> None:
         import sys
+
         # Resolve script path relative to this file
         worker_script = os.path.join(os.path.dirname(__file__), "plugin_worker.py")
         loop = asyncio.get_running_loop()
@@ -87,11 +88,17 @@ class PluginProcessWrapper:
 
         try:
             await asyncio.wait_for(self._init_future, timeout=5.0)
-            logger.info("Isolated plugin process '%s' initialized with hooks: %s", self.plugin_name, self.hooks)
+            logger.info(
+                "Isolated plugin process '%s' initialized with hooks: %s",
+                self.plugin_name,
+                self.hooks,
+            )
         except asyncio.TimeoutError:
             logger.error("Initialization timed out for plugin process '%s'", self.plugin_name)
             await self.stop()
-            raise RuntimeError(f"Plugin '{self.plugin_name}' worker process failed to initialize within 5s")
+            raise RuntimeError(
+                f"Plugin '{self.plugin_name}' worker process failed to initialize within 5s"
+            )
 
     async def stop(self) -> None:
         logger.info("Stopping isolated plugin process '%s'...", self.plugin_name)
@@ -151,7 +158,9 @@ class PluginProcessWrapper:
                     continue
 
             except Exception:
-                logger.exception("[%s-parent] Failed to parse stdout line: %r", self.plugin_name, line)
+                logger.exception(
+                    "[%s-parent] Failed to parse stdout line: %r", self.plugin_name, line
+                )
 
     async def _read_stderr(self) -> None:
         while self.process and self.process.stderr:
@@ -161,7 +170,7 @@ class PluginProcessWrapper:
             logger.info("[%s-child-stderr] %s", self.plugin_name, line.decode().strip())
 
     async def _handle_db_request(self, msg: dict) -> None:
-        call_id = msg.get("call_id")
+        call_id = cast(str, msg.get("call_id"))
         db_call_id = msg.get("db_call_id")
         msg_type = msg.get("type")
 
@@ -169,18 +178,21 @@ class PluginProcessWrapper:
         db = self._active_db_conns.get(call_id)
         if not db:
             from master.db.database import get_db_conn
+
             try:
                 db = get_db_conn()
             except Exception:
                 db = None
 
         if not db:
-            await self._send_to_child({
-                "type": "db_result",
-                "db_call_id": db_call_id,
-                "status": "error",
-                "error": "No database connection available"
-            })
+            await self._send_to_child(
+                {
+                    "type": "db_result",
+                    "db_call_id": db_call_id,
+                    "status": "error",
+                    "error": "No database connection available",
+                }
+            )
             return
 
         try:
@@ -190,32 +202,33 @@ class PluginProcessWrapper:
                 cursor = await db.execute(sql, params)
                 rows = await cursor.fetchall()
                 serializable_rows = [dict(r) for r in rows]
-                await self._send_to_child({
-                    "type": "db_result",
-                    "db_call_id": db_call_id,
-                    "status": "success",
-                    "result": {
-                        "rowcount": cursor.rowcount,
-                        "lastrowid": cursor.lastrowid,
-                        "rows": serializable_rows
+                await self._send_to_child(
+                    {
+                        "type": "db_result",
+                        "db_call_id": db_call_id,
+                        "status": "success",
+                        "result": {
+                            "rowcount": cursor.rowcount,
+                            "lastrowid": cursor.lastrowid,
+                            "rows": serializable_rows,
+                        },
                     }
-                })
+                )
             elif msg_type == "db_commit":
                 await db.commit()
-                await self._send_to_child({
-                    "type": "db_result",
-                    "db_call_id": db_call_id,
-                    "status": "success",
-                    "result": {}
-                })
+                await self._send_to_child(
+                    {
+                        "type": "db_result",
+                        "db_call_id": db_call_id,
+                        "status": "success",
+                        "result": {},
+                    }
+                )
         except Exception as e:
             logger.exception("[%s-parent] Database request failed", self.plugin_name)
-            await self._send_to_child({
-                "type": "db_result",
-                "db_call_id": db_call_id,
-                "status": "error",
-                "error": str(e)
-            })
+            await self._send_to_child(
+                {"type": "db_result", "db_call_id": db_call_id, "status": "error", "error": str(e)}
+            )
 
     async def call_hook(self, hook_name: str, **kwargs: Any) -> Any:
         # Check process status and restart if dead
@@ -233,12 +246,9 @@ class PluginProcessWrapper:
             self._active_db_conns[call_id] = db
 
         try:
-            await self._send_to_child({
-                "type": "call_hook",
-                "call_id": call_id,
-                "hook_name": hook_name,
-                "kwargs": kwargs
-            })
+            await self._send_to_child(
+                {"type": "call_hook", "call_id": call_id, "hook_name": hook_name, "kwargs": kwargs}
+            )
             return await fut
         finally:
             self._pending_calls.pop(call_id, None)
@@ -275,7 +285,11 @@ class PluginManager:
             ) as cursor:
                 rows = await cursor.fetchall()
                 self._enabled_plugins = {row[0] for row in rows}
-            logger.info("PluginManager initialized. Enabled plugins: %s (Sandbox=%s)", self._enabled_plugins, self._sandbox)
+            logger.info(
+                "PluginManager initialized. Enabled plugins: %s (Sandbox=%s)",
+                self._enabled_plugins,
+                self._sandbox,
+            )
         except Exception as e:
             logger.error(
                 "Failed to query enabled plugins during PluginManager initialization: %s", e
@@ -487,9 +501,7 @@ class PluginManager:
                 # Register hook proxies
                 for hook_name in wrapper.hooks:
                     self.register(
-                        hook_name,
-                        self._make_proxy(wrapper, hook_name),
-                        plugin_name=plugin_id
+                        hook_name, self._make_proxy(wrapper, hook_name), plugin_name=plugin_id
                     )
 
                 self._loaded_plugins.append(plugin_id)
@@ -510,6 +522,7 @@ class PluginManager:
 
                 module = importlib.util.module_from_spec(spec)
                 import sys
+
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
 
@@ -529,6 +542,7 @@ class PluginManager:
                 logger.exception("Failed to load plugin '%s' in-process", plugin_id)
                 module_name = f"vigile.plugins.{plugin_name}"
                 import sys
+
                 if module_name in sys.modules:
                     del sys.modules[module_name]
                 return False
@@ -536,6 +550,7 @@ class PluginManager:
     def _make_proxy(self, wrapper: PluginProcessWrapper, hook_name: str) -> Callable:
         async def proxy(**kwargs: Any) -> Any:
             return await wrapper.call_hook(hook_name, **kwargs)
+
         return proxy
 
     async def unload_plugin(self, plugin_name: str) -> None:
@@ -571,6 +586,7 @@ class PluginManager:
 
         module_name = f"vigile.plugins.{module_stem}"
         import sys
+
         if module_name in sys.modules:
             del sys.modules[module_name]
 
