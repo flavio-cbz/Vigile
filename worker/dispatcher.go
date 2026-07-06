@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -141,15 +140,16 @@ func handleUpdateWorker(wc *WorkerConn, msg Intent) IntentResult {
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to locate executable: %v", err)}
 	}
-	execDir := filepath.Dir(execPath)
-	tmpFile, err := os.CreateTemp(execDir, "vigile-worker-new-*")
+	// Use default temp dir (e.g. /tmp) — the executable's own directory
+	// may be read-only (e.g. Docker --read-only rootfs).
+	tmpFile, err := os.CreateTemp("", "vigile-worker-new-*")
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create temporary file: %v", err)}
 	}
 	tmpPath := tmpFile.Name()
 	defer func() {
 		tmpFile.Close()
-		os.Remove(tmpPath) // cleaned up if not renamed
+		os.Remove(tmpPath)
 	}()
 
 	resp, err = client.Get(binaryURL)
@@ -174,20 +174,33 @@ func handleUpdateWorker(wc *WorkerConn, msg Intent) IntentResult {
 		return IntentResult{Success: false, Error: fmt.Sprintf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)}
 	}
 
-	// 6. Perform the atomic swap
+	// 6. Back up the current binary
 	backupPath := execPath + ".old"
-	_ = os.Remove(backupPath) // remove old backup if exists
+	_ = os.Remove(backupPath)
 	if err := os.Rename(execPath, backupPath); err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to backup current executable: %v", err)}
 	}
-	if err := os.Rename(tmpPath, execPath); err != nil {
-		// attempt rollback
-		_ = os.Rename(backupPath, execPath)
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to replace executable: %v", err)}
-	}
 
-	if err := os.Chmod(execPath, 0755); err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to set executable permissions: %v", err)}
+	// 7. Swap — try atomic rename first, fall back to copy+remove
+	//     (temp file is in /tmp, which may be a different filesystem).
+	replaceErr := os.Rename(tmpPath, execPath)
+	if replaceErr != nil {
+		// Cross-device or other: copy instead
+		var copyErr error
+		var data []byte
+		data, copyErr = os.ReadFile(tmpPath)
+		if copyErr == nil {
+			copyErr = os.WriteFile(execPath, data, 0755)
+		}
+		if copyErr != nil {
+			_ = os.Rename(backupPath, execPath) // rollback
+			return IntentResult{Success: false, Error: fmt.Sprintf("failed to replace executable: %v", copyErr)}
+		}
+		_ = os.Remove(tmpPath)
+	} else {
+		if err := os.Chmod(execPath, 0755); err != nil {
+			return IntentResult{Success: false, Error: fmt.Sprintf("failed to set executable permissions: %v", err)}
+		}
 	}
 
 	log.Printf("Self-update succeeded. Restart scheduled in 1 second...")

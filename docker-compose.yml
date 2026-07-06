@@ -37,6 +37,8 @@ services:
       - LLM_MODEL=${LLM_MODEL}
       - WORKER_BINARY_MANIFEST_URL=file:///var/cache/vigile/worker/manifest.json
       - WORKER_BINARY_CACHE_DIR=/var/cache/vigile/worker
+      - SERVER_SECRET_KEY=${SERVER_SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       # Secrets auto-generated on first start (dev mode)
     healthcheck:
       test: ["CMD", "curl", "-s", "http://localhost:8000/health"]

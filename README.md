@@ -6,6 +6,24 @@ L'IA est un excellent codeur, mais un administrateur système catastrophique san
 
 ---
 
+**Vigile, c'est quoi concrètement ?**
+
+Un petit serveur (le **Master**) qui tourne sur un VPS ou un Raspberry Pi, auquel se connectent des **agents légers** (les **Workers**) installés sur chacun de vos serveurs. Le Master a un **cerveau IA** qui surveille tout, détecte les anomalies et propose des actions. Vous approuvez en un clic depuis une interface web, le Worker exécute. Zéro SSH, zéro script hasardeux, zéro risque de tout casser d'un coup.
+
+**Ça remplace quoi ?** SSH + un monitoring type Netdata/Cockpit + un cerveau pour relier les deux.
+
+**C'est pour qui ?**
+
+- Pour ceux qui, comme moi, ont **la flemme** de se connecter en SSH à 2h du matin pour redémarrer un conteneur
+- Pour ceux qui ont **un ou plusieurs serveurs** à gérer (homelab, VPS, serveur dédié) et n'ont pas envie d'y passer leur vie
+- Pour ceux qui **ne sont pas admin sys** de formation mais qui font tourner des services chez eux
+- Pour ceux qui veulent un **garde-fou** : l'IA peut proposer, mais jamais exécuter sans approbation humaine
+- Pour ceux qui en ont **marre des alertes muettes** : Vigile ne se contente pas de dire "le disque est plein", il propose "supprimer les logs de la semaine dernière pour libérer 3 jours de stockage"
+
+**En bref :** un pote IA qui veille sur vos serveurs pendant que vous dormez, et qui a assez de bon sens pour ne pas tout casser.
+
+---
+
 ## L'histoire
 
 J'ai un Homelab Debian pourri avec plein de conteneurs Docker (Plex, Home Assistant, Radarr...). Le serveur crash régulièrement. Entre les études et la flemme du soir, me connecter en SSH pour débugger un volume Docker devient une corvée. Donc je repousse. Et l'uptime s'effondre.

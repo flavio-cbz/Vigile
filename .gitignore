@@ -51,6 +51,7 @@ data/
 
 ## Go Build
 worker/vigile-worker
+worker/worker
 *.o
 *.a
 

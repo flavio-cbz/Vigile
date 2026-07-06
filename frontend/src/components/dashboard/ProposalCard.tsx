@@ -77,10 +77,10 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
 
   return (
     <div
-      className={`card card-proposal flex flex-col justify-between group relative overflow-hidden ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
+      className={`card card-proposal flex flex-col justify-between group relative ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
     >
-      <div className="flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-start justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <span className="text-[10px] font-extrabold font-interface tracking-wide text-accent uppercase bg-accent-muted px-1.5 py-0.5 rounded border border-accent/20 whitespace-nowrap shrink-0">
             {t('prop.badge')}
           </span>

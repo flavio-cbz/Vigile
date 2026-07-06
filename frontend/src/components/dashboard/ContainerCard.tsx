@@ -156,10 +156,7 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
         </div>
       </div>
 
-      <div className="border-t border-border/40 pt-2 flex items-center justify-between mt-auto">
-        <span className="text-xs text-ink-muted truncate font-mono">
-          {t('container.id', { id: container.id.substring(0, 12) })}
-        </span>
+      <div className="border-t border-border/40 pt-2 flex items-center justify-end mt-auto">
         {isAdmin && (
           <button
             onClick={handleRestart}
