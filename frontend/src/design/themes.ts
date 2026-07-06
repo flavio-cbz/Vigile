@@ -1,20 +1,21 @@
 export const themes = {
-  'warm-dark': {         // DEFAULT - Rebranded/re-styled to Obsidian Command
-    '--bg':           '#0a0a0f',
-    '--surface':      '#12121a',
-    '--surface-2':    '#1a1a26',
-    '--surface-3':    '#232335',
-    '--border':       'rgba(232, 228, 240, 0.05)',
-    '--border-strong':'rgba(232, 228, 240, 0.12)',
-    '--accent':       '#6366f1',
-    '--accent-hover': '#4f46e5',
-    '--accent-muted': 'rgba(99,102,241,0.15)',
-    '--text-1':       '#e8e4f0',   // Lavande primary
-    '--text-2':       '#9a97b0',   // Lavande secondary
-    '--text-3':       '#52506b',   // Lavande muted
-    '--gradient-hero-ok': 'linear-gradient(135deg, #0f2a1a, #0a0a0f)',
-    '--gradient-hero-warn': 'linear-gradient(135deg, #2a1f0a, #0a0a0f)',
-    '--gradient-hero-crit': 'linear-gradient(135deg, #2a0f0f, #0a0a0f)',
+  'warm-dark': {         // DEFAULT - Amber accent, warm dark background
+    '--bg':           '#0e0d0c',
+    '--surface':      '#161514',
+    '--surface-2':    '#1e1d1b',
+    '--surface-3':    '#282624',
+    '--border':       'rgba(245, 241, 235, 0.05)',
+    '--border-strong':'rgba(245, 241, 235, 0.12)',
+    '--accent':       '#F59E0B',
+    '--accent-hover': '#D97706',
+    '--accent-muted': 'rgba(245, 158, 11, 0.15)',
+    '--destructive':  '#E8650A',
+    '--text-1':       '#f5f1eb',   // Warm white primary
+    '--text-2':       '#b0a898',   // Warm beige secondary
+    '--text-3':       '#6b6358',   // Warm brown muted
+    '--gradient-hero-ok': 'linear-gradient(135deg, #1a2e12, #0e0d0c)',
+    '--gradient-hero-warn': 'linear-gradient(135deg, #2a1f0a, #0e0d0c)',
+    '--gradient-hero-crit': 'linear-gradient(135deg, #2a0f0f, #0e0d0c)',
   },
   'cool-dark': {
     '--bg':           '#090B0E',
@@ -26,6 +27,7 @@ export const themes = {
     '--accent':       '#2DD4BF',
     '--accent-hover': '#20B9A6',
     '--accent-muted': 'rgba(45,212,191,0.12)',
+    '--destructive':  '#E8650A',
     '--text-1':       '#E8F0F5',
     '--text-2':       '#7A9AB0',
     '--text-3':       '#3A5060',
@@ -43,6 +45,7 @@ export const themes = {
     '--accent':       '#E8650A',
     '--accent-hover': '#D4560A',
     '--accent-muted': 'rgba(232,101,10,0.12)',
+    '--destructive':  '#E8650A',
     '--text-1':       '#F0F0F5',
     '--text-2':       '#8080A0',
     '--text-3':       '#404060',
@@ -60,6 +63,7 @@ export const themes = {
     '--accent':       '#E8650A',
     '--accent-hover': '#D4560A',
     '--accent-muted': 'rgba(232,101,10,0.12)',
+    '--destructive':  '#E8650A',
     '--text-1':       '#1A1210',
     '--text-2':       '#6A5C50',
     '--text-3':       '#A09080',

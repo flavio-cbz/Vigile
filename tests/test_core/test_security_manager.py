@@ -329,3 +329,25 @@ def test_jwt_token_isolation(security: SecurityManager):
     # Should fail decoding as refresh token
     with pytest.raises(SecurityError):
         security.verify_refresh_token(wt)
+
+
+def test_load_master_key_warns_on_bad_permissions(temp_dir, caplog):
+    import logging
+    import os
+
+    from cryptography.hazmat.primitives.serialization import NoEncryption, PrivateFormat
+
+    from master.core.security_manager import load_or_generate_master_key
+
+    key_path = os.path.join(temp_dir, "master_insecure.key")
+
+    key1 = load_or_generate_master_key(key_path)
+    os.chmod(key_path, 0o700)
+
+    with caplog.at_level(logging.WARNING, logger="master.core.security_manager"):
+        key2 = load_or_generate_master_key(key_path)
+
+    raw1 = key1.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    raw2 = key2.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    assert raw1 == raw2
+    assert any("insecure permissions" in r.message.lower() or "600" in r.message for r in caplog.records)

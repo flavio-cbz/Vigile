@@ -22,7 +22,7 @@ class DatabaseConnectionPool:
     """
 
     def __init__(self) -> None:
-        self._pool: asyncio.Queue[aiosqlite.Connection] = asyncio.Queue()
+        self._pool: asyncio.Queue[aiosqlite.Connection] = asyncio.Queue(maxsize=5)
         self._connections: list[aiosqlite.Connection] = []
         self._path: str = ""
 

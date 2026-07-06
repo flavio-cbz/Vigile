@@ -23,7 +23,8 @@ export const InsightCard: React.FC<InsightCardProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
-    if (insight.type !== 'offline' || !insight.raw?.last_heartbeat) return;
+    const raw = insight.raw as Record<string, unknown> | undefined;
+    if (insight.type !== 'offline' || !raw?.last_heartbeat) return;
 
     const interval = setInterval(() => {
       setTick((t) => t + 1);
@@ -33,8 +34,9 @@ export const InsightCard: React.FC<InsightCardProps> = ({
 
   let headline = insight.headline;
   let detail = insight.detail;
-  if (insight.type === 'offline' && insight.raw?.last_heartbeat) {
-    const hbTime = insight.raw.last_heartbeat;
+  const raw = insight.raw as Record<string, unknown> | undefined;
+  if (insight.type === 'offline' && raw?.last_heartbeat) {
+    const hbTime = Number(raw.last_heartbeat);
     const durationStr = formatOfflineDuration(hbTime);
     headline = t('node_detail.offline_headline', { duration: durationStr });
     const hbLabel = new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString();

@@ -42,8 +42,9 @@ const formatUptime = (seconds: number | undefined): string => {
   if (minutes < 60) return `${Math.round(minutes)}m`;
   const hours = minutes / 60;
   if (hours < 24) return `${Math.round(hours)}h`;
-  const days = hours / 24;
-  return `${Math.round(days)}j`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = Math.round(hours % 24);
+  return `${days}j ${remainingHours}h`;
 };
 
 export const Dashboard: React.FC = () => {

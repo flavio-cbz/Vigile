@@ -24,7 +24,7 @@ interface ActivityItemProps {
   actor: string;
   userId?: string;
   timestamp: string;
-  details?: any;
+  details?: Record<string, unknown>;
   nodeId?: string | null;
 }
 

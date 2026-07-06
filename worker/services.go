@@ -10,13 +10,13 @@ import (
 )
 
 // handleListServices lists all systemd services.
-func handleListServices(intent Intent) IntentResult {
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+func handleListServices(ctx context.Context, intent Intent) IntentResult {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--no-pager", "--no-legend")
+	cmd := exec.CommandContext(cmdCtx, "systemctl", "list-units", "--type=service", "--no-pager", "--no-legend")
 	out, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
+	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "systemctl timed out"}
 	}
 	if err != nil {
@@ -50,24 +50,24 @@ func handleListServices(intent Intent) IntentResult {
 }
 
 // handleStatusService gets the status of a specific systemd service.
-func handleStatusService(intent Intent) IntentResult {
+func handleStatusService(ctx context.Context, intent Intent) IntentResult {
 	service := getParamString(intent.Params, "service", "")
 	if service == "" {
 		return IntentResult{Success: false, Error: "service parameter required"}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "systemctl", "is-active", service)
+	cmd := exec.CommandContext(cmdCtx, "systemctl", "is-active", service)
 	active, _ := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
+	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "systemctl is-active timed out"}
 	}
 
-	cmd2 := exec.CommandContext(ctx, "systemctl", "is-enabled", service)
+	cmd2 := exec.CommandContext(cmdCtx, "systemctl", "is-enabled", service)
 	enabled, _ := cmd2.Output()
-	if ctx.Err() == context.DeadlineExceeded {
+	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "systemctl is-enabled timed out"}
 	}
 
@@ -81,7 +81,7 @@ func handleStatusService(intent Intent) IntentResult {
 }
 
 // handleRestartService restarts a systemd service.
-func handleRestartService(intent Intent) IntentResult {
+func handleRestartService(ctx context.Context, intent Intent) IntentResult {
 	if intent.RequestedBy == "" {
 		return IntentResult{Success: false, Error: "missing requested_by context"}
 	}
@@ -90,12 +90,12 @@ func handleRestartService(intent Intent) IntentResult {
 	log.Printf("executing action action=RESTART_SERVICE service=%s node_id=%s requested_by=%s approval_id=%s intent_id=%s",
 		service, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "systemctl", "restart", service)
+	cmd := exec.CommandContext(cmdCtx, "systemctl", "restart", service)
 	output, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
+	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "systemctl restart timed out"}
 	}
 	if err != nil {

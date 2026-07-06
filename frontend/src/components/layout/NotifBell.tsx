@@ -4,6 +4,9 @@ import { Bell, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useNodeStore } from '../../store/nodeStore';
 import { useUiStore } from '../../store/uiStore';
 import { TimeAgo } from '../primitives/TimeAgo';
+import { usePolling } from '../../hooks/usePolling';
+import { api } from '../../hooks/useApi';
+import type { ActionProposal } from '../../store/uiStore';
 
 export const NotifBell: React.FC = () => {
   const { t } = useLocale();
@@ -11,32 +14,21 @@ export const NotifBell: React.FC = () => {
   const { openCopilot } = useUiStore();
 
   const [isOpen, setIsOpen] = useState(false);
-  const [proposals, setProposals] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<ActionProposal[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const loadProposals = async () => {
-      try {
-        const token = localStorage.getItem('vigile_access_token');
-        if (!token) return;
-        const res = await fetch('/api/chat/proposals?status=PENDING', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setProposals(data || []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch pending proposals for notifications:', err);
+  const loadProposals = async () => {
+    try {
+      const data = await api<ActionProposal[]>('/api/chat/proposals?status=PENDING', { skipToast: true });
+      if (data) {
+        setProposals(data);
       }
-    };
+    } catch (err) {
+      console.error('Failed to fetch pending proposals for notifications:', err);
+    }
+  };
 
-    loadProposals();
-    const interval = setInterval(loadProposals, 20000);
-    return () => clearInterval(interval);
-  }, []);
+  usePolling('notif_bell_proposals', loadProposals, 20000);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {

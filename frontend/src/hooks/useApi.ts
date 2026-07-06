@@ -2,6 +2,8 @@ import { useToastStore } from '../store/useToastStore';
 import { useAuthStore } from '../store/authStore';
 import { useLocaleStore } from '../store/localeStore';
 
+const toastedErrors = new WeakSet<object>();
+
 export interface ApiOptions extends RequestInit {
   skipToast?: boolean;
   retries?: number;
@@ -133,7 +135,7 @@ export async function api<T = unknown>(
             useToastStore.getState().addToast('warning', 'Limite de débit atteinte', displayMessage);
           }
           const error = new Error(displayMessage);
-          (error as any)._toasted = true;
+          toastedErrors.add(error);
           throw error;
         }
         if (response.status >= 500 && attempt < maxAttempts) {
@@ -151,7 +153,7 @@ export async function api<T = unknown>(
         const error = new Error(displayMessage || `HTTP ${response.status}`);
         if (response.status >= 500 && !skipToast) {
           useToastStore.getState().addToast('error', 'Erreur serveur', displayMessage || `HTTP ${response.status}`);
-          (error as any)._toasted = true;
+          toastedErrors.add(error);
         }
         throw error;
       }
@@ -169,7 +171,7 @@ export async function api<T = unknown>(
         await new Promise((resolve) => window.setTimeout(resolve, 300 * attempt));
         continue;
       }
-      if (!skipToast && !(normalizedError as any)._toasted) {
+      if (!skipToast && !(normalizedError instanceof Error && toastedErrors.has(normalizedError))) {
         useToastStore.getState().addToast(
           'error',
           'Erreur réseau',

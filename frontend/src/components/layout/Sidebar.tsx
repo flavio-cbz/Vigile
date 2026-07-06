@@ -6,10 +6,8 @@ import { useLayoutStore } from '../../store/layoutStore';
 import { useNodeStore } from '../../store/nodeStore';
 import { useUiStore } from '../../store/uiStore';
 import {
-  ShieldAlert,
   LayoutDashboard,
   CheckSquare,
-  Activity,
   Grid,
   X,
   ChevronsLeft,
@@ -21,7 +19,9 @@ import {
   ChevronRight,
   Zap,
 } from 'lucide-react';
+import { VigileLogo } from '../ui/VigileLogo';
 import { useLocale } from '../../i18n';
+import type { NavItem } from '../../types';
 
 export const Sidebar: React.FC = () => {
   const { isAdmin, isOperator } = usePermission();
@@ -119,11 +119,10 @@ export const Sidebar: React.FC = () => {
     const adminItems = [
       { to: '/automations', label: t('nav.automations'), icon: Zap },
       { to: '/plugins', label: t('nav.plugins'), icon: Grid },
-      { to: '/audit', label: t('nav.audit'), icon: Activity },
       { to: '/settings', label: t('nav.settings'), icon: SettingsIcon },
     ];
 
-    const renderLink = (item: any) => {
+    const renderLink = (item: NavItem) => {
       const Icon = item.icon;
       const isActive = item.to === '/chat/new'
         ? copilotOpen
@@ -262,9 +261,7 @@ export const Sidebar: React.FC = () => {
               onClick={handleNavClick}
               className="flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer text-text-1 hover:text-text-1"
             >
-              <div className="w-7 h-7 rounded-md border border-accent/25 bg-accent-muted/15 flex items-center justify-center shadow-[0_0_8px_var(--color-accent-glow)] shrink-0">
-                <ShieldAlert className="w-3.5 h-3.5 text-accent" />
-              </div>
+              <VigileLogo className="w-7 h-7" />
               <span className="font-bold text-xs uppercase tracking-widest font-mono">{t('sidebar.brand')}</span>
             </Link>
             <button
@@ -332,9 +329,7 @@ export const Sidebar: React.FC = () => {
               collapsed ? '' : 'animate-fade-in'
             }`}
           >
-            <div className="w-7 h-7 xl:w-8.5 xl:h-8.5 rounded-md border border-accent/25 bg-accent-muted/15 flex items-center justify-center shadow-[0_0_8px_var(--color-accent-glow)] shrink-0">
-              <ShieldAlert className="w-4 h-4 xl:w-4.5 xl:h-4.5 text-accent animate-pulse" />
-            </div>
+            <VigileLogo className="w-7 h-7 xl:w-8.5 xl:h-8.5" />
             {!collapsed && (
               <span className="font-bold text-xs xl:text-sm uppercase tracking-widest font-mono">
                 {t('sidebar.brand')}

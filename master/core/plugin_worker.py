@@ -134,7 +134,10 @@ class PluginWorker:
         )
 
         try:
-            return await fut
+            return await asyncio.wait_for(fut, timeout=30.0)
+        except asyncio.TimeoutError:
+            self._pending_db_calls.pop(db_call_id, None)
+            raise RuntimeError(f"DB request timed out after 30s: {op_type}")
         finally:
             self._pending_db_calls.pop(db_call_id, None)
 

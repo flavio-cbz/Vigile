@@ -9,10 +9,13 @@ interface ActivitySectionProps {
   entries: ActivityEntry[];
 }
 
+const LOGIN_LOGOUT_ACTIONS = new Set<string>(['user_login', 'user_logout']);
+
 export const ActivitySection: React.FC<ActivitySectionProps> = ({ entries }) => {
   const { t } = useLocale();
+  const filtered = entries.filter((e) => !LOGIN_LOGOUT_ACTIONS.has(e.action));
 
-  if (entries.length === 0) return null;
+  if (filtered.length === 0) return null;
 
   return (
     <div className="space-y-3 relative w-full border-t border-border/30 pt-6 mt-6 animate-fade-in">
@@ -27,7 +30,7 @@ export const ActivitySection: React.FC<ActivitySectionProps> = ({ entries }) => 
 
       <div className="px-4 md:px-12">
         <div className="border border-border rounded-xl bg-surface divide-y divide-border overflow-hidden shadow-md">
-          {entries.map((act) => (
+          {filtered.map((act) => (
             <ActivityItem
               key={act.id}
               action={act.action}

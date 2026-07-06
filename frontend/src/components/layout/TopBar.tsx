@@ -7,8 +7,9 @@ import { useNodeStore } from '../../store/nodeStore';
 import { NodeSelector } from './NodeSelector';
 import { NotifBell } from './NotifBell';
 import { useLocale } from '../../i18n';
-import { LogOut, Settings, ShieldAlert, User, Compass, Palette, Search } from 'lucide-react';
-import { themes } from '../../design/themes';
+import { LogOut, Settings, User, Compass, Palette, Search } from 'lucide-react';
+import { VigileLogo } from '../ui/VigileLogo';
+import { themes, type ThemeKey } from '../../design/themes';
 
 export const TopBar: React.FC = () => {
   const { t } = useLocale();
@@ -54,9 +55,7 @@ export const TopBar: React.FC = () => {
     <header className="h-[var(--topbar-height)] bg-surface/75 backdrop-blur-md border-b border-border-strong/30 flex items-center justify-between px-6 shrink-0 relative z-30 font-interface select-none shadow-[0_4px_20px_var(--shadow-topbar)]">
       <div className="flex items-center gap-6">
         <Link to="/" className="flex items-center gap-2 group md:hidden">
-          <div className="w-7 h-7 xl:w-8.5 xl:h-8.5 bg-accent-muted/20 border border-accent/25 rounded flex items-center justify-center shadow-[0_0_10px_var(--color-accent-glow)] group-hover:border-accent/40 transition-colors">
-            <ShieldAlert className="w-4.5 h-4.5 xl:w-5.5 xl:h-5.5 text-accent animate-pulse" />
-          </div>
+          <VigileLogo className="w-7 h-7 xl:w-8.5 xl:h-8.5" />
         </Link>
 
         <div className="h-4 w-px bg-border-strong/50 hidden sm:block md:hidden" />
@@ -101,15 +100,6 @@ export const TopBar: React.FC = () => {
             <Compass className="w-4 h-4 xl:w-5 h-5 transition-transform duration-200 hover:rotate-12" />
           </Link>
           <Link
-            to="/audit"
-            className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
-              location.pathname === '/audit' ? 'text-accent bg-accent-muted/15' : ''
-            }`}
-            title={t("ui.cmd_audit")}
-          >
-            <ShieldAlert className="w-4 h-4 xl:w-5 h-5" />
-          </Link>
-          <Link
             to="/settings"
             className={`p-2 xl:p-2.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 transition-colors ${
               location.pathname === '/settings' ? 'text-accent bg-accent-muted/15' : ''
@@ -151,14 +141,14 @@ export const TopBar: React.FC = () => {
                 <div className="grid grid-cols-2 gap-1.5">
                   {Object.keys(themes).map((t) => {
                     const dotColor =
-                      t === 'warm-dark' ? 'bg-[#6366f1]' :
+                      t === 'warm-dark' ? 'bg-[#F59E0B]' :
                       t === 'cool-dark' ? 'bg-[#2dd4bf]' :
                       t === 'gray-dark' ? 'bg-[#8b8698]' :
                       'bg-[#e8650a]';
                     return (
                       <button
                         key={t}
-                        onClick={() => setTheme(t as any)}
+                        onClick={() => setTheme(t as ThemeKey)}
                         className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-[9px] text-left uppercase truncate font-semibold border transition-all duration-150 cursor-pointer ${
                           theme === t
                             ? 'border-accent text-accent bg-accent-muted/20 shadow-[0_0_8px_var(--color-accent-glow)]'

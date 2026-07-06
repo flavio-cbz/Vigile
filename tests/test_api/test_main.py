@@ -24,6 +24,20 @@ from master.core.security_manager import SecurityManager
 from master.db.database import reset_db
 from master.main import app
 
+from starlette.routing import Route
+
+# Register temporary test routes to verify exception handling logic
+# Must be inserted directly at the front of the app.router.routes list to avoid being shadowed by "/" mount
+def raise_dict(request):
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error": "dict_error"})
+
+def raise_str(request):
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="str_error")
+
+app.router.routes.insert(0, Route("/_test/exc-dict", raise_dict, methods=["GET"]))
+app.router.routes.insert(0, Route("/_test/exc-str", raise_str, methods=["GET"]))
+
+
 
 @pytest.fixture
 def auth_headers(security: SecurityManager):
@@ -42,9 +56,14 @@ async def test_main_lifespan(temp_dir, monkeypatch):
     db_path = os.path.join(temp_dir, "lifespan_test.db")
     key_path = os.path.join(temp_dir, "master_ed25519.key")
 
-    monkeypatch.setattr(settings, "database_path", db_path)
-    monkeypatch.setattr(settings, "master_key_path", key_path)
-    monkeypatch.setattr(settings, "plugins_dir", temp_dir)
+    import master.main
+    import master.config
+    monkeypatch.setattr(master.main.settings, "database_path", db_path)
+    monkeypatch.setattr(master.main.settings, "master_key_path", key_path)
+    monkeypatch.setattr(master.main.settings, "plugins_dir", temp_dir)
+    monkeypatch.setattr(master.config.settings, "database_path", db_path)
+    monkeypatch.setattr(master.config.settings, "master_key_path", key_path)
+    monkeypatch.setattr(master.config.settings, "plugins_dir", temp_dir)
 
     # Temporarily reset the security manager singleton to allow the lifespan to initialize it
     import master.core.security_manager as sm
@@ -83,15 +102,7 @@ async def test_main_lifespan(temp_dir, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_custom_http_exception_handlers(db):
-    # Register temporary test routes to verify exception handling logic
-    @app.get("/_test/exc-dict")
-    def raise_dict():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error": "dict_error"})
-
-    @app.get("/_test/exc-str")
-    def raise_str():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="str_error")
-
+    transport = ASGITransport(app=app)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         resp_dict = await c.get("/_test/exc-dict")
@@ -170,14 +181,11 @@ async def test_admin_settings_endpoint(db, auth_headers):
 @pytest.mark.asyncio
 async def test_update_llm_settings(db, auth_headers, temp_dir, monkeypatch):
     """Test updating LLM settings via POST /api/admin/settings/llm."""
+    import master.main
+    import master.config
     db_path = os.path.join(temp_dir, "override_main_test.db")
-    monkeypatch.setattr(settings, "database_path", db_path)
-    try:
-        import master.api.admin
-
-        monkeypatch.setattr(master.api.admin.settings, "database_path", db_path)
-    except Exception:
-        pass
+    monkeypatch.setattr(master.main.settings, "database_path", db_path)
+    monkeypatch.setattr(master.config.settings, "database_path", db_path)
 
     # Clean up static overrides before test
     override_file = Path(db_path).parent / "settings_override.json"
@@ -286,6 +294,9 @@ async def test_llm_client_lazy_recreation():
     """Test N3 level: lazy recreation of LLMClient on settings update."""
     from master.api.deps import get_llm_client, reset_llm_clients
     from master.config import settings
+
+    # Reset cached clients first to clear any cached client from previous tests
+    reset_llm_clients()
 
     # 1. Access initial client
     settings.apply_overrides(

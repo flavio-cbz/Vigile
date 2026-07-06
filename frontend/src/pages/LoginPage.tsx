@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuthStore } from '../store/authStore';
 import { LoginForm } from '../components/auth/LoginForm';
-import { ShieldAlert, KeyRound, Loader2, Cpu, Activity, Terminal as TerminalIcon } from 'lucide-react';
+import { KeyRound, Loader2, Cpu, Activity, Terminal as TerminalIcon } from 'lucide-react';
+import { VigileLogo } from '../components/ui/VigileLogo';
 import { api } from '../hooks/useApi';
 import { useLocale } from '../i18n';
 import { ParticleCanvas } from '../components/login/ParticleCanvas';
+import type { MeResponse, LoginLocationState } from '../types';
 const BootLogs: React.FC = () => {
   const { t } = useLocale();
   const [logs, setLogs] = useState<string[]>([]);
@@ -83,7 +85,7 @@ export const LoginPage: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [tempToken, setTempToken] = useState<string | null>(null);
 
-  const from = (location.state as any)?.from?.pathname || '/';
+  const from = (location.state as LoginLocationState | null)?.from?.pathname || '/';
 
   const handleLogin = async (username: string, password: string) => {
     setOriginalUsername(username);
@@ -102,18 +104,19 @@ export const LoginPage: React.FC = () => {
       }
       const { access_token, refresh_token } = data;
 
-      let meData: any = null;
+      let meData: MeResponse | null = null;
       try {
-        meData = await api<any>('/api/auth/me', {
+        meData = await api<MeResponse>('/api/auth/me', {
           headers: {
             'Authorization': `Bearer ${access_token}`,
           },
           skipToast: true,
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         // If meData throws 403, check if it's MUST_CHANGE_PASSWORD
         try {
-          const parsed = JSON.parse(err.message);
+          const message = err instanceof Error ? err.message : String(err);
+          const parsed = JSON.parse(message);
           if (parsed.code === 'MUST_CHANGE_PASSWORD' || parsed.detail === 'Must change password first') {
             setTempToken(access_token);
             setOldPassword(password);
@@ -137,8 +140,9 @@ export const LoginPage: React.FC = () => {
       });
 
       navigate(from, { replace: true });
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       setIsLoading(false);
     }
   };
@@ -161,7 +165,7 @@ export const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      await api<any>('/api/auth/change-password', {
+      await api<{ detail?: string }>('/api/auth/change-password', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${tempToken}`,
@@ -177,8 +181,9 @@ export const LoginPage: React.FC = () => {
       setTempToken(null);
 
       await handleLogin(originalUsername, newPassword);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       setIsLoading(false);
     }
   };
@@ -198,9 +203,7 @@ export const LoginPage: React.FC = () => {
         <ParticleCanvas />
 
         <div className="z-10 flex items-center gap-3">
-          <div className="w-10 h-10 border border-accent/20 bg-accent/5 rounded-lg flex items-center justify-center shadow-lg">
-            <ShieldAlert className="w-5 h-5 text-accent animate-pulse" />
-          </div>
+          <VigileLogo className="w-10 h-10" />
           <div>
             <div className="font-serif text-lg font-bold text-text-1 tracking-wide">Vigile</div>
             <div className="text-[8px] font-extrabold text-accent uppercase tracking-widest mt-0.5 font-interface">
@@ -258,9 +261,7 @@ export const LoginPage: React.FC = () => {
 
         <div className="w-full max-w-sm border border-border rounded-xl bg-surface p-8 relative animate-fade-in z-10 shadow-2xl">
           <div className="flex flex-col items-center mb-8 text-center">
-            <div className="w-12 h-12 border border-accent/20 bg-accent-muted rounded-xl flex items-center justify-center mb-3 shadow lg:hidden">
-              <ShieldAlert className="w-6 h-6 text-accent animate-pulse" />
-            </div>
+            <VigileLogo className="w-12 h-12 mb-3 mx-auto lg:hidden" />
             <h2 className="font-serif text-xl font-bold text-text-1 tracking-wide">
               {mustChangePassword ? t('login.form_title_change_password') : t('login.form_title')}
             </h2>

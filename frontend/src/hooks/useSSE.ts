@@ -20,7 +20,7 @@ export function useSSE() {
   const connect = useCallback(async (
     url: string,
     body: object,
-    onEvent: (event: { type: string; [key: string]: any }) => void,
+    onEvent: (event: { type: string; [key: string]: unknown }) => void,
     onDone?: () => void,
     onError?: (err: Error) => void,
     readTimeoutMs: number = 60000
@@ -99,9 +99,9 @@ export function useSSE() {
         }
       }
       if (onDone) onDone();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('SSE Stream error:', err);
-      if (onError) onError(err);
+      if (onError) onError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       window.clearTimeout(connectionTimeout);
       setStreaming(false);

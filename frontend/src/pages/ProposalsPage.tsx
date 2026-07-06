@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../hooks/useApi';
 import type { ActionProposal } from '../store/uiStore';
-import { useNodeStore } from '../store/nodeStore';
+import { useNodeStore, type Node } from '../store/nodeStore';
 import { usePermission } from '../hooks/usePermission';
 import { useChatStore } from '../store/chatStore';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -15,7 +15,7 @@ import { useLocale } from '../i18n';
 
 const ProposalRow: React.FC<{
   prop: ActionProposal;
-  node: any;
+  node: Node | undefined;
   isOperator: boolean;
   executing: boolean;
   handleRejectInit: (id: string) => void;
@@ -55,8 +55,8 @@ const ProposalRow: React.FC<{
 
         <h4 className="font-mono text-xs text-text-1 font-bold truncate">
           {t('prop.action')} : <span className="text-accent">{prop.action}</span>
-          {prop.params?.target && (
-            <> · {t('prop.target')} : <code className="text-text-2">{prop.params.target}</code></>
+          {Boolean(prop.params?.target) && (
+            <> · {t('prop.target')} : <code className="text-text-2">{String(prop.params!.target)}</code></>
           )}
         </h4>
 
@@ -75,9 +75,9 @@ const ProposalRow: React.FC<{
           )}
         </p>
 
-        {prop.params?.result && (
+        {Boolean(prop.params?.result) && (
           <div className="p-3 rounded bg-surface-2 border border-border font-mono text-[10px] text-text-2 leading-relaxed max-h-24 overflow-y-auto mt-2">
-            Result: {prop.params.result}
+            Result: {String(prop.params!.result)}
           </div>
         )}
       </div>

@@ -43,6 +43,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
   const { t } = useLocale();
   const [nodesStats, setNodesStats] = useState<Record<string, Snapshot[]>>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [hoveredBar, setHoveredBar] = useState<{ nodeIdx: number; barIdx: number } | null>(null);
   const [period, setPeriod] = useState<'24h' | '7d'>(
     () => (localStorage.getItem('vigile_trend_period') as '24h' | '7d') || '24h'
   );
@@ -328,7 +329,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
             {t('trend.empty')}
           </div>
         ) : (
-          nodes.map((node) => {
+          nodes.map((node, nodeIdx) => {
             const nodeSnaps = nodesStats[node.id] || [];
             const timelineBars = getTimelineData(node, nodeSnaps);
             const uptimePct = calculateUptime(timelineBars);
@@ -373,19 +374,24 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                       if (bar.status === 'warning') colorClass = 'bg-severity-warning/70 hover:bg-severity-warning';
                       if (bar.status === 'critical') colorClass = 'bg-severity-critical/70 hover:bg-severity-critical';
 
+                      const isHovered = hoveredBar?.nodeIdx === nodeIdx && hoveredBar?.barIdx === barIdx;
+
                       return (
                         <div
                           key={barIdx}
-                          title={`${bar.label} : ${bar.details}`}
-                          className={`flex-1 h-6 rounded-sm transition-transform duration-100 hover:scale-y-125 cursor-pointer relative group ${colorClass}`}
+                          className={`flex-1 h-6 rounded-sm transition-transform duration-100 hover:scale-y-125 cursor-pointer relative ${colorClass}`}
+                          onMouseEnter={() => setHoveredBar({ nodeIdx: nodeIdx, barIdx })}
+                          onMouseLeave={() => setHoveredBar(null)}
                         >
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
-                            <div className="bg-surface-2 border border-border-strong text-text-1 text-[10px] rounded p-2 shadow-xl whitespace-nowrap flex flex-col gap-0.5">
-                              <span className="font-mono text-text-3">{bar.label}</span>
-                              <span className="font-semibold">{bar.details}</span>
+                          {isHovered && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+                              <div className="bg-surface-2 border border-border-strong text-text-1 text-[10px] rounded p-2 shadow-xl whitespace-nowrap flex flex-col gap-0.5">
+                                <span className="font-mono text-text-3">{bar.label}</span>
+                                <span className="font-semibold">{bar.details}</span>
+                              </div>
+                              <div className="w-1.5 h-1.5 bg-surface-2 border-r border-b border-border-strong rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2 z-40" />
                             </div>
-                            <div className="w-1.5 h-1.5 bg-surface-2 border-r border-b border-border-strong rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2 z-40" />
-                          </div>
+                          )}
                         </div>
                       );
                     })}

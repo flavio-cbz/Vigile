@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -73,10 +74,10 @@ type MetricsSnapshot struct {
 }
 
 // collectMetrics gathers all system metrics from /proc (Linux) or sysctl/ps (macOS).
-func collectMetrics() MetricsSnapshot {
+func collectMetrics(ctx context.Context) MetricsSnapshot {
 	now := float64(time.Now().UnixMicro()) / 1_000_000
 	if runtime.GOOS == "darwin" {
-		return collectDarwinMetrics(now)
+		return collectDarwinMetrics(ctx, now)
 	}
 	diskTotal, diskUsed, diskPercent, disks := getDiskMetrics()
 	return MetricsSnapshot{
@@ -352,8 +353,8 @@ func isNumeric(s string) bool {
 // ── Intent handler ───────────────────────────────────────────────────
 
 // handleGetStats collects metrics and returns them as a STATUS_REPORT.
-func handleGetStats(intent Intent) IntentResult {
-	metrics := collectMetrics()
+func handleGetStats(ctx context.Context, intent Intent) IntentResult {
+	metrics := collectMetrics(ctx)
 	out, err := json.Marshal(metrics)
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("marshal error: %v", err)}
@@ -362,8 +363,8 @@ func handleGetStats(intent Intent) IntentResult {
 }
 
 // buildStatusReport builds a STATUS_REPORT message from metrics.
-func buildStatusReport() map[string]interface{} {
-	m := collectMetrics()
+func buildStatusReport(ctx context.Context) map[string]interface{} {
+	m := collectMetrics(ctx)
 	return map[string]interface{}{
 		"type":             "STATUS_REPORT",
 		"version":          Version,
@@ -389,16 +390,16 @@ func buildStatusReport() map[string]interface{} {
 
 // ── Darwin (macOS) Fallback Metrics Helpers ──────────────────────────
 
-func collectDarwinMetrics(now float64) MetricsSnapshot {
+func collectDarwinMetrics(ctx context.Context, now float64) MetricsSnapshot {
 	cores := runtime.NumCPU()
 	diskTotal, diskUsed, diskPercent, disks := getDiskMetrics()
 
-	cpuPercent := getDarwinCPUPercent()
-	load1, load5, load15 := getDarwinLoadAvg()
-	memTotal, memUsed, memPercent := getDarwinMem()
-	swapTotal, swapUsed := getDarwinSwap()
-	uptime := getDarwinUptime()
-	procCount := getDarwinProcessCount()
+	cpuPercent := getDarwinCPUPercent(ctx)
+	load1, load5, load15 := getDarwinLoadAvg(ctx)
+	memTotal, memUsed, memPercent := getDarwinMem(ctx)
+	swapTotal, swapUsed := getDarwinSwap(ctx)
+	uptime := getDarwinUptime(ctx)
+	procCount := getDarwinProcessCount(ctx)
 
 	return MetricsSnapshot{
 		CPUPercent:    cpuPercent,
@@ -421,8 +422,10 @@ func collectDarwinMetrics(now float64) MetricsSnapshot {
 	}
 }
 
-func getDarwinCPUPercent() float64 {
-	cmd := exec.Command("ps", "-A", "-o", "%cpu")
+func getDarwinCPUPercent(ctx context.Context) float64 {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "ps", "-A", "-o", "%cpu")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -450,8 +453,10 @@ func getDarwinCPUPercent() float64 {
 	return math.Round(percent*100) / 100
 }
 
-func getDarwinLoadAvg() (float64, float64, float64) {
-	cmd := exec.Command("sysctl", "-n", "vm.loadavg")
+func getDarwinLoadAvg(ctx context.Context) (float64, float64, float64) {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "sysctl", "-n", "vm.loadavg")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, 0, 0
@@ -468,8 +473,10 @@ func getDarwinLoadAvg() (float64, float64, float64) {
 	return l1, l5, l15
 }
 
-func getDarwinMem() (int64, int64, float64) {
-	cmd := exec.Command("sysctl", "-n", "hw.memsize")
+func getDarwinMem(ctx context.Context) (int64, int64, float64) {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "sysctl", "-n", "hw.memsize")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, 0, 0
@@ -479,7 +486,7 @@ func getDarwinMem() (int64, int64, float64) {
 		return 0, 0, 0
 	}
 
-	cmdStats := exec.Command("vm_stat")
+	cmdStats := exec.CommandContext(cmdCtx, "vm_stat")
 	statsOut, err := cmdStats.Output()
 	if err != nil {
 		return total, 0, 0
@@ -527,8 +534,10 @@ func extractVmStatValue(line string) int64 {
 	return val
 }
 
-func getDarwinSwap() (int64, int64) {
-	cmd := exec.Command("sysctl", "-n", "vm.swapusage")
+func getDarwinSwap(ctx context.Context) (int64, int64) {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "sysctl", "-n", "vm.swapusage")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, 0
@@ -569,8 +578,10 @@ func parseSwapVal(s string) int64 {
 	}
 }
 
-func getDarwinUptime() float64 {
-	cmd := exec.Command("sysctl", "-n", "kern.boottime")
+func getDarwinUptime(ctx context.Context) float64 {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "sysctl", "-n", "kern.boottime")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -597,8 +608,10 @@ func getDarwinUptime() float64 {
 	return float64(uptime)
 }
 
-func getDarwinProcessCount() int {
-	cmd := exec.Command("ps", "-A")
+func getDarwinProcessCount(ctx context.Context) int {
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "ps", "-A")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0

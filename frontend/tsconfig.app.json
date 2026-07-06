@@ -25,6 +25,7 @@
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "noImplicitAny": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },

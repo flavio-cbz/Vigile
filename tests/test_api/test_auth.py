@@ -408,3 +408,136 @@ async def test_change_password_user_not_found(client: AsyncClient, security: Sec
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "user not found" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_refresh_no_token_no_cookie(client: AsyncClient):
+    response = await client.post("/api/auth/refresh", json={})
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "refresh token required" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_logout_no_token_no_cookie(client: AsyncClient, db):
+    response = await client.post("/api/auth/logout", json={})
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+
+@pytest.mark.asyncio
+async def test_login_demo_user(client: AsyncClient, db):
+    response = await client.post("/api/auth/login", json={"username": "guest", "password": "guest"})
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
+    assert "vigile_access_token" in response.cookies
+    assert "vigile_refresh_token" in response.cookies
+
+
+@pytest.mark.asyncio
+async def test_refresh_demo_user(client: AsyncClient, db):
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": "guest", "password": "guest"}
+    )
+    assert login_resp.status_code == status.HTTP_200_OK
+    refresh_token = login_resp.json()["refresh_token"]
+
+    response = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["refresh_token"] != refresh_token
+    assert "vigile_access_token" in response.cookies
+
+
+@pytest.mark.asyncio
+async def test_change_password_demo_user_blocked(client: AsyncClient, db, security: SecurityManager):
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": "guest", "password": "guest"}
+    )
+    access_token = login_resp.json()["access_token"]
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = await client.post(
+        "/api/auth/change-password",
+        headers=headers,
+        json={"old_password": "guest", "new_password": "newpassword123"},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "demo mode" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_change_password_weak_password_validation(client: AsyncClient, db, security: SecurityManager):
+    await db.execute("UPDATE users SET must_change_password = 0 WHERE username = 'admin'")
+    await db.commit()
+
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    access_token = login_resp.json()["access_token"]
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = await client.post(
+        "/api/auth/change-password",
+        headers=headers,
+        json={"old_password": "admin", "new_password": "short"},
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.asyncio
+async def test_must_change_password_blocks_non_auth_endpoints(client: AsyncClient, db, security: SecurityManager):
+    import uuid
+
+    user_id = str(uuid.uuid4())
+    pw_hash = security.hash_password("testpass123")
+    await db.execute(
+        "INSERT INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES (?, 'mustchange_user', ?, 'admin', 1, 1, ?, ?)",
+        (user_id, pw_hash, time.time(), time.time()),
+    )
+    await db.commit()
+
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": "mustchange_user", "password": "testpass123"}
+    )
+    assert login_resp.status_code == status.HTTP_200_OK
+    access_token = login_resp.json()["access_token"]
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    me_resp = await client.get("/api/auth/me", headers=headers)
+    assert me_resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_refresh_theft_cascade_revocation(client: AsyncClient, db, security: SecurityManager):
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    original_refresh = login_resp.json()["refresh_token"]
+    original_hash = security.hash_refresh_token(original_refresh)
+
+    resp1 = await client.post("/api/auth/refresh", json={"refresh_token": original_refresh})
+    assert resp1.status_code == status.HTTP_200_OK
+    new_refresh = resp1.json()["refresh_token"]
+
+    resp2 = await client.post("/api/auth/refresh", json={"refresh_token": original_refresh})
+    assert resp2.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "token reuse detected" in resp2.json()["detail"].lower()
+
+    new_hash = security.hash_refresh_token(new_refresh)
+    async with db.execute(
+        "SELECT revoked FROM refresh_tokens WHERE token_hash = ?", (new_hash,)
+    ) as cursor:
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row["revoked"] == 1
+
+    async with db.execute(
+        "SELECT action FROM audit_log WHERE action = 'REFRESH_THEFT_DETECTED'"
+    ) as cursor:
+        row = await cursor.fetchone()
+        assert row is not None

@@ -68,7 +68,7 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
             <ProposalInline
               proposalId={message.proposal.id}
               action={message.proposal.action}
-              target={message.proposal.target || message.proposal.params?.target}
+              target={message.proposal.target || (typeof message.proposal.params?.target === 'string' ? message.proposal.params.target : undefined)}
               riskLevel={message.proposal.risk_level}
               reasoning={message.proposal.reasoning}
               status={message.proposal.status || 'PENDING'}

@@ -37,7 +37,7 @@ export interface InsightRecord {
   icon: string;
   headline: string;
   detail: string;
-  raw?: any;
+  raw?: Record<string, unknown>;
 }
 
 export interface NodeRecord {

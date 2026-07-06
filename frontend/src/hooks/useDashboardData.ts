@@ -23,7 +23,7 @@ export interface ActivityEntry {
   actor?: string;
   user_id?: string;
   timestamp: number;
-  details?: unknown;
+  details?: Record<string, unknown>;
   node_id?: string;
 }
 

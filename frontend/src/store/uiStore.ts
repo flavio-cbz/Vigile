@@ -7,7 +7,7 @@ export interface InsightItem {
   icon: string;
   headline: string;
   detail: string;
-  raw?: any;
+  raw?: Record<string, unknown>;
 }
 
 export interface ActionProposal {
@@ -15,7 +15,7 @@ export interface ActionProposal {
   node_id: string;
   action: string;
   target: string;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
   reasoning: string;
   risk_level: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';

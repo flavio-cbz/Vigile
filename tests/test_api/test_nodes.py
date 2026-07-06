@@ -387,7 +387,7 @@ async def test_get_bulk_status(client: AsyncClient, db, auth_headers, security: 
     assert "statuses" in data
     assert "n-bulk" in data["statuses"]
     status_node = data["statuses"]["n-bulk"]
-    assert status_node["cpu"] == 26
+    assert status_node["cpu"] == 25.5
     assert status_node["mem"] == 50
     assert status_node["disk"] == 25
     assert status_node["uptime"] == 600.0

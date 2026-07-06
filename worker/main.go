@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
@@ -105,18 +106,21 @@ func main() {
 	fp := collectFingerprint()
 	logger.Printf("Fingerprint: hostname=%s arch=%s os=%s", fp.Hostname, fp.Arch, fp.OS)
 
-	// ── Create worker connection ─────────────────────────────────────────
-	wc := NewWorkerConn(url, token, workerToken, privKey, pubKey, fp)
+	// ── Create lifecycle context (cancelled on SIGINT/SIGTERM) ───────────
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// ── Handle OS signals ────────────────────────────────────────────────
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigCh
 		logger.Printf("Received signal %v, shutting down...", sig)
-		wc.Stop()
+		cancel()
 	}()
+
+	// ── Create worker connection ─────────────────────────────────────────
+	wc := NewWorkerConn(ctx, url, token, workerToken, privKey, pubKey, fp)
 
 	// ── Run (with auto-reconnect backoff) ────────────────────────────────
 	logger.Printf("Starting connection loop...")

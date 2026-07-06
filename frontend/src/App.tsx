@@ -5,7 +5,6 @@ import { LoginPage } from './pages/LoginPage';
 import { Dashboard } from './pages/Dashboard';
 import { NodeDetail } from './pages/NodeDetail';
 import { ProposalsPage } from './pages/ProposalsPage';
-import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ServersPage } from './pages/ServersPage';
 import { PluginsPage } from './pages/PluginsPage';
@@ -42,7 +41,6 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="nodes/:id" element={<NodeDetail />} />
         <Route path="proposals" element={<ProposalsPage />} />
-        <Route path="audit" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="servers" element={<ServersPage />} />
         <Route path="plugins" element={<PluginsPage />} />

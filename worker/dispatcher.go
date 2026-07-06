@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -70,23 +71,23 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 	var result IntentResult
 	switch msg.Action {
 	case "GET_STATS":
-		result = handleGetStats(msg)
+		result = handleGetStats(wc.ctx, msg)
 	case "READ_LOGS":
-		result = handleReadLogs(msg)
+		result = handleReadLogs(wc.ctx, msg)
 	case "LIST_CONTAINERS":
-		result = handleListContainers(msg)
+		result = handleListContainers(wc.ctx, msg)
 	case "RESTART_CONTAINER":
-		result = handleRestartContainer(msg)
+		result = handleRestartContainer(wc.ctx, msg)
 	case "LIST_SERVICES":
-		result = handleListServices(msg)
+		result = handleListServices(wc.ctx, msg)
 	case "STATUS_SERVICE":
-		result = handleStatusService(msg)
+		result = handleStatusService(wc.ctx, msg)
 	case "RESTART_SERVICE":
-		result = handleRestartService(msg)
+		result = handleRestartService(wc.ctx, msg)
 	case "READ_LOGS_SERVICE":
-		result = handleReadLogsService(msg)
+		result = handleReadLogsService(wc.ctx, msg)
 	case "UPDATE_WORKER":
-		result = handleUpdateWorker(wc, msg)
+		result = handleUpdateWorker(wc.ctx, wc, msg)
 	default:
 		result = IntentResult{
 			IntentID: msg.IntentID,
@@ -100,7 +101,7 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 	return mustJSON(result)
 }
 
-func handleUpdateWorker(wc *WorkerConn, msg Intent) IntentResult {
+func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentResult {
 	// 1. Determine URLs
 	binaryURL := wc.masterURL + fmt.Sprintf("/api/nodes/binary/%s/%s/worker", runtime.GOOS, runtime.GOARCH)
 	checksumURL := binaryURL + ".sha256"
@@ -118,7 +119,11 @@ func handleUpdateWorker(wc *WorkerConn, msg Intent) IntentResult {
 	}
 
 	// 3. Download checksum
-	resp, err := client.Get(checksumURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", checksumURL, nil)
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create checksum request: %v", err)}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to download checksum: %v", err)}
 	}
@@ -152,7 +157,11 @@ func handleUpdateWorker(wc *WorkerConn, msg Intent) IntentResult {
 		os.Remove(tmpPath)
 	}()
 
-	resp, err = client.Get(binaryURL)
+	reqBin, err := http.NewRequestWithContext(ctx, "GET", binaryURL, nil)
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create binary request: %v", err)}
+	}
+	resp, err = client.Do(reqBin)
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to download binary: %v", err)}
 	}
@@ -207,7 +216,10 @@ func handleUpdateWorker(wc *WorkerConn, msg Intent) IntentResult {
 
 	// 7. Schedule exit after sending result
 	go func() {
-		time.Sleep(1 * time.Second)
+		select {
+		case <-time.After(1 * time.Second):
+		case <-wc.ctx.Done():
+		}
 		os.Exit(0)
 	}()
 

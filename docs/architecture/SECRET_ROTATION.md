@@ -2,7 +2,7 @@
 
 ## Clé API LLM compromise
 
-La clé `sk-hY0lH32Z1UDArBSXxUsoyw` est marquée comme compromise dans le rapport d'audit.
+La clé `sk-XXXX...XXXX` (masquée volontairement) est marquée comme compromise dans le rapport d'audit.
 Elle fonctionne encore mais DOIT être remplacée immédiatement.
 
 ### Procédure
@@ -12,7 +12,7 @@ Elle fonctionne encore mais DOIT être remplacée immédiatement.
    - `api.anthropic.com` → https://console.anthropic.com/settings/keys
    - `chat.youcloud.ovh` → dashboard du proxy LLM auto-hébergé
 
-2. **Révoquer l'ancienne clé** `sk-hY0lH32Z1UDArBSXxUsoyw` sur le dashboard du provider
+2. **Révoquer l'ancienne clé** `sk-XXXX...XXXX` sur le dashboard du provider
 
 3. **Générer une nouvelle clé** sur le dashboard du provider
 

@@ -26,11 +26,11 @@ var dockerClient = &http.Client{
 	Timeout: 30 * time.Second,
 }
 
-func dockerAPI(method, path string, body io.Reader) ([]byte, error) {
+func dockerAPI(ctx context.Context, method, path string, body io.Reader) ([]byte, error) {
 	if _, err := os.Stat(dockerSocket); os.IsNotExist(err) {
 		return nil, fmt.Errorf("Docker socket not found at %s", dockerSocket)
 	}
-	req, err := http.NewRequest(method, "http://localhost"+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, "http://localhost"+path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +50,8 @@ func dockerAPI(method, path string, body io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-func handleListContainers(intent Intent) IntentResult {
-	data, err := dockerAPI("GET", "/v1.45/containers/json?all=true", nil)
+func handleListContainers(ctx context.Context, intent Intent) IntentResult {
+	data, err := dockerAPI(ctx, "GET", "/v1.45/containers/json?all=true", nil)
 	if err != nil {
 		return IntentResult{Success: false, Error: err.Error()}
 	}
@@ -72,31 +72,68 @@ func handleListContainers(intent Intent) IntentResult {
 	}
 	var summary []containerSummary
 	for _, c := range containers {
-		id, _ := c["Id"].(string)
+		idVal, ok := c["Id"].(string)
+		if !ok {
+			logger.Printf("Warning: container missing 'Id' field, skipping")
+			continue
+		}
+		id := idVal
 		if len(id) > 12 {
 			id = id[:12]
 		}
-		state, _ := c["State"].(string)
-		status, _ := c["Status"].(string)
-		image, _ := c["Image"].(string)
-		names, _ := c["Names"].([]interface{})
+
+		state, ok := c["State"].(string)
+		if !ok {
+			logger.Printf("Warning: container %s missing 'State'", id)
+		}
+		status, ok := c["Status"].(string)
+		if !ok {
+			logger.Printf("Warning: container %s missing 'Status'", id)
+		}
+		image, ok := c["Image"].(string)
+		if !ok {
+			logger.Printf("Warning: container %s missing 'Image'", id)
+		}
+
+		names, ok := c["Names"].([]interface{})
+		if !ok {
+			logger.Printf("Warning: container %s missing 'Names'", id)
+		}
 		name := ""
 		if len(names) > 0 {
-			name, _ = names[0].(string)
-			name = strings.TrimPrefix(name, "/")
+			nameStr, ok := names[0].(string)
+			if !ok {
+				logger.Printf("Warning: container %s has non-string name at index 0", id)
+			} else {
+				name = strings.TrimPrefix(nameStr, "/")
+			}
 		}
-		portsRaw, _ := c["Ports"].([]interface{})
+
+		portsRaw, ok := c["Ports"].([]interface{})
+		if !ok {
+			logger.Printf("Warning: container %s missing 'Ports'", id)
+		}
 		var ports []string
 		for _, p := range portsRaw {
-			if pm, ok := p.(map[string]interface{}); ok {
-				privatePort, _ := pm["PrivatePort"].(float64)
-				publicPort, hasPublic := pm["PublicPort"]
-				if hasPublic {
-					ip, _ := pm["IP"].(string)
-					ports = append(ports, fmt.Sprintf("%s:%v->%.0f", ip, publicPort, privatePort))
-				} else {
-					ports = append(ports, fmt.Sprintf("%.0f", privatePort))
+			pm, ok := p.(map[string]interface{})
+			if !ok {
+				logger.Printf("Warning: container %s has invalid port entry", id)
+				continue
+			}
+			privatePort, ok := pm["PrivatePort"].(float64)
+			if !ok {
+				logger.Printf("Warning: container %s port entry missing 'PrivatePort'", id)
+				continue
+			}
+			publicPort, hasPublic := pm["PublicPort"]
+			if hasPublic {
+				ip, ok := pm["IP"].(string)
+				if !ok {
+					logger.Printf("Warning: container %s port entry missing 'IP'", id)
 				}
+				ports = append(ports, fmt.Sprintf("%s:%v->%.0f", ip, publicPort, privatePort))
+			} else {
+				ports = append(ports, fmt.Sprintf("%.0f", privatePort))
 			}
 		}
 		summary = append(summary, containerSummary{
@@ -104,11 +141,14 @@ func handleListContainers(intent Intent) IntentResult {
 		})
 	}
 
-	out, _ := json.Marshal(summary)
+	out, err := json.Marshal(summary)
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("marshal error: %v", err)}
+	}
 	return IntentResult{Success: true, Output: string(out)}
 }
 
-func handleRestartContainer(intent Intent) IntentResult {
+func handleRestartContainer(ctx context.Context, intent Intent) IntentResult {
 	if intent.RequestedBy == "" {
 		return IntentResult{Success: false, Error: "missing requested_by context"}
 	}
@@ -121,7 +161,7 @@ func handleRestartContainer(intent Intent) IntentResult {
 		return IntentResult{Success: false, Error: "container_id parameter required"}
 	}
 
-	_, err := dockerAPI("POST", fmt.Sprintf("/v1.45/containers/%s/restart", containerID), nil)
+	_, err := dockerAPI(ctx, "POST", fmt.Sprintf("/v1.45/containers/%s/restart", containerID), nil)
 	if err != nil {
 		return IntentResult{Success: false, Error: err.Error()}
 	}

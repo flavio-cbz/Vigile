@@ -279,6 +279,7 @@ def test_plugin_edge_cases():
         "uptime_seconds",
         "processes",
         "collected_at",
+        "disks",
     }
     flat_default = default_snap.model_dump_flat()
     assert set(flat_default.keys()) == all_keys

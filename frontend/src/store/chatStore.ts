@@ -3,6 +3,7 @@ import { useAuthStore } from './authStore';
 import { useToastStore } from './useToastStore';
 import { useLocaleStore } from './localeStore';
 import { api } from '../hooks/useApi';
+import type { ProposalActionResponse } from '../types';
 
 export interface Message {
   role: 'system' | 'user' | 'assistant';
@@ -14,7 +15,7 @@ export interface Message {
     reasoning?: string;
     target?: string;
     status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
-    params?: Record<string, any>;
+    params?: Record<string, unknown>;
   };
 }
 
@@ -32,7 +33,7 @@ export interface Proposal {
   id: string;
   node_id: string;
   action: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
   reasoning: string;
   risk_level: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
@@ -46,6 +47,7 @@ interface ChatState {
   activeSession: ChatSession | null;
   isLoading: boolean;
   isStreaming: boolean;
+  _abortController?: AbortController;
   fetchSessions: (nodeId?: string | null) => Promise<void>;
   selectSession: (sessionId: string | null) => void;
   createSession: (nodeId?: string | null, title?: string) => Promise<ChatSession | null>;
@@ -54,6 +56,7 @@ interface ChatState {
   updateSession: (sessionId: string, title: string, nodeId: string | null) => Promise<void>;
   approveProposal: (proposalId: string) => Promise<boolean>;
   rejectProposal: (proposalId: string, reason?: string) => Promise<boolean>;
+  abortStreaming: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -62,6 +65,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeSession: null,
   isLoading: false,
   isStreaming: false,
+
+  abortStreaming: () => {
+    const { _abortController } = get();
+    if (_abortController) {
+      _abortController.abort();
+      set({ isStreaming: false });
+    }
+  },
 
   fetchSessions: async (nodeId) => {
     set({ isLoading: true });
@@ -183,6 +194,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     const abortController = new AbortController();
+    set({ _abortController: abortController });
     const fetchTimeout = window.setTimeout(() => abortController.abort(), 30000);
 
     try {
@@ -285,7 +297,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       useToastStore.getState().addToast('error', 'Erreur Réseau', 'La connexion IA a été interrompue.');
     } finally {
       window.clearTimeout(fetchTimeout);
-      set({ isStreaming: false });
+      set({ isStreaming: false, _abortController: undefined });
       // Fetch latest sessions to sync titles and history
       const state = get();
       const nodeIdForFetch = state.activeSession?.node_id || null;
@@ -327,22 +339,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   approveProposal: async (proposalId) => {
     try {
-      const res = await api<any>(`/api/chat/proposals/${proposalId}/approve`, {
+      const res = await api<ProposalActionResponse>(`/api/chat/proposals/${proposalId}/approve`, {
         method: 'POST'
       });
       if (res) {
         useToastStore.getState().addToast('success', 'Succès', 'Proposition approuvée et exécutée avec succès.');
         return true;
       }
-    } catch (err: any) {
-      useToastStore.getState().addToast('error', 'Échec', err.message || 'Impossible d\'approuver la proposition.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Impossible d\'approuver la proposition.';
+      useToastStore.getState().addToast('error', 'Échec', message);
     }
     return false;
   },
 
   rejectProposal: async (proposalId, reason) => {
     try {
-      const res = await api<any>(`/api/chat/proposals/${proposalId}/reject`, {
+      const res = await api<ProposalActionResponse>(`/api/chat/proposals/${proposalId}/reject`, {
         method: 'POST',
         body: JSON.stringify({ reason: reason || '' })
       });
@@ -350,8 +363,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         useToastStore.getState().addToast('info', 'Refusé', 'Proposition rejetée.');
         return true;
       }
-    } catch (err: any) {
-      useToastStore.getState().addToast('error', 'Échec', err.message || 'Impossible de rejeter la proposition.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Impossible de rejeter la proposition.';
+      useToastStore.getState().addToast('error', 'Échec', message);
     }
     return false;
   }

@@ -4,18 +4,19 @@
 @import "./styles/animations.css";
 
 :root {
-  --bg:           #0a0a0f;
-  --surface:      #12121a;
-  --surface-2:    #1a1a26;
-  --surface-3:    #232335;
-  --border:       rgba(255, 255, 255, 0.015);
-  --border-strong:rgba(255, 255, 255, 0.04);
-  --accent:       #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-muted: rgba(99, 102, 241, 0.15);
-  --text-1:       #e8e4f0;
-  --text-2:       #9a97b0;
-  --text-3:       #52506b;
+  --bg:           #0e0d0c;
+  --surface:      #161514;
+  --surface-2:    #1e1d1b;
+  --surface-3:    #282624;
+  --border:       rgba(245, 241, 235, 0.03);
+  --border-strong:rgba(245, 241, 235, 0.07);
+  --accent:       #F59E0B;
+  --accent-hover: #D97706;
+  --accent-muted: rgba(245, 158, 11, 0.15);
+  --destructive:  #E8650A;
+  --text-1:       #f5f1eb;
+  --text-2:       #b0a898;
+  --text-3:       #6b6358;
 
   /* Severities - independent of the active theme */
   --severity-critical: #EF4444;
@@ -75,7 +76,7 @@
 
   /* Shadow colors for layout components */
   --shadow-dropdown: color-mix(in srgb, var(--text-1) 50%, transparent);
-  --shadow-sidebar: color-mix(in srgb, var(--text-1) 50%, transparent);
+  --shadow-sidebar: rgba(0, 0, 0, 0.35);
   --shadow-topbar: color-mix(in srgb, var(--text-1) 8%, transparent);
   --shadow-toggle: color-mix(in srgb, var(--text-1) 30%, transparent);
 
@@ -163,6 +164,10 @@
 
   --color-green-custom: var(--severity-ok);
   --color-green-glow: var(--severity-ok);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: rgba(232, 101, 10, 0.08);
+  --color-destructive-border: rgba(232, 101, 10, 0.15);
 
   --color-amber-custom: var(--severity-warning);
   --color-amber-soft: rgba(245, 158, 11, 0.08);

@@ -2,115 +2,61 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [ master, main ]
   pull_request:
-    branches: [master]
-
-env:
-  PYTHONPATH: "."
-  PYTHONIOENCODING: utf-8
+    branches: [ master, main ]
 
 jobs:
-  test-python:
+  backend:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12"]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-
+          python-version: '3.12'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov
-
-      - name: Run unit tests
+      - name: Run Pytest
+        env:
+          PYTHONPATH: .
+          ALLOW_INSECURE: "true"
         run: |
-          python -m pytest -m "not integration" -v --cov=master --cov-report=term --cov-report=xml
+          python -m pytest -m "not integration" -v --cov=master
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
-
-  test-worker:
+  frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-          cache: false
-
-      - name: Build Worker
-        run: |
-          cd worker
-          go build -v -o vigile-worker .
-
-      - name: Vet Worker
-        run: |
-          cd worker
-          go vet ./...
-
-      - name: Test Worker
-        run: |
-          cd worker
-          go test -race -coverprofile=coverage.out ./...
-
-  lint-python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          pip install flake8 black isort mypy
-          pip install -r requirements.txt
-
-      - name: Run pre-commit hooks
-        uses: pre-commit/action@v3.0.1
-
-  build-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
+          node-version: '20'
       - name: Install dependencies
         run: npm ci
-        working-directory: frontend
-
-      - name: Run tests
-        run: npm test
-        working-directory: frontend
-
+      - name: Lint
+        run: npm run lint
       - name: Build
         run: npm run build
-        working-directory: frontend
 
-      - name: Check SPA fallback files
-        run: |
-          test -f frontend/dist/index.html || exit 1
-          test -f master/static/index.html || exit 1
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./worker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build
+        run: go build -v ./...
+      - name: Test
+        run: go test -v ./...

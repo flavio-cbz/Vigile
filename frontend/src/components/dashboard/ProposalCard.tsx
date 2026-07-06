@@ -51,19 +51,19 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
     }
   };
 
-  const parsedParams = typeof proposal.params === 'object' ? proposal.params :
-                       (proposal as any).params_json ? (() => {
+  const parsedParams = typeof proposal.params === 'object' && proposal.params !== null ? proposal.params :
+                       ('params_json' in proposal && typeof proposal.params_json === 'string' ? (() => {
                          try {
-                           return JSON.parse((proposal as any).params_json);
+                           return JSON.parse(proposal.params_json as string) as Record<string, unknown>;
                          } catch {
                            return {};
                          }
-                       })() : {};
+                       })() : {}) as Record<string, unknown>;
 
   const displayTarget = proposal.target ||
-                        parsedParams?.service ||
-                        parsedParams?.container_id ||
-                        parsedParams?.container ||
+                        (typeof parsedParams?.service === 'string' ? parsedParams.service : '') ||
+                        (typeof parsedParams?.container_id === 'string' ? parsedParams.container_id : '') ||
+                        (typeof parsedParams?.container === 'string' ? parsedParams.container : '') ||
                         t('common.system');
 
   let cardStatusClass = "card-success";

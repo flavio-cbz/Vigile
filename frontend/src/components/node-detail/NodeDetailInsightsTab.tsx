@@ -16,16 +16,17 @@ const OfflineInsightCard: React.FC<{ insight: InsightRecord; nodeId: string | un
   const [isExpanded, setIsExpanded] = useState(false);
 
   usePolling(
-    `offline_insight_tick_${insight.raw?.last_heartbeat ?? 'none'}`,
+    `offline_insight_tick_${(insight.raw as Record<string, unknown> | undefined)?.last_heartbeat ?? 'none'}`,
     () => setTick((t) => t + 1),
     30000,
-    Boolean(insight.raw?.last_heartbeat)
+    Boolean((insight.raw as Record<string, unknown> | undefined)?.last_heartbeat)
   );
 
   let headline = insight.headline;
   let detail = insight.detail;
-  if (insight.raw?.last_heartbeat) {
-    const hbTime = insight.raw.last_heartbeat;
+  const raw = insight.raw as Record<string, unknown> | undefined;
+  if (raw?.last_heartbeat) {
+    const hbTime = Number(raw.last_heartbeat);
     const durationStr = formatOfflineDuration(hbTime);
     headline = t('node_detail.offline_headline', { duration: durationStr });
     const hbLabel = new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR');

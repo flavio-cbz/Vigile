@@ -114,3 +114,127 @@ async def test_db_connection_pool(db: aiosqlite.Connection):
 
     # After exiting all sessions, get_db_conn should fallback to primary connection
     assert db_mod.get_db_conn() == db_mod._db
+
+
+@pytest.mark.asyncio
+async def test_db_close_all_exception_during_close():
+    import unittest.mock as mock
+
+    import master.db.database as db_mod
+
+    pool = db_mod.DatabaseConnectionPool()
+    fake_conn = mock.AsyncMock()
+    fake_conn.close.side_effect = OSError("simulated close failure")
+
+    pool._connections = [fake_conn]
+    pool._pool = db_mod.asyncio.Queue()
+    await pool._pool.put(fake_conn)
+
+    await pool.close_all()
+
+    fake_conn.close.assert_awaited_once()
+    assert len(pool._connections) == 0
+
+
+@pytest.mark.asyncio
+async def test_db_transaction_success(db: aiosqlite.Connection):
+    import master.db.database as db_mod
+
+    async with db_mod.transaction(db) as conn:
+        await conn.execute(
+            "INSERT INTO nodes (id, name, state, created_at, updated_at) VALUES ('nod-tx-ok', 'TxOk', 'PENDING', 0, 0)"
+        )
+
+    async with db.execute("SELECT id FROM nodes WHERE id = 'nod-tx-ok'") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_close_db():
+    import os
+    import tempfile
+
+    import master.db.database as db_mod
+
+    fd, path = tempfile.mkstemp()
+    os.close(fd)
+    try:
+        orig = db_mod._db
+        db_mod._db = None
+        await db_mod.init_db(path)
+        assert db_mod._db is not None
+        await db_mod.close_db()
+        assert db_mod._db is None
+    finally:
+        db_mod._db = orig
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_pool_acquire_release():
+    import os
+    import tempfile
+
+    import master.db.database as db_mod
+
+    fd, path = tempfile.mkstemp()
+    os.close(fd)
+    try:
+        orig = db_mod._db
+        db_mod._db = None
+        await db_mod.init_db(path, pool_size=2)
+
+        conn1 = await db_mod._pool.acquire()
+        conn2 = await db_mod._pool.acquire()
+        assert conn1 is not conn2
+
+        await db_mod._pool.release(conn1)
+        await db_mod._pool.release(conn2)
+
+        assert db_mod._pool._pool.qsize() == 2
+    finally:
+        db_mod._db = orig
+        await db_mod.close_db()
+        await db_mod.reset_db()
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+@pytest.mark.asyncio
+async def test_db_pool_timeout():
+    import os
+    import tempfile
+    import asyncio
+    import master.db.database as db_mod
+
+    fd, path = tempfile.mkstemp()
+    os.close(fd)
+    try:
+        orig = db_mod._db
+        db_mod._db = None
+        # Pool size of 1
+        await db_mod.init_db(path, pool_size=1)
+        
+        # Acquire the only connection
+        conn1 = await db_mod._pool.acquire()
+        
+        # Trying to acquire another one should timeout
+        with pytest.raises(asyncio.TimeoutError):
+            # We must use wait_for to test if it blocks indefinitely or timeout manually
+            await asyncio.wait_for(db_mod._pool.acquire(), timeout=0.1)
+            
+        await db_mod._pool.release(conn1)
+    finally:
+        db_mod._db = orig
+        await db_mod.close_db()
+        await db_mod.reset_db()
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+

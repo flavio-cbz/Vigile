@@ -64,6 +64,12 @@ export const CopilotPanel: React.FC = () => {
   }, [activeSession?.history, isStreaming]);
 
   useEffect(() => {
+    if (!copilotOpen) {
+      useChatStore.getState().abortStreaming();
+    }
+  }, [copilotOpen]);
+
+  useEffect(() => {
     if (!copilotOpen) return;
 
     const setupSession = async () => {

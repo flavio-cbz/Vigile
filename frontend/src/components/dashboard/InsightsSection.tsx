@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useLocale } from '../../i18n';
 import { SwimLane } from './SwimLane';
@@ -19,6 +19,12 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
   onDiagnose,
 }) => {
   const { t } = useLocale();
+  const [showStable, setShowStable] = useState(false);
+
+  const allInsights = insights;
+  const activeInsights = showStable
+    ? allInsights
+    : allInsights.filter((item) => item.insight.severity !== 'ok');
 
   if (loading) {
     return (
@@ -40,19 +46,27 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
     );
   }
 
-  if (insights.length > 0) {
+  if (activeInsights.length > 0 || allInsights.length > 0) {
     return (
       <SwimLane
         title={t('swim.insights')}
         icon={Sparkles}
         layout="grid"
         subtitle={
-          stableMetricsCount > 0
-            ? `• ${stableMetricsCount} métrique${stableMetricsCount > 1 ? 's' : ''} stable${stableMetricsCount > 1 ? 's' : ''} sur la flotte`
+          stableMetricsCount > 0 && !showStable
+            ? `${activeInsights.length} alerte${activeInsights.length > 1 ? 's' : ''} active${activeInsights.length > 1 ? 's' : ''}`
+            : stableMetricsCount > 0
+            ? `${stableMetricsCount} stable${stableMetricsCount > 1 ? 's' : ''}`
             : undefined
         }
+        onSeeAll={
+          stableMetricsCount > 0
+            ? () => setShowStable(!showStable)
+            : undefined
+        }
+        seeAllLabel={showStable ? 'Masquer les stables' : `Afficher les stables (${stableMetricsCount})`}
       >
-        {insights.map((item, idx) => (
+        {activeInsights.map((item, idx) => (
           <InsightCard
             key={`${item.nodeId}-${item.insight.type}-${idx}`}
             insight={item.insight}
@@ -62,19 +76,6 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
           />
         ))}
       </SwimLane>
-    );
-  }
-
-  if (stableMetricsCount > 0) {
-    return (
-      <div className="px-4 md:px-12">
-        <div className="flex items-center gap-2 text-xs text-success bg-success/5 border border-success/15 rounded-lg py-2.5 px-4 w-fit">
-          <span className="text-sm">✓</span>
-          <span className="font-interface font-medium">
-            {t('dash.stable_metrics', { count: stableMetricsCount })}
-          </span>
-        </div>
-      </div>
     );
   }
 

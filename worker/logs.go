@@ -16,7 +16,7 @@ const (
 )
 
 // handleReadLogs handles the READ_LOGS intent.
-func handleReadLogs(intent Intent) IntentResult {
+func handleReadLogs(ctx context.Context, intent Intent) IntentResult {
 	path := getParamString(intent.Params, "path", "")
 	lines := getParamInt(intent.Params, "lines", 50)
 
@@ -32,7 +32,7 @@ func handleReadLogs(intent Intent) IntentResult {
 	return readLogFile(path, lines)
 }
 
-func handleReadLogsService(intent Intent) IntentResult {
+func handleReadLogsService(ctx context.Context, intent Intent) IntentResult {
 	service := getParamString(intent.Params, "service", "")
 	lines := getParamInt(intent.Params, "lines", 50)
 
@@ -41,12 +41,12 @@ func handleReadLogsService(intent Intent) IntentResult {
 	}
 
 	// Use journalctl for systemd services
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", service, "--no-pager", "-n", fmt.Sprintf("%d", lines), "--output", "short")
+	cmd := exec.CommandContext(cmdCtx, "journalctl", "-u", service, "--no-pager", "-n", fmt.Sprintf("%d", lines), "--output", "short")
 	out, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
+	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "journalctl timed out"}
 	}
 	if err != nil {

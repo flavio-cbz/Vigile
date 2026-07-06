@@ -76,6 +76,8 @@ class Settings(BaseModel):
     llm_api_key: str = load_secret("LLM_API_KEY")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+    llm_chat_temperature: float = float(os.getenv("LLM_CHAT_TEMPERATURE", "0.3"))
+    llm_structured_temperature: float = float(os.getenv("LLM_STRUCTURED_TEMPERATURE", "0.1"))
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
     llm_timeout: int = int(os.getenv("LLM_TIMEOUT", "30"))
     llm_stream_read_timeout: int = int(os.getenv("LLM_STREAM_READ_TIMEOUT", "120"))
@@ -178,11 +180,17 @@ class Settings(BaseModel):
             self.enforce_https = True
             self.cookie_secure = True
         if not self.server_secret_key:
-            self.server_secret_key = secrets.token_hex(32)
-            _log.warning("SERVER_SECRET_KEY auto-generated (dev mode). Set it in production.")
+            if self.allow_insecure:
+                self.server_secret_key = "dev_secret_key_only"
+                _log.warning("SERVER_SECRET_KEY auto-generated (allow_insecure). Set it in production.")
+            else:
+                raise ValueError("SERVER_SECRET_KEY must be set in production")
         if not self.jwt_secret_key:
-            self.jwt_secret_key = secrets.token_hex(32)
-            _log.warning("JWT_SECRET_KEY auto-generated (dev mode). Set it in production.")
+            if self.allow_insecure:
+                self.jwt_secret_key = "dev_jwt_key_only"
+                _log.warning("JWT_SECRET_KEY auto-generated (allow_insecure). Set it in production.")
+            else:
+                raise ValueError("JWT_SECRET_KEY must be set in production")
 
     def apply_overrides(self, base_url: str, api_key: str, model: str) -> None:
         """Mutate LLM configuration in memory (Zero filesystem I/O per DI rule)."""

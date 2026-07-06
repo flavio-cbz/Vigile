@@ -10,6 +10,7 @@ import { useLayoutStore } from '../../store/layoutStore';
 import { useAuthStore } from '../../store/authStore';
 import { api } from '../../hooks/useApi';
 import { usePolling } from '../../hooks/usePolling';
+import type { ActionProposal } from '../../store/uiStore';
 
 export const RootLayout: React.FC = () => {
   const { isAddNodeModalOpen, setAddNodeModalOpen } = useLayoutStore();
@@ -22,7 +23,7 @@ export const RootLayout: React.FC = () => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
     try {
-      const data = await api<any[]>('/api/chat/proposals?status=PENDING', { skipToast: true });
+      const data = await api<ActionProposal[]>('/api/chat/proposals?status=PENDING', { skipToast: true });
       if (data) {
         useLayoutStore.getState().setPendingCount(data.length);
       }

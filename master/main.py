@@ -229,7 +229,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("🔒 Secure mode active: HTTPS/WSS is enforced.")
 
     # 1. Init DB
-    db = await init_db(settings.database_path, timeout=settings.db_timeout)
+    db = await init_db(settings.database_path, timeout=settings.db_timeout, pool_size=settings.db_pool_size)
     logger.info("Database connection established.")
 
     # 2. Migrations

@@ -16,6 +16,7 @@ import { nodeMutations } from '../store/nodeMutations';
 import { clsx } from 'clsx';
 import { api } from '../hooks/useApi';
 import { formatOfflineDuration } from '../utils/formatTime';
+import type { NodeMetrics } from '../types';
 
 const formatHeartbeatTime = (ts: number | null): string => {
   if (!ts) return '—';
@@ -25,7 +26,7 @@ const formatHeartbeatTime = (ts: number | null): string => {
   return `${hrs}h${mins}`;
 };
 
-const getOfflineMiniInsight = (metrics: any, t: (k: string) => string): string | null => {
+const getOfflineMiniInsight = (metrics: NodeMetrics, t: (k: string) => string): string | null => {
   if (!metrics || (metrics.cpu === undefined && metrics.mem === undefined)) {
     return null;
   }
@@ -74,7 +75,7 @@ export const ServersPage: React.FC = () => {
   usePageTitle(t('page_title.servers'));
   const { nodes, isLoading, fetchNodes } = useNodeStore();
   const [search, setSearch] = useState('');
-  const [bulkStatus, setBulkStatus] = useState<Record<string, any>>({});
+  const [bulkStatus, setBulkStatus] = useState<Record<string, NodeMetrics>>({});
   const navigate = useNavigate();
   const { isAdmin } = usePermission();
   const addToast = useToastStore((s) => s.addToast);
@@ -84,7 +85,7 @@ export const ServersPage: React.FC = () => {
 
   const fetchBulkMetrics = async () => {
     try {
-      const data = await api<{ statuses: Record<string, any> }>('/api/nodes/bulk/status');
+      const data = await api<{ statuses: Record<string, NodeMetrics> }>('/api/nodes/bulk/status');
       if (data && data.statuses) {
         setBulkStatus(data.statuses);
       }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -39,23 +40,38 @@ type WorkerConn struct {
 	fingerprint Fingerprint
 	workerToken string
 
+	ctx    context.Context
+	cancel context.CancelFunc
 	stopCh chan struct{}
 	doneCh chan struct{}
 }
 
 // NewWorkerConn creates a new WorkerConn.
 // workerToken is an optional persisted token for reconnection (empty on first enrollment).
-func NewWorkerConn(masterURL, joinToken, workerToken string, privKey ed25519.PrivateKey, pubKey ed25519.PublicKey, fp Fingerprint) *WorkerConn {
-	return &WorkerConn{
+// The provided context controls the worker lifecycle; cancelling it triggers graceful shutdown.
+func NewWorkerConn(ctx context.Context, masterURL, joinToken, workerToken string, privKey ed25519.PrivateKey, pubKey ed25519.PublicKey, fp Fingerprint) *WorkerConn {
+	ctx, cancel := context.WithCancel(ctx)
+	wc := &WorkerConn{
 		masterURL:   masterURL,
 		joinToken:   joinToken,
 		workerToken: workerToken,
 		privKey:     privKey,
 		pubKey:      pubKey,
 		fingerprint: fp,
+		ctx:         ctx,
+		cancel:      cancel,
 		stopCh:      make(chan struct{}),
 		doneCh:      make(chan struct{}),
 	}
+	// Propagate context cancellation to stopCh so all goroutines observe shutdown.
+	go func() {
+		select {
+		case <-ctx.Done():
+			wc.Stop()
+		case <-wc.stopCh:
+		}
+	}()
+	return wc
 }
 
 // Connect establishes the WebSocket connection and runs the enrollment handshake.
@@ -72,7 +88,7 @@ func (wc *WorkerConn) Connect() error {
 	wsURL := wc.masterURL + "/ws/worker/join"
 	logger.Printf("Connecting to %s ...", wsURL)
 
-	ws, err := DialWebSocket(wsURL)
+	ws, err := DialWebSocket(wc.ctx, wsURL)
 	if err != nil {
 		wc.mu.Lock()
 		wc.state = stateDisconnected
@@ -222,12 +238,16 @@ func (wc *WorkerConn) RunOperational() error {
 	msgCh := make(chan wsMsg, 1)
 	go func() {
 		for {
+			select {
+			case <-wc.ctx.Done():
+				return
+			default:
+			}
 			_ = ws.SetReadDeadline(time.Now().Add(90 * time.Second))
 			data, err := ws.ReadText()
 			select {
 			case msgCh <- wsMsg{data, err}:
 			default:
-				// Channel full (shouldn't happen), drop message
 			}
 			if err != nil {
 				return
@@ -241,6 +261,10 @@ func (wc *WorkerConn) RunOperational() error {
 			logger.Printf("Stop signal received")
 			return nil
 
+		case <-wc.ctx.Done():
+			logger.Printf("Context cancelled, stopping operational phase")
+			return nil
+
 		case <-heartbeatTicker.C:
 			if err := wc.sendJSON(map[string]interface{}{
 				"type":    "HEARTBEAT",
@@ -251,7 +275,7 @@ func (wc *WorkerConn) RunOperational() error {
 			}
 
 		case <-statusTicker.C:
-			report := buildStatusReport()
+			report := buildStatusReport(wc.ctx)
 			if err := wc.sendJSON(report); err != nil {
 				logger.Printf("Status report error: %v", err)
 			}
@@ -274,7 +298,11 @@ func (wc *WorkerConn) RunOperational() error {
 				continue
 			}
 
-			msgType, _ := msgObj["type"].(string)
+			msgType, ok := msgObj["type"].(string)
+			if !ok {
+				logger.Printf("Warning: message from master missing 'type' field")
+				continue
+			}
 
 			switch msgType {
 			case "HEARTBEAT_ACK":
@@ -313,6 +341,11 @@ func (wc *WorkerConn) RunWithBackoff() {
 			logger.Printf("Worker stopped gracefully")
 			close(wc.doneCh)
 			return
+		case <-wc.ctx.Done():
+			logger.Printf("Context cancelled, stopping worker")
+			wc.disconnect()
+			close(wc.doneCh)
+			return
 		default:
 		}
 
@@ -337,13 +370,18 @@ func (wc *WorkerConn) RunWithBackoff() {
 			}
 			wc.disconnect()
 
-			select {
-			case <-wc.stopCh:
-				logger.Printf("Stopped during backoff")
-				close(wc.doneCh)
-				return
-			case <-time.After(backoff):
-			}
+		select {
+		case <-wc.stopCh:
+			logger.Printf("Stopped during backoff")
+			close(wc.doneCh)
+			return
+		case <-wc.ctx.Done():
+			logger.Printf("Context cancelled during backoff")
+			wc.disconnect()
+			close(wc.doneCh)
+			return
+		case <-time.After(backoff):
+		}
 
 			backoff = time.Duration(math.Min(
 				float64(backoff)*2,
@@ -391,6 +429,7 @@ func (wc *WorkerConn) RunWithBackoff() {
 
 // Stop signals graceful shutdown.
 func (wc *WorkerConn) Stop() {
+	wc.cancel()
 	select {
 	case <-wc.stopCh:
 	default:
@@ -444,7 +483,10 @@ func (wc *WorkerConn) readTyped(expectedType string) (map[string]interface{}, er
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, fmt.Errorf("json parse: %w", err)
 	}
-	gotType, _ := msg["type"].(string)
+	gotType, ok := msg["type"].(string)
+	if !ok {
+		return nil, fmt.Errorf("message missing 'type' field, expected %q", expectedType)
+	}
 	if gotType != expectedType {
 		return nil, fmt.Errorf("expected type %q, got %q", expectedType, gotType)
 	}

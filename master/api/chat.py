@@ -38,6 +38,7 @@ from master.api.deps import (
     DB,
     get_llm_client,
     get_node_manager,
+    get_settings,
     get_structured_llm,
     require_role,
 )
@@ -70,6 +71,7 @@ async def chat(
     nm: NodeManager = Depends(get_node_manager),
     llm: LLMClient = Depends(get_llm_client),
     sllm: StructuredLLM = Depends(get_structured_llm),
+    settings: Any = Depends(get_settings),
     accept_language: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     """
@@ -166,7 +168,7 @@ async def chat(
         tool_calls_detected: list[dict] = []
 
         try:
-            async for event in llm.stream(messages, temperature=0.3):
+            async for event in llm.stream(messages, temperature=settings.llm_chat_temperature):
                 if event["type"] == "token":
                     token_buffer += event["content"]
                     yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
@@ -992,7 +994,7 @@ async def _try_extract_proposal(
                     ),
                 },
             ],
-            temperature=0.1,
+            temperature=settings.llm_structured_temperature,
             max_retries=2,
         )
         if not req.action or req.action == "NONE":

@@ -240,7 +240,7 @@ Reminder: never commit without explicit user authorization.
 
 **No external dependencies without explicit authorization.**
 
-**Python (Master) Whitelist:** `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`, `passlib`, `httpx`, `pydantic`
+**Python (Master) Whitelist:** `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`, `passlib`, `httpx`, `pydantic`, `bcrypt` (via passlib), `itsdangerous` (via python-jose), `python-multipart` (via starlette), `anyio`, `pydantic-settings`
 
 **Go (Worker) Whitelist:** Standard Library only. `go get` forbidden.
 

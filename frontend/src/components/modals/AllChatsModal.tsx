@@ -5,13 +5,14 @@ import { X, MessageSquareCode, Trash2 } from 'lucide-react';
 import { useNodeStore } from '../../store/nodeStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToastStore } from '../../store/useToastStore';
+import { type Message } from '../../store/chatStore';
 
 interface ChatSession {
   id: string;
   user_id: string;
   node_id: string | null;
   title: string;
-  history: any[];
+  history: Message[];
   created_at: number;
   updated_at: number;
 }
