@@ -473,10 +473,11 @@ export const fr = {
   "node_detail.os_default": "Linux",
   "node_detail.arch_default": "amd64",
   "node_detail.hostname_label": "Hostname : {hostname}",
+  "node_detail.version_label": "Worker v{version}",
   "node_detail.tab.insights": "Analyses IA",
   "node_detail.tab.metrics": "Métriques",
-  "node_detail.tab.services": "Services ({count})",
-  "node_detail.tab.containers": "Docker ({count})",
+  "node_detail.tab.services": "Services",
+  "node_detail.tab.containers": "Docker",
   "node_detail.tab.logs": "Logs",
   "node_detail.tab.settings": "Paramètres",
   "node_detail.insights_section_title": "Insights IA trouvés sur cette machine",
@@ -526,6 +527,15 @@ export const fr = {
   "node_detail.admin_required": "Droits administrateur requis",
   "node_detail.image_label": "Image: {image}",
   "node_detail.id_label": "ID: {id}",
+
+  // Prédiction Disque
+  "metrics.prediction_title": "Prédiction d'utilisation disque",
+  "metrics.prediction_1h": "1 heure",
+  "metrics.prediction_6h": "6 heures",
+  "metrics.prediction_24h": "24 heures",
+  "metrics.prediction_48h": "48 heures",
+  "metrics.prediction_full": "Disque estimé plein dans {hours} heures",
+  "metrics.prediction_low_confidence": "Confiance de prédiction trop faible (R² < 0.3)",
 
   // Modals
   "modal.close_aria": "Fermer",

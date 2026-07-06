@@ -2,7 +2,7 @@
 
 > Fleet Manager intelligent pour serveurs et homelabs.
 > Zero-Trust. Zéro Dépendance Tierce sur le Core. Zéro SSH.
-> Vision long terme : système autonome dirigé par l'IA (Sprints 7→11).
+> Vision long terme : système autonome dirigé par l'IA (Sprints 13→17).
 
 ---
 
@@ -410,28 +410,38 @@ Résultat renvoyé au Master → Audit Trail signé
 ```tree
 vigile/
 ├── master/
-│   ├── main.py
+│   ├── main.py                      # Point d'entrée FastAPI
 │   ├── config.py                    # Settings depuis env vars
 │   ├── core/
 │   │   ├── security_manager.py      # JOIN_TOKEN, WORKER_TOKEN, Ed25519, JWT, RBAC
 │   │   ├── node_manager.py          # États nodes, WebSockets actives, heartbeat
-│   │   ├── plugin_manager.py        # Système de hooks natif (inspiré Pluggy)
+│   │   ├── plugin_manager.py        # Système de hooks natif + sandbox sous-processus
+│   │   ├── plugin_worker.py         # Worker IPC sandbox (JSON-RPC, DB proxy)
+│   │   ├── automation_engine.py     # Moteur d'automatisations (règles, triggers, actions)
 │   │   ├── llm_client.py            # Client LLM universel (inspiré LiteLLM)
-│   │   └── structured_llm.py        # Structured outputs (inspiré Instructor)
+│   │   ├── structured_llm.py        # Structured outputs (inspiré Instructor)
+│   │   └── rate_limiter.py          # Sliding window rate limiter
 │   ├── api/
 │   │   ├── nodes.py                 # POST /generate-join, GET /kickstart.sh, binaires
 │   │   ├── chat.py                  # POST /chat (stream SSE), POST /chat/approve
 │   │   ├── auth.py                  # POST /auth/login, /auth/refresh
-│   │   └── admin.py                 # Gestion users, révocation tokens, audit log
+│   │   ├── admin.py                 # Gestion users, révocation tokens, audit log
+│   │   ├── automations.py           # CRUD règles d'automatisation
+│   │   └── schemas/
+│   │       ├── automations.py       # Schémas Pydantic automations
+│   │       └── ...
 │   ├── ws/
 │   │   └── worker_handler.py        # WebSocket /ws/worker/join — enrollment + opérationnel
 │   ├── plugins/
-│   │   ├── docker_plugin.py         # Actions Docker (si Docker détecté)
-│   │   ├── systemd_plugin.py        # Actions systemd (si Linux)
-│   │   └── metrics_plugin.py        # CPU, RAM, disque (cross-platform)
+│   │   ├── docker_plugin.py         # Actions Docker (LIST_CONTAINERS, RESTART_CONTAINER)
+│   │   ├── systemd_plugin.py        # Actions systemd (LIST_SERVICES, RESTART_SERVICE)
+│   │   ├── metrics_plugin.py        # CPU, RAM, disque, uptime (cross-platform)
+│   │   ├── clean_logs.py            # Proposition nettoyage logs obsolètes
+│   │   ├── discord_alert.py         # Notification Discord
+│   │   └── slack_alert.py           # Notification Slack
 │   └── db/
-│       ├── models.py                # Tables SQLite (nodes, tokens, users, audit, proposals)
-│       └── migrations.py            # Schema init
+│       ├── models.py                # Tables SQLite (nodes, tokens, users, audit, proposals, rules)
+│       └── migrations.py            # Schema init + migrations
 │
 ├── worker/
 │   ├── main.go
@@ -446,12 +456,25 @@ vigile/
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── ChatPanel.tsx        # Chat streaming (inspiré Open WebUI)
-│   │   │   ├── ActionProposal.tsx   # Carte d'approbation Human-in-the-Loop
-│   │   │   ├── NodeCard.tsx         # État d'un node + métriques
-│   │   │   ├── LogViewer.tsx        # Terminal lecture seule (Xterm.js natif)
-│   │   │   └── AuditLog.tsx         # Trail immuable
+│   │   ├── pages/                   # 9 pages réelles (~3000 lignes)
+│   │   │   ├── Dashboard.tsx         # Vue d'ensemble (Insights/Servers/Containers/Activity)
+│   │   │   ├── LoginPage.tsx        # Authentification
+│   │   │   ├── ServersPage.tsx      # Liste des serveurs
+│   │   │   ├── NodeDetail.tsx       # Détail d'un nœud (métriques, logs, actions)
+│   │   │   ├── ProposalsPage.tsx    # Propositions IA (approuver/rejeter)
+│   │   │   ├── PluginsPage.tsx      # Catalogue des plugins
+│   │   │   ├── AutomationsPage.tsx  # Règles d'automatisation (586 lignes)
+│   │   │   ├── SettingsPage.tsx     # Paramètres utilisateur
+│   │   │   └── AuditPage.tsx        # Registre d'audit
+│   │   ├── components/              # Nombreux composants réutilisables
+│   │   │   ├── dashboard/
+│   │   │   ├── ui/
+│   │   │   ├── automations/
+│   │   │   ├── ChatPanel.tsx
+│   │   │   └── ...
+│   │   ├── hooks/                   # Hooks personnalisés (useApi, useDashboardData...)
+│   │   ├── store/                   # Zustand stores (nodeStore, uiStore, insightsStore...)
+│   │   ├── i18n/                    # Traductions français/anglais
 │   │   └── lib/
 │   │       ├── ws.ts                # Client WebSocket Master ↔ Frontend
 │   │       └── sse.ts               # SSE reader pour le streaming LLM
@@ -469,6 +492,8 @@ vigile/
 ## Sprints
 
 > **Légende :** ✅ = fait | ⚠️ = partiel | ❌ = manquant
+>
+> **Critères de test :** Les Sprints 7→17 doivent être validés selon les 5 niveaux de `RULES.md §8` avant de passer à l'étape suivante. Les critères spécifiques sont définis dans chaque sprint.
 
 ### Sprint 1 — Core Sécurisé et Enrollment ✅
 
@@ -496,40 +521,50 @@ vigile/
 - ✅ API : `POST /api/chat` (stream), `POST /api/proposals/{id}/approve`, `POST /api/proposals/{id}/reject`
 - ✅ Audit Trail : hash chaîné, stockage immuable
 
-### Sprint 4 — Frontend ✅
+### Sprint 4 — Frontend React SPA ⚠️ (construit mais buggué)
 
-- ✅ Application React standalone (vite + TailwindCSS + shadcn/ui)
+**Ce qui est construit :**
+- ✅ Application React standalone (vite + TailwindCSS + shadcn/ui) — 9 pages réelles, ~3000 lignes
 - ✅ `CopilotPanel` (ChatPanel) : streaming SSE natif, historique de conversation
 - ✅ `ProposalInline` / `ProposalCard` (ActionProposal) : carte d'approbation avec contexte et niveau de risque
-- ✅ `NodeCard` : état, métriques temps réel, logs
-- ✅ `NodeDetailLogsTab` (LogViewer) : terminal lecture seule, WebSocket streaming
+- ✅ `NodeCard` / `NodeDetail` : état, métriques temps réel, logs
 - ✅ `AuditPage` (AuditLog) : timeline des actions approuvées
 - ✅ Auth UI : login, gestion de session JWT
-- ✅ **Plugin Catalogue** : page d'accueil des plugins disponibles avec installation en 1 clic
+- ✅ `PluginsPage` : catalogue des plugins
+- ✅ `AutomationsPage` : moteur d'automatisations (règles, déclencheurs, actions)
+- ✅ `SettingsPage`, `ServersPage`, `Dashboard` avec sections Insight/Servers/Containers/Activity/Fleet
 
-### Sprint 5 — Plugin Ecosystem (Home Assistant-like) ✅ (100%)
+**Bugs connus (à corriger dans Sprint 7-8) :**
+- ❌ CPU indique 0-1% au lieu de la valeur réelle
+- ❌ Un seul disque visible au lieu de 3
+- ❌ Erreur réseau "Request timed out" sur l'onglet Docker
+- ❌ Badge de navigation affiche `(.)` au lieu du count
+- ❌ Logs chargés en boucle infinie
+- ❌ Surlignage des métriques au survol non fonctionnel
+- ❌ Carte "État de la flotte" : le temps déborde de la carte
+- ❌ Prédiction disque aberrante (+2145 Go/j)
 
-- ✅ **Format de plugin standardisé** : métadonnées, dépendances, hooks, configuration
-- ✅ **Plugin Registry** : catalogue de plugins téléchargeables (GitHub / registre local) — endpoints API et fallback résilient hors-ligne validés
-- ✅ **Installation frontend** : browse, install, activate, configure depuis l'UI
-- ✅ **Plugin isolation** : chaque plugin dans son propre sous-processus (sandbox) avec proxy DB transparent
-- ✅ **Moteur d'automatisations** : déclencheur (trigger) → conditions (conditions) → actions
-  - Triggers : heartbeat, STATUS_REPORT, INTENT_RESULT, timer, webhook
-  - Conditions : métrique > seuil, service down, log match, time window
-  - Actions : intent Worker, webhook, notification, logs
-- ✅ **Plugin SDK** : documentation + template pour créer des plugins tiers (`docs/PLUGIN_SDK.md`)
-- ✅ Exemples de plugins : Discord Alert, Slack Alert, Clean Logs (propositions de nettoyage de disque)
+### Sprint 5 — Plugin Ecosystem (Sandbox + Automations) ⚠️ (core OK, extension UI à venir)
 
-### Sprint 6 — Production Hardening ⚠️
+**Ce qui est construit :**
+- ✅ **Plugin isolation** : chaque plugin dans son propre sous-processus (sandbox) avec proxy DB transparent — `PluginProcessWrapper` + `plugin_worker.py` (JSON-RPC IPC, DB proxying) — **totalement réel**
+- ✅ **Plugin Registry** : catalogue de plugins téléchargeables (endpoints API + fallback offline) — commit `8c220c6`
+- ✅ **Moteur d'automatisations** : backend `automation_engine.py` + API `automations.py` + frontend `AutomationsPage.tsx` (586 lignes) — règles, déclencheurs, conditions, actions enum
+- ✅ **Plugins existants** : docker, systemd, metrics, clean_logs, discord_alert, slack_alert — 6 plugins fonctionnels au format `register(pm)`
+- ✅ **Plugin SDK** : documentation `docs/PLUGIN_SDK.md` + template
+- ❌ **Format profond (dossier + manifest.json + pages auto-découvertes)** : n'existe pas — c'est le Sprint 9
+- ❌ **Marketplace 1-clic depuis l'UI** : le catalogue frontend existe mais l'installation distale automatique n'est pas finalisée
+- ❌ **Plugins avec pages dédiées** : tous les plugins sont des fichiers `.py` uniques, aucun n'a de composant React — c'est le Sprint 9-10
+
+### Sprint 6 — Production Hardening ❌ (sauf rate limiter)
 
 Le passage en production nécessite de verrouiller les limites du système et d'automatiser le cycle de vie des credentials.
 
-#### 1. Rate Limiting Multi-Niveaux (FastAPI Middleware)
-- **Middleware IP & Token** : Limitation du nombre de requêtes à l'aide d'un algorithme de *sliding-window* stocké en mémoire locale (avec option d'extension Redis).
-- **Limites configurables via `settings`** :
-  - Authentification (`/api/auth/login`) : max 5 requêtes par minute par IP.
-  - Endpoints de script (`/api/nodes/kickstart.sh`) : max 10 requêtes par minute par IP.
-  - API de contrôle des Workers : max 100 requêtes par minute par utilisateur.
+> **Note** : Le rate limiter middleware + endpoint `/metrics` Prometheus sont les seules parties entamées (commit `3f9ae11`). Le reste est à zéro.
+
+#### 1. Rate Limiting Multi-Niveaux (FastAPI Middleware) ⚠️
+- ✅ **Sliding-window rate limiter** : Implémenté via `master/core/rate_limiter.py`, endpoints `/metrics` Prometheus opérationnels (commit `3f9ae11`).
+- ❌ **Limites configurables via `settings`** : Les defaults (5/min login, 10/min script, 100/min API) ne sont pas encore branchés aux settings.
 
 #### 2. Rotation Automatique des `WORKER_TOKEN`
 - **Mécanisme** : Lors du heartbeat, si `rotation_due` (7 jours écoulés depuis `issued_at`), le Master génère un nouveau token et l'envoie dans une payload asynchrone :
@@ -556,105 +591,688 @@ Le passage en production nécessite de verrouiller les limites du système et d'
   - `vigile_database_latency_seconds` : Temps de réponse des requêtes aiosqlite.
 
 ---
+---
+
+### Sprint 7 — Corrections Métriques et Fiabilité ✅
+
+#### 1. Métriques CPU et Disque (Node Details)
+
+- ✅ **CPU à 0-1% au lieu de 80%** : Corrigé — l'idle CPU additionnait le field index 0 au lieu du field index 4 (iowait). (`worker/stats.go`)
+- ✅ **Un seul disque visible sur 3** : Corrigé — `MetricsSnapshot` expose maintenant `Disks []DiskMount` avec tous les points de montage collectés via `getLinuxDiskMetrics()`. (`worker/stats.go`)
+- ✅ **« Disque plein dans moins d'un jour ! Taux de croissance de +2145.23 Go/jour »** : Corrigé — `DiskPredictionCard` utilise une régression linéaire avec seuil de confiance R² < 0.3. Prédictions à 1/6/24/48h. (`frontend/.../NodeDetailMetricsTab.tsx`)
+- ✅ **Aucune info de version Worker** : Corrigé — `var Version` injecté par ldflags, envoyé dans HEARTBEAT et STATUS_REPORT, affiché dans `NodeDetailHeader`. (`worker/discovery.go`, `worker/connection.go`, `frontend/.../NodeDetailHeader.tsx`)
+
+#### 2. Stabilité des Onglets et Requêtes
+
+- ✅ **Erreur réseau « Request timed out »** : Corrigé — ajout de `timeoutMs: 30000` aux appels API services/containers, nettoyage des dépendances `useCallback`. (`frontend/src/hooks/useNodeDetailData.ts`)
+- ✅ **Logs chargés en boucle infini** : Corrigé — remplacement des abonnements complets au store Zustand par des sélecteurs individuels, ajout de guards `loadingServices`/`loadingContainers` dans le `useEffect` de changement d'onglet. (`frontend/src/hooks/useNodeInsights.ts`, `frontend/src/pages/NodeDetail.tsx`)
+
+### Sprint 8 — Rafraîchissement UI/UX ❌
+
+#### 1. Corrections d'Affichage
+
+- ❌ **Surlignage des métriques au survol** : L'effet hover sur les graphiques/tables de métriques est moche et non fonctionnel. À refaire avec un tooltip propre ou un highlight stylé (shadcn/ui Card + animation Tailwind).
+- ❌ **Badge de navigation « Services (.) »** : Au lieu d'afficher « Services (24) », le badge affiche « Services (.) ». Problème de formatage ou d'état vide/NaN dans le compteur. Idem pour Docker. À corriger dans le composant Sidebar.
+- ❌ **Carte « État de la flotte » débordée** : Le temps d'activité (ex: `4228462s`) dépasse les limites de la carte. Tronquer ou formater en jours/heures lisibles (ex: « 48 jours »).
+- ❌ **Sidebar : ajouter un raccourci Docker** : Accès direct aux conteneurs Docker depuis la navigation latérale, sans passer par les détails d'un nœud.
+- ❌ **Descriptions des plugins manquantes** : On ne sait pas à quoi sert chaque plugin. Ajouter un champ `description` dans les métadonnées et l'afficher dans le catalogue. (Prérequis UI avant le nouveau moteur — Sprint 10)
+- ❌ **Toggle d'activation cassé** : Cocher un plugin désactivé affiche « Plugin désactivé » mais ne l'active pas. Corriger le flux activation/désactivation. (Prérequis UI avant le nouveau moteur — Sprint 10)
+- ❌ **Pas de désinstallation possible** : Aucun bouton pour supprimer un plugin. Ajouter une action de désinstallation. (Prérequis UI avant le nouveau moteur — Sprint 10)
+
+#### 2. Dashboard — Filtrage par Défaut
+
+- ❌ **Afficher uniquement les conteneurs en échec par défaut** : Le dashboard montre tous les conteneurs, ce qui noie l'information. Comportement attendu : ne montrer que les conteneurs avec un statut autre que `running`/`healthy`, avec un toggle « Voir tout » en haut pour afficher l'intégralité.
+
+#### 3. Registre d'Audit Cryptographique
+
+- ❌ **Supprimer la page** : La page « Registre d'Audit Cryptographique » et son entrée dans la topbar ne présentent pas d'utilité pour l'utilisateur courant. Les retirer de l'UI.
+
+#### 4. Nettoyage UX — Bruit et Hiérarchie
+
+- ❌ **Cartes d'insight « NORMAL »** : Les cartes « CPU stable », « Mémoire stable » (severity=ok) polluent la section Insights et noient les vraies alertes (warning/critical). Masquer les statuts `ok` par défaut, n'afficher que warning+critical+offline, avec un toggle « Afficher les stables ».
+- ❌ **Fil d'activité pollué par login/logout** : Les évènements de connexion/déconnexion des utilisateurs n'ont pas leur place dans le fil d'activité principal. Les filtrer ou les dédier à un onglet séparé.
+- ❌ **Carrousels horizontaux qui cachent du contenu** : Les sections en carrousel (ex: serveurs, conteneurs) tronquent l'information. Si un élément ne tient pas dans la vue, il devient invisible sans scroll — ce qui rend les alertes critiques potentiellement hors-champ. Remplacer par une grille responsive ou un layout à défilement vertical avec indicateur de nombre total.
+
+#### 5. Thème Warm Dark
+
+- ❌ **Appliquer le thème Warm Dark confirmé** : Le thème actuel (Glass Dark Ops / teal / Inter) est à remplacer par le Warm Dark validé : fond `#0e0d0c`, accent orange `#E8650A`, titrage DM Serif Display. Vérifier la cohérence sur toutes les pages (modales, cartes, sidebar, formulaires).
+- ❌ **Règle d'usage de l'orange** : `#E8650A` sert à la fois d'accent décoratif (boutons, titres) et d'alerte (warning, critique). Risque de confusion visuelle si un bouton orange "Nouveau conteneur" est perçu comme une alerte. Définir une règle d'usage : orange réservé aux alertes + actions critiques ; accents décoratifs sur une teinte dérivée (ex: `#F59E0B` amber plus doux) ou le blanc cassé.
+
+### Sprint 9 — Moteur de Plugins — Core Engine ❌
+
+> **Problème** : Le système actuel (`PluginManager` avec hooks et sandbox sous-processus) permet aux plugins
+> de réagir à des évènements et de s'isoler, mais ils n'ont aucune notion d'UI, de page dédiée, de stockage
+> persistant autonome, ou de configuration structurée. C'est un système de scripts hookables, pas un
+> vrai moteur de plugins.
+>
+> **Objectif du Sprint 9** : Construire le cœur du nouveau moteur — `PluginEngine` avec scanner,
+> lifecycle manager, registre, bus d'évènements, DB auto, et scheduler. Remplacer le `PluginManager`
+> actuel tout en gardant la compatibilité avec les plugins existants.
+>
+> Voir aussi Sprint 10 (intégration frontend) et Sprint 11 (marketplace).
+>
+> Inspiration : **Jeedom** — chaque plugin est un mini-module autonome.
+
+---
+
+#### 1. Cahier des Charges Fonctionnel
+
+| Capacité | Exemple concret | Aujourd'hui | Demain |
+|---|---|---|---|
+| **Avoir sa propre page** | Docker → page "Conteneurs" liste + statuts + actions | ❌ hooks only | ✅ Page dédiée dans la sidebar |
+| **Avoir ses propres routes API** | `/api/plugins/docker/containers/{id}/logs` | ❌ | ✅ Auto-montées par le moteur |
+| **Stocker ses données** | Sauvegarder préférences, historique, cache | ❌ rien | ✅ Tables SQL auto-créées + KV store |
+| **Avoir sa configuration** | Configurer socket Docker, timeout, options | ❌ | ✅ Formulaires générés depuis un schéma JSON |
+| **Ajouter des widgets au dashboard** | Widget "Docker Stats" sur la page d'accueil | ❌ | ✅ Panels injectables |
+| **Étendre le Copilot IA** | Le LLM connaît les actions du plugin et les propose | ❌ | ✅ Actions déclarées dans le manifest |
+| **Réagir aux évènements système** | Déclencher une action quand un nœud se connecte | ✅ hooks basiques | ✅ Hooks enrichis + scheduler CRON |
+| **Tâches planifiées** | Nettoyage automatique toutes les heures | ❌ | ✅ Scheduler interne (intervalle, CRON) |
+| **Dépendre d'un autre plugin** | Plugin `nginx` dépend du plugin `docker` | ❌ | ✅ Dépendances déclaratives |
+| **S'installer/désinstaller proprement** | Créer ses tables à l'install, les détruire à la désinstall | ❌ copie fichier | ✅ Cycle de vie complet géré |
+| **Se mettre à jour** | Nouvelle version dispo → notification 1-clic | ❌ | ✅ Détection de version intégrée |
+| **S'exécuter isolé** | Pas d'accès aux données des autres plugins | ❌ pas d'isolation | ✅ Routes/DB/UI isolées par plugin |
+
+---
+
+#### 2. Architecture du Moteur
+
+Le `PluginManager` actuel est remplacé par un **`PluginEngine`** qui gère le cycle de vie complet,
+la découverte, l'isolation et l'intégration automatique dans l'UI.
+
+```
+ ┌─────────────────────────────────────────────────────────────────┐
+ │                        PluginEngine                            │
+ │                                                                 │
+ │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+ │  │   Scanner    │  │   Registry   │  │   Lifecycle Manager  │  │
+ │  │              │  │              │  │                      │  │
+ │  │ Watche le    │  │ Catalogue    │  │ install → activate   │  │
+ │  │ dossier      │  │ des plugins  │  │ → configure → run    │  │
+ │  │ plugins/     │  │ installés    │  │ → deactivate →       │  │
+ │  │ (hot-reload) │  │ en DB        │  │   uninstall          │  │
+ │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
+ │         │                │                     │              │
+ │  ┌──────┴────────────────┴─────────────────────┴───────────┐  │
+ │  │                Plugin Dispatcher                         │  │
+ │  │  RouteRegistrar  │  PageRegistry  │  HookBus  │  DBAuto  │  │
+ │  │  Monte les routes│  Injecte les   │  Distribue│  Crée les │  │
+ │  │  API du plugin   │  pages dans le │  les hooks│  tables du │  │
+ │  │  sous /api/...   │  routeur React │  système  │  manifest  │  │
+ │  └──────────────────┴───────────────┴───────────┴────────────┘  │
+ └─────────────────────────────────────────────────────────────────┘
+```
+
+**Composants clés du moteur :**
+
+- **`Scanner`** : au démarrage du master, scanne `master/plugins/` à la recherche de dossiers avec
+  `manifest.json`. Puis watcher en temps réel (inotify) pour détecter ajouts, modifications, suppressions.
+  Hot-reload : un plugin modifié est rechargé sans redémarrer le master.
+
+- **`Registry`** : table SQL `plugin_registry` qui stocke l'ID, la version, le statut (decouvert/installed/
+  active/running/deactivated), la configuration courante de chaque plugin. C'est la source de vérité.
+  Le frontend l'interroge avec `GET /api/plugins` pour afficher le catalogue.
+
+- **`LifecycleManager`** : machine à états qui gère les transitions. Chaque transition exécute les
+  callbacks associés (`on_install` → crée les tables, `on_activate` → monte les routes + injecte
+  les pages, `on_uninstall` → supprime les tables + fichiers).
+
+- **`RouteRegistrar`** : inspecte les routes déclarées dans `manifest.json.routes` ou via les
+  décorateurs `@plugin.route()`, et les monte dynamiquement dans FastAPI sous `/api/plugins/{id}/...`.
+  Check RBAC à l'exécution. Un plugin A ne peut pas appeler les routes d'un plugin B sans dépendance.
+
+- **`PageRegistry`** : expose `GET /api/plugins/pages` qui retourne la liste de toutes les pages
+  déclarées par les plugins activés. Le frontend appelle cet endpoint au démarrage et injecte les
+  pages dans le routeur React (via `React.lazy` + dynamic imports). Les entrées avec `sidebar: true`
+  apparaissent automatiquement dans le menu latéral.
+
+- **`HookBus`** : bus d'évènements asynchrone. Remplace les hooks synchrones du `PluginManager` actuel.
+  Évènements disponibles : `on_heartbeat`, `on_intent_result`, `on_node_connect`, `on_node_disconnect`,
+  `on_proposal_approved`, `on_proposal_rejected`, `on_plugin_installed`, `on_plugin_activated`,
+  `on_cron_minute`, `on_cron_hour`, `on_cron_day`, `on_config_changed`.
+
+- **`DBAuto`** : lit `manifest.json.database.tables`, exécute `CREATE TABLE IF NOT EXISTS` à l'activation,
+  et `DROP TABLE` à la désinstallation. Les plugins n'écrivent jamais de SQL brut — ils utilisent des
+  helpers fournis par `PluginBase.db` (type ORM léger).
+
+- **`Scheduler`** : lit `manifest.json.scheduler.tasks` et planifie les tâches avec `asyncio`.
+  Supporte les intervalles en secondes, minutes, heures, et les expressions CRON.
+
+**Transitions d'état (machine à états) :**
+
+```text
+       ┌──────────┐
+       │ DECOUVERT│ ← Scanner trouve le dossier, valide le manifest
+       └────┬─────┘
+            ↓ (on_install)
+       ┌──────────┐
+       │ INSTALLED│ → CREATE TABLE, init config defaults, copie les assets frontend
+       └────┬─────┘
+            ↓ (on_activate)
+       ┌──────────┐
+       │ ACTIVE   │ → monte les routes FastAPI, injecte les pages React,
+       └────┬─────┘   abonne les hooks, démarre le scheduler
+            ↓
+       ┌──────────┐
+       │ RUNNING  │ ← vie normale du plugin
+       └────┬─────┘
+            ↓ (on_deactivate)
+       ┌──────────┐
+       │DEACTIVATE│ → démonte les routes, désabonne les hooks,
+       └────┬─────┘   cache les pages, arrête le scheduler
+            ↓ (on_uninstall)
+       ┌──────────┐
+       │UNINSTALL │ → DROP TABLE, supprime les fichiers du dossier plugins/
+       └──────────┘
+```
+
+---
+
+#### 3. Structure d'un Plugin
+
+Un plugin est un **dossier** dans `master/plugins/`. Le moteur découvre tout automatiquement —
+pas besoin d'enregistrer quoi que ce soit dans le code du core.
+
+```
+master/plugins/docker/
+├── manifest.json              ← Métadonnées + déclarations (OBLIGATOIRE)
+├── __init__.py                 ← Code backend (optionnel si plugin purement déclaratif)
+├── config/
+│   └── default_config.json     ← Configuration par défaut (optionnel)
+└── frontend/                   ← Code frontend React (optionnel)
+    ├── pages/                  ← Pages découvertes automatiquement par PageRegistry
+    │   ├── Containers.tsx
+    │   └── ContainerDetail.tsx
+    ├── widgets/                ← Widgets injectables dans le dashboard
+    │   └── DockerStats.tsx
+    └── assets/
+        └── icon.svg
+```
+
+---
+
+#### 4. Le manifest.json en Détail
+
+C'est le fichier le plus important. Il déclare tout ce que le plugin peut faire.
+
+```json
+{
+  "id": "docker",
+  "name": "Docker Manager",
+  "version": "1.0.0",
+  "author": "Vigile",
+  "icon": "docker",
+  "category": "containers",
+  "description": {
+    "short": "Gestion complète des conteneurs Docker",
+    "full": "Permet de lister, inspecter, démarrer, arrêter et redémarrer les conteneurs Docker\nsur chaque nœud de la flotte. Ajoute une page dédiée avec streaming logs,\nfiltres et actions en un clic."
+  },
+  "license": "MIT",
+  "min_master_version": "2.0.0",
+
+  "pages": [
+    {
+      "id": "containers",
+      "title": "Conteneurs",
+      "icon": "docker",
+      "sidebar": true,
+      "component": "Containers",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "id": "container-detail",
+      "title": "Détails du conteneur",
+      "sidebar": false,
+      "component": "ContainerDetail",
+      "params": ["container_id"],
+      "roles": ["admin", "operator"]
+    }
+  ],
+
+  "widgets": [
+    {
+      "id": "docker-stats",
+      "title": "Statistiques Docker",
+      "component": "DockerStats",
+      "sizes": ["small", "medium"],
+      "roles": ["viewer", "operator", "admin"]
+    }
+  ],
+
+  "routes": [
+    {
+      "path": "/containers",
+      "method": "GET",
+      "handler": "list_containers",
+      "roles": ["admin", "operator", "viewer"]
+    },
+    {
+      "path": "/containers/{id}/logs",
+      "method": "GET",
+      "handler": "stream_container_logs",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/containers/{id}/start",
+      "method": "POST",
+      "handler": "start_container",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/containers/{id}/stop",
+      "method": "POST",
+      "handler": "stop_container",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/containers/{id}/restart",
+      "method": "POST",
+      "handler": "restart_container",
+      "roles": ["admin", "operator"]
+    }
+  ],
+
+  "hooks": [
+    "on_node_connected",
+    "on_intent_result"
+  ],
+
+  "database": {
+    "tables": [
+      {
+        "name": "docker_container_cache",
+        "columns": [
+          {"name": "id", "type": "TEXT PRIMARY KEY"},
+          {"name": "node_id", "type": "TEXT NOT NULL"},
+          {"name": "name", "type": "TEXT NOT NULL"},
+          {"name": "status", "type": "TEXT"},
+          {"name": "image", "type": "TEXT"},
+          {"name": "ports", "type": "TEXT"},
+          {"name": "cached_at", "type": "DATETIME DEFAULT CURRENT_TIMESTAMP"}
+        ]
+      }
+    ]
+  },
+
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "docker_socket": {
+        "type": "string",
+        "title": "Chemin du socket Docker",
+        "default": "/var/run/docker.sock",
+        "description": "Chemin vers le socket Unix de Docker sur chaque nœud"
+      },
+      "refresh_interval": {
+        "type": "integer",
+        "title": "Intervalle de rafraîchissement (s)",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 300
+      }
+    },
+    "required": ["docker_socket"]
+  },
+
+  "dependencies": {
+    "plugins": [],
+    "extras": []
+  },
+
+  "copilot_actions": [
+    {
+      "action": "LIST_CONTAINERS",
+      "description": "Liste tous les conteneurs Docker sur un nœud",
+      "risk_level": "LOW",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "node_id": {"type": "string", "description": "ID du nœud cible"},
+          "filter": {"type": "string", "enum": ["all", "running", "stopped"]}
+        },
+        "required": ["node_id"]
+      }
+    },
+    {
+      "action": "RESTART_CONTAINER",
+      "description": "Redémarre un conteneur Docker",
+      "risk_level": "MEDIUM",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "node_id": {"type": "string"},
+          "container_id": {"type": "string"}
+        },
+        "required": ["node_id", "container_id"]
+      }
+    }
+  ],
+
+  "scheduler": {
+    "tasks": [
+      {
+        "id": "refresh_cache",
+        "interval": 60,
+        "handler": "refresh_container_cache"
+      }
+    ]
+  }
+}
+```
+
+**Ce que le moteur fait automatiquement avec ce manifest :**
+
+1. 🔍 **Scanner** détecte le dossier `docker/` au démarrage, lit et valide le manifest
+2. 📦 **Installation** : crée la table `docker_container_cache`, écrit la config par défaut
+3. 🚀 **Activation** : monte les 5 routes dans FastAPI, injecte les pages dans le routeur React
+4. 🖼️ **Sidebar** : l'entrée "Conteneurs" avec l'icône Docker apparaît automatiquement dans le menu
+5. 🔌 **Hooks** : le plugin reçoit `on_node_connected` et `on_intent_result`
+6. ⚙️ **Config UI** : l'interface génère un formulaire interactif depuis `config_schema`
+7. 🤖 **Copilot** : le LLM connaît `LIST_CONTAINERS` et `RESTART_CONTAINER` — peut les proposer dans le chat
+8. ⏰ **Scheduler** : toutes les 60s, `refresh_container_cache()` est appelé automatiquement
+
+---
+
+### Sprint 10 — Moteur de Plugins — Intégration Frontend ❌
+
+> Construire l'interface entre le moteur de plugins et le frontend React : découverte automatique des pages,
+> injection dans le routeur, SDK pour écrire des plugins en quelques lignes, et exemples concrets
+> (Docker avec page dédiée, Systemd, Metrics, Notifications).
+>
+> Prérequis : Sprint 9 (Core Engine) doit être fonctionnel.
+
+---
+
+#### 1. Fonctionnement Côté Frontend (Injection Transparente)
+
+Le frontend n'a pas besoin d'être recompilé pour ajouter un plugin. Tout est dynamique.
+
+**Au démarrage de l'app React :**
+1. Appel à `GET /api/plugins/pages` → reçoit la liste de toutes les pages des plugins activés
+2. Pour chaque page avec `sidebar: true`, le composant `Sidebar` ajoute une entrée dans le menu
+3. Le routeur React enregistre les routes dynamiquement via `React.lazy(() => import(...))`
+4. Les imports pointent vers `frontend/plugins/<plugin_id>/pages/<component>.tsx`
+
+**PluginAPI (sandbox frontend) :**
+Chaque page de plugin reçoit une API restreinte en props, pas d'accès direct au store global :
+
+```tsx
+// frontend/plugins/docker/pages/Containers.tsx
+// Aucune importation manuelle nécessaire — découverte automatique
+import { PluginPage, PluginAPI } from '@vigile/plugin-sdk'
+
+export default function DockerContainers({ api }: { api: PluginAPI }) {
+  const [containers, setContainers] = useState([])
+
+  useEffect(() => {
+    // L'API préfixe automatiquement vers /api/plugins/docker/...
+    api.fetch('/containers').then(setContainers)
+  }, [])
+
+  return (
+    <div>
+      <h1>🐳 Conteneurs Docker</h1>
+      <Button onClick={() => api.fetch('/containers', { method: 'POST' })}>
+        Rafraîchir
+      </Button>
+      <ContainerTable containers={containers} />
+    </div>
+  )
+}
+```
+
+---
+
+#### 2. SDK — Écrire un Plugin en Quelques Lignes
+
+Le SDK fournit tout ce qu'il faut pour qu'un plugin simple tienne dans un seul fichier.
+
+**Plugin minimal (10 lignes, backend uniquement) :**
+
+```python
+# master/plugins/disk_cleaner/__init__.py
+from core.plugin_engine import PluginBase, hook
+
+class DiskCleanerPlugin(PluginBase):
+    id = "disk_cleaner"
+    name = "Disk Cleaner"
+    description = "Suggère des nettoyages disque automatiques"
+
+    @hook("on_cron_hour")
+    async def check_disk(self, timestamp: int):
+        nodes = await self.api.get_connected_nodes()
+        for node in nodes:
+            stats = await self.api.get_node_stats(node.id)
+            if stats.disk.usage_pct > 85:
+                await self.api.create_proposal(
+                    action="CLEAN_DISK",
+                    target=node.id,
+                    reasoning=f"Disk at {stats.disk.usage_pct}%",
+                    risk_level="LOW"
+                )
+```
+
+**Plugin avec page et configuration (30 lignes) :**
+
+```python
+# master/plugins/weather/__init__.py
+from core.plugin_engine import PluginBase, route, page
+
+class WeatherPlugin(PluginBase):
+    id = "weather"
+    name = "Weather Monitor"
+    description = "Affiche la météo pour chaque nœud"
+
+    @route("/current")
+    async def get_current(self, request):
+        lat = self.config.get("latitude", 48.85)
+        lon = self.config.get("longitude", 2.35)
+        return await self.api.http_get(
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}&current_weather=true"
+        )
+
+    @page("Météo", icon="cloud-sun", sidebar=True,
+          roles=["viewer", "operator", "admin"])
+    def weather_page(self):
+        return {"component": "WeatherWidget"}
+```
+
+---
+
+#### 3. Exemple Concret : Plugin Docker Nouvelle Génération
+
+Le plugin Docker actuel (un hook `handle_intent` qui wrapper un appel Worker) devient un **plugin
+complet avec page dédiée** :
+
+- **Page `Conteneurs`** dans la sidebar : liste tous les conteneurs de tous les nœuds
+- **Tableau interactif** : nom, image, statut (couleur), ports, uptime, CPU/MEM
+- **Actions en 1 clic** : ▶️ Start / ⏹️ Stop / 🔄 Restart / ⏸️ Pause
+- **Page détail** : logs en streaming (WebSocket), inspection JSON, stats live
+- **Filtres** : running / stopped / failed / all + recherche textuelle
+- **Multi-nœuds** : switch pour voir les conteneurs d'un nœud spécifique ou tous
+- **Cache local** : table `docker_container_cache` pour éviter de requêter le Worker à chaque vue
+- **Scheduler** : refresh automatique du cache toutes les 60s
+- **Copilot** : propose `RESTART_CONTAINER` avec `container_id` + `node_id` validés
+
+---
+
+#### 4. Exemple Concret : Plugin Systemd
+
+- **Page `Services`** dans la sidebar : liste tous les services systemd de tous les nœuds
+- **Filtres** : active / inactive / failed / enabled / disabled
+- **Actions** : restart / start / stop / enable / disable / status
+- **Recherche** par nom de service
+- **Logs** : `journalctl -u <service>` en streaming WebSocket
+
+---
+
+#### 5. Exemple Concret : Plugin Metrics Avancé
+
+- **Widget dashboard** : mini-graphiques CPU/RAM/DISK par nœud
+- **Page dédiée** : historique des métriques avec line charts (Chart.js ou Recharts)
+- **Alertes** : seuils configurables CPU/RAM/DISK avec notification in-app
+- **Export** : endpoint Prometheus ou JSON
+
+---
+
+#### 6. Exemple Concret : Plugin Notifications
+
+- **Widget** dans la topbar : cloche avec compteur de notifications non lues
+- **Canaux** : Web in-app, email, Discord, Slack, Telegram (un sous-module par canal)
+- **Déclencheurs** : seuils métriques, statut nœud, erreurs plugins
+- **Configuration** : formulaire pour chaque canal (webhook URL, token, etc.)
+
+---
+
+### Sprint 11 — Moteur de Plugins — Marketplace ❌
+
+> Interface de distribution, installation et mise à jour des plugins. Repose sur le Core Engine
+> (Sprint 9) et l'intégration frontend (Sprint 10).
+>
+> Prérequis : Sprints 9 et 10.
+
+---
+
+#### 1. Marketplace et Distribution
+
+**Intégré dans l'application — pas de site externe obligatoire :**
+
+- **Onglet « Catalogue »** dans la page Plugins : liste des plugins disponibles à l'installation
+- **Dépôt officiel** : registre GitHub `vigile/plugin-registry` avec plugins validés par la communauté
+- **Dépôt custom** : possibilité d'ajouter une URL de registre tiers dans les paramètres
+- **Installation 1 clic** : « Installer » → télécharge le ZIP → décompresse dans `master/plugins/`
+  → installe les dépendances → active le plugin
+- **Mises à jour** : badge dans l'UI quand une MAJ est disponible, installation en 1 clic
+- **Stats** : nombre d'installations, note, compatibilité master
+
+**Exemple de réponse du registre :**
+
+```json
+{
+  "registry_url": "https://registry.vigile.dev",
+  "plugins": [{
+    "id": "docker",
+    "name": "Docker Manager",
+    "version": "1.0.0",
+    "author": "Vigile",
+    "download_url": "https://registry.vigile.dev/plugins/docker/v1.0.0/plugin.zip",
+    "sha256": "abc123...",
+    "min_master_version": "2.0.0",
+    "category": "containers",
+    "downloads": 1520,
+    "rating": 4.5
+  }]
+}
+```
+
+---
+
+#### 2. Sécurité et Isolation
+
+- **Routes isolées** : chaque plugin sous `/api/plugins/{id}/`. Pas d'accès aux routes d'un autre
+  plugin sans dépendance déclarée.
+- **DB isolée** : préfixe de table par plugin (`docker_container_cache`). Aucun accès aux tables
+  du core ni des autres plugins.
+- **Frontend isolé** : les composants reçoivent une `PluginAPI` restreinte. Pas d'accès au store
+  global, pas de `fetch` direct — seulement via le bridge API.
+- **RBAC** : chaque page, route et widget déclare les rôles autorisés. Vérifié à l'exécution.
+- **Sandbox** : plugins first-party chargés directement dans le process master. Plugins tiers
+  optionnellement isolés dans un sous-processus avec communication IPC.
+- **Pas de exec()** : un plugin ne peut PAS exécuter de code arbitraire sur le master. Les actions
+  Docker/systemd passent par le Worker (whitelist). Un plugin peut seulement faire des appels API,
+  lire/écrire dans ses propres tables, et envoyer des intents au Worker.
+
+---
+
+#### 3. Migration depuis l'Ancien Système
+
+1. Le `PluginManager` actuel et ses hooks synchrones sont dépréciés
+2. Les 3 plugins existants (docker, systemd, metrics) sont réécrits dans la nouvelle architecture
+3. Pendant la transition, le `PluginEngine` bridge les anciens plugins hook-only vers le `HookBus`
+4. Une fois la migration validée, l'ancien `PluginManager` est supprimé
+
+### Sprint 12 — Propositions IA, Configuration et Chat IA ❌
+
+#### 1. Propositions IA — Qualité et Pertinence
+
+- ❌ **Estimation du gain dans les propositions** : Au lieu de « Proposed deletion of rotated/archived logs to free up space », la proposition doit chiffrer le gain attendu : « Supprimer 2.3 Go de logs obsolètes pour libérer ~3 jours de stockage » (ou l'équivalent). Calculer l'espace récupérable avant de formuler la proposition.
+- ❌ **Cohérence linguistique** : Toute l'interface est en français (confirmé). Les propositions IA doivent suivre la même règle — pas d'anglais mélangé.
+
+#### 2. Page Paramètres
+
+- ❌ **Changement de nom d'utilisateur et logo** : Impossible de modifier le nom d'utilisateur ou le logo de l'instance. Ajouter des champs d'édition et les endpoints API associés.
+- ❌ **Supprimer « Mode démo DÉSACTIVÉ »** : Cette information est inutile dans l'interface. La retirer.
+- ❌ **« Configuration Master » doit être admin-only** : Vérifier que la section Configuration Master est masquée pour les rôles non-admin (Viewer, Operator).
+
+#### 3. Chat IA — Réarchitecture Complète
+
+- ❌ **Intégration trop simpliste** : Le chat IA actuel est une intégration basique sans contexte réel, sans mémoire de conversation, sans streaming fiable et sans propositions actionnables correctes. Tout refaire :
+  - Contexte enrichi (état des nœuds, métriques récentes, historique des actions)
+  - Streaming SSE robuste avec reconnexion
+  - Mémoire de session persistante
+  - Génération de propositions ActionProposal valides
+  - Gestion des erreurs et fallback Ollama/local
+  - UI repensée (messages, suggestions, états vides/chargement/erreur)
+
+---
 
 ## Vision Long Terme — Système Autonome Dirigé par l'IA
 
 Le chemin vers un système entièrement autonome où l'IA gère les opérations courantes et n'escalade que l'inconnu.
 
-### Sprint 7 — Autonomie Graduée
+> ⚠️ **Sprints 13-17** : Vision lointaine, pas prioritaire. Ne pas détailler tant que les besoins réels ne sont pas validés par l'usage des Sprints 7-12.
+
+### Sprint 13 — Autonomie Graduée
 
 L'IA passe d'un rôle d'assistant passif à un rôle d'acteur régulé, avec trois niveaux d'autonomie paramétrables.
 
 #### 1. Niveaux de Confiance et Approbation
-- **`LOW_RISK`** : Actions d'observation ou de maintenance mineure (ex: `GET_STATS`, nettoyage temporaire). Exécution automatique immédiate sans intervention humaine.
-- **`MEDIUM_RISK`** : Actions modifiant des ressources non-critiques (ex: restart d'un container de dev, vidage de cache). Notification SSE/WebSocket instantanée dans l'UI avec possibilité d'annulation sous 10 secondes.
-- **`HIGH_RISK`** : Actions affectant l'infrastructure globale ou le réseau (ex: reboot de node, restart de service systemd critique). Requiert une double validation explicite par un Admin ou Operator.
+- **`AUTO_RISK`** : Actions d'observation ou de maintenance mineure. Sous réserve de validation explicite dans `RULES.md` — le Human-in-the-Loop est un pilier fondateur.
+- **`MEDIUM_RISK`** : Actions modifiant des ressources non-critiques. Notification SSE/WebSocket dans l'UI avec possibilité d'annulation sous 10 secondes.
+- **`HIGH_RISK`** : Actions affectant l'infrastructure globale ou le réseau. Requiert double validation explicite.
 
 #### 2. Profiling Comportemental & Apprentissage
-- Stockage de l'historique des interactions avec les propositions dans la table `confidence_history` :
-  ```sql
-  CREATE TABLE confidence_history (
-      id TEXT PRIMARY KEY,
-      action_type TEXT NOT NULL,
-      confidence_score REAL NOT NULL,
-      human_decision TEXT NOT NULL, -- APPROVED, REJECTED, AUTO_EXECUTED
-      decided_at REAL NOT NULL,
-      feedback_text TEXT
-  );
-  ```
-- Un score d'évaluation dynamique réajuste le niveau de risque d'un type d'action selon le ratio d'acceptation de l'utilisateur (ex: si l'administrateur rejette systématiquement le nettoyage de disque automatique, l'action bascule de `LOW_RISK` à `HIGH_RISK`).
+- Stockage de l'historique des interactions dans la table `confidence_history`.
+- Score d'évaluation dynamique réajustant le niveau de risque selon le ratio d'acceptation humain.
+
+> **Note** : Toute déviation du Human-in-the-Loop (ex: `AUTO_RISK` sans validation) doit être explicitement documentée et justifiée. Voir `RULES.md` §13.
 
 ---
 
-### Sprint 8 — Détection Proactive
+### Sprint 14 — Détection Proactive
 
-Le système n'attend pas la panne pour proposer des remédiations. Il surveille en continu et extrait des signaux faibles.
+Le système n'attend pas la panne. Surveillance continue, signaux faibles.
 
-#### 1. Calcul Automatique des Baselines (EMA & Anomaly Detection)
-- Utilisation de moyennes mobiles exponentielles (EMA) locales sur les rapports de métriques (CPU, RAM, Load) :
-  $$\text{Baseline}_{t} = \alpha \times \text{Metric}_{t} + (1 - \alpha) \times \text{Baseline}_{t-1}$$
-- En cas de déviation majeure (> 3 écarts-types) pendant plus de 5 minutes, une proposition d'investigation est générée de manière proactive.
-
-#### 2. Log Scanner Intelligent sur le Worker
-- Le Worker Go intègre un scanner de fichier de logs léger en streaming avec correspondance d'expressions régulières (configuré dynamiquement par le Master).
-- En cas de détection de patterns comme `FATAL`, `OutOfMemoryError` ou `Connection reset by peer`, le Worker lève immédiatement un évènement `LOG_PATTERN_MATCHED` vers le Master, qui lance une analyse contextuelle avec l'IA.
-
-#### 3. Prédiction de Saturation de Disque
-- Modèle linéaire d'extrapolations temporelles sur le disque dur. L'IA avertit l'utilisateur : *"Le disque dur de node-1 sera saturé dans 48h au rythme actuel d'écriture (12 Go/jour)."* et propose une action de nettoyage ciblée.
+- Calcul automatique de baselines (EMA) sur CPU/RAM/Load
+- Log scanner intelligent sur le Worker (expressions régulières configurables)
+- Prédiction de saturation de disque (extrapolation linéaire)
 
 ---
 
-### Sprint 9 — Runbooks & Auto-Healing
+### Sprint 15 — Runbooks & Auto-Healing
 
-Les diagnostics de l'IA sont codifiés sous forme de runbooks dynamiques auto-exécutés.
+Codification des diagnostics IA sous forme de graphes d'actions conditionnels (YAML en DB).
 
-#### 1. Moteur de Runbooks en Base
-- Définition de graphes d'actions conditionnels (YAML stocké en DB) :
-  ```yaml
-  name: Auto-healing Nginx 502
-  trigger:
-    metric: http_response_code
-    condition: "== 502"
-  steps:
-    - action: RESTART_CONTAINER
-      params: { container_name: "nginx-prod" }
-    - action: CHECK_HEALTH
-      delay: 5
-    - if_failed:
-        - action: SEND_DISCORD_NOTIFICATION
-          params: { level: "CRITICAL", msg: "Remediation failed. Nginx is still down." }
-  ```
-- **Moteur d'exécution asynchrone** capable de gérer les temps de pause, les boucles de vérification et les cascades conditionnelles.
-
-#### 2. Rollback Automatique en Cas d'Échec
-- Avant toute remédiation destructive, le Worker sauvegarde l'état actuel de la configuration. Si le service ciblé ne valide pas ses health checks après action, le Worker effectue un rollback sur l'état valide précédent et lève une alerte.
+- Moteur de runbooks avec conditions, délais, cascades
+- Rollback automatique en cas d'échec (sous réserve de validation)
 
 ---
 
-### Sprint 10 — Coordination Multi-Nœuds
+### Sprint 16 — Coordination Multi-Nœuds
 
-L'IA gère la topologie de l'infrastructure globale comme un ensemble cohérent et interdépendant.
+L'IA gère la topologie de l'infrastructure globale.
 
-#### 1. Graphe de Dépendances Automatique
-- Analyse des connexions réseau ouvertes par les containers/processus pour dresser une topologie (ex: *le container Web sur le node-1 dépend de PostgreSQL sur le node-2*).
-- Empêche les arrêts en cascade non planifiés et planifie intelligemment l'ordre des redémarrages (Database d'abord, puis API, puis Frontend).
-
-#### 2. Déploiement Gradué (Canary Operations)
-- Application d'une modification de configuration ou d'une mise à jour de plugin sur un unique nœud "canari".
-- Monitoring automatique de ses performances et métriques d'erreur pendant 1 heure avant de valider et de propager la modification sur le reste des serveurs de la flotte.
+- Graphe de dépendances automatique (connexions réseau entre services)
+- Déploiement gradué (canary) sur un nœud avant propagation
 
 ---
 
-### Sprint 11 — Apprentissage & Mémoire
+### Sprint 17 — Apprentissage & Mémoire
 
-L'IA tire parti de l'expérience opérationnelle passée pour affiner ses analyses et résolutions.
+L'IA tire parti de l'expérience opérationnelle passée.
 
-#### 1. Indexation et Base de Connaissances Locale (FTS5 / Vector DB)
-- Chaque incident résolu (avec ses logs associés, la cause racine identifiée et l'action corrective validée) est archivé et indexé à l'aide de SQLite FTS5 ou d'une base vectorielle locale légère.
-- Lors d'une nouvelle alerte, l'IA interroge la base locale pour retrouver les cas similaires : *"Incident similaire résolu le 12 juin sur node-3 en redémarrant le service Docker daemon."*
-
-#### 2. Mémoire Conversationnelle & Contextuelle
-- Maintien d'un historique enrichi par node détaillant les pannes passées, les surcharges régulières et les particularités de l'OS. Le LLM adapte ses propositions de commande en fonction de ces spécificités matérielles et logicielles propres à chaque serveur.
+- Indexation des incidents résolus (SQLite FTS5 uniquement — pas de base vectorielle, zéro dépendance supplémentaire)
+- Mémoire conversationnelle par nœud
 
 ---
 

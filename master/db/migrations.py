@@ -67,10 +67,21 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "version" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN version TEXT DEFAULT NULL")
         mutated = True
+    if "worker_version" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN worker_version TEXT DEFAULT NULL")
+        mutated = True
+
+    async with db.execute("PRAGMA table_info(metrics_snapshots)") as cursor:
+        metrics_columns = [row["name"] for row in await cursor.fetchall()]
+    if "disks_json" not in metrics_columns:
+        await db.execute("ALTER TABLE metrics_snapshots ADD COLUMN disks_json TEXT DEFAULT NULL")
+        mutated = True
 
     if mutated:
         await db.commit()
-        logger.info("Added insights/caching/group/disabled/version columns to nodes table.")
+        logger.info(
+            "Added insights/caching/group/disabled/version/worker_version/disks_json columns."
+        )
 
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_disabled ON nodes(disabled)")

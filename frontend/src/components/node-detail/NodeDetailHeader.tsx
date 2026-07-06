@@ -44,6 +44,12 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
               <span>{t('node_detail.os_label', { os: node.os || t('node_detail.os_default'), arch: node.arch || t('node_detail.arch_default') })}</span>
               <span>·</span>
               <span>{t('node_detail.hostname_label', { hostname: node.hostname || t('common.unknown') })}</span>
+              {node.version && (
+                <>
+                  <span>·</span>
+                  <span>{t('node_detail.version_label', { version: node.version })}</span>
+                </>
+              )}
             </div>
           </div>
         </div>

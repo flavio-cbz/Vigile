@@ -473,10 +473,11 @@ export const en = {
   "node_detail.os_default": "Linux",
   "node_detail.arch_default": "amd64",
   "node_detail.hostname_label": "Hostname: {hostname}",
+  "node_detail.version_label": "Worker v{version}",
   "node_detail.tab.insights": "AI Analysis",
   "node_detail.tab.metrics": "Metrics",
-  "node_detail.tab.services": "Services ({count})",
-  "node_detail.tab.containers": "Docker ({count})",
+  "node_detail.tab.services": "Services",
+  "node_detail.tab.containers": "Docker",
   "node_detail.tab.logs": "Logs",
   "node_detail.tab.settings": "Settings",
   "node_detail.insights_section_title": "AI Insights found on this machine",
@@ -526,6 +527,15 @@ export const en = {
   "node_detail.admin_required": "Administrator permissions required",
   "node_detail.image_label": "Image: {image}",
   "node_detail.id_label": "ID: {id}",
+
+  // Disk Prediction
+  "metrics.prediction_title": "Disk Usage Forecast",
+  "metrics.prediction_1h": "1 hour",
+  "metrics.prediction_6h": "6 hours",
+  "metrics.prediction_24h": "24 hours",
+  "metrics.prediction_48h": "48 hours",
+  "metrics.prediction_full": "Disk estimated full in {hours} hours",
+  "metrics.prediction_low_confidence": "Prediction confidence too low (R² < 0.3)",
 
   // Modals
   "modal.close_aria": "Close",

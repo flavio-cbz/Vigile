@@ -15,6 +15,7 @@ Hooks registered:
 Zero dependencies beyond the project whitelist (pydantic).
 """
 
+import json
 import logging
 import time
 from typing import Any
@@ -132,6 +133,12 @@ class MetricsSnapshot(BaseModel):
     collected_at: float = Field(
         default_factory=time.time,
         description="Unix timestamp when metrics were collected",
+    )
+
+    # Per-mount disk inventory (Sprint 7) — raw array from Worker
+    disks: list[dict] | None = Field(
+        default=None,
+        description="Per-mount disk stats: mount_point, fs_type, device, total_bytes, used_bytes, percent",
     )
 
     @property
@@ -293,8 +300,8 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             mem_total_bytes, mem_used_bytes, mem_percent,
             swap_total_bytes, swap_used_bytes,
             disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            uptime_seconds, processes, disks_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_id,
@@ -316,6 +323,7 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             snapshot.get("disk_percent", 0),
             snapshot.get("uptime_seconds", 0),
             snapshot.get("processes"),
+            json.dumps(snapshot["disks"]) if snapshot.get("disks") else None,
         ),
     )
     await db.commit()

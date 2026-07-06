@@ -3,7 +3,9 @@ import { useInsightsStore } from '../store/insightsStore';
 import { type InsightItem } from '../store/uiStore';
 
 export function useNodeInsights(nodeId: string | null) {
-  const { insightsByNode, loadingByNode, fetchInsights } = useInsightsStore();
+  const insightsByNode = useInsightsStore((s) => s.insightsByNode);
+  const loadingByNode = useInsightsStore((s) => s.loadingByNode);
+  const fetchInsights = useInsightsStore((s) => s.fetchInsights);
 
   const insights = nodeId && nodeId !== 'all' ? insightsByNode[nodeId] || [] : [];
   const loading = nodeId && nodeId !== 'all' ? loadingByNode[nodeId] || false : false;

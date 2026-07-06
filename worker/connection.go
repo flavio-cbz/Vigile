@@ -243,8 +243,9 @@ func (wc *WorkerConn) RunOperational() error {
 
 		case <-heartbeatTicker.C:
 			if err := wc.sendJSON(map[string]interface{}{
-				"type": "HEARTBEAT",
-				"ts":   float64(time.Now().UnixMicro()) / 1_000_000,
+				"type":    "HEARTBEAT",
+				"ts":      float64(time.Now().UnixMicro()) / 1_000_000,
+				"version": Version,
 			}); err != nil {
 				return fmt.Errorf("heartbeat send: %w", err)
 			}

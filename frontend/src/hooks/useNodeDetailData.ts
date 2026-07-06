@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../hooks/useApi';
 import { useNodeInsights } from '../hooks/useNodeInsights';
-import { useLocale } from '../i18n';
+import { t } from '../i18n';
 import type {
   ContainerRecord,
   InsightRecord,
@@ -49,7 +49,6 @@ export interface NodeDetailData {
 }
 
 export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
-  const { t } = useLocale();
   const { insights, loading: loadingInsights, refresh: refreshInsights } = useNodeInsights(nodeId || null);
 
   const [node, setNode] = useState<NodeRecord | null>(null);
@@ -108,7 +107,7 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     if (!nodeId) return;
     setLoadingServices(true);
     try {
-      const data = await api<{ services: ServiceRecord[] }>(`/api/nodes/${nodeId}/services`);
+      const data = await api<{ services: ServiceRecord[] }>(`/api/nodes/${nodeId}/services`, { timeoutMs: 30000 });
       if (data && data.services) setServices(data.services);
     } catch (err) {
       console.error('Failed to fetch services:', err);
@@ -121,7 +120,7 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     if (!nodeId) return;
     setLoadingContainers(true);
     try {
-      const data = await api<{ containers: ContainerRecord[] }>(`/api/nodes/${nodeId}/containers`);
+      const data = await api<{ containers: ContainerRecord[] }>(`/api/nodes/${nodeId}/containers`, { timeoutMs: 30000 });
       if (data && data.containers) setContainers(data.containers);
     } catch (err) {
       console.error('Failed to fetch containers:', err);
@@ -145,16 +144,18 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     } finally {
       setLoadingLogs(false);
     }
-  }, [nodeId, logsLimit, logsService, t]);
+  }, [nodeId, logsLimit, logsService]);
 
   useEffect(() => {
     const init = async () => {
       setLoadingNode(true);
       await fetchNodeDetails();
       setLoadingNode(false);
+      fetchServicesList();
+      fetchContainersList();
     };
     init();
-  }, [fetchNodeDetails]);
+  }, [fetchNodeDetails, fetchServicesList, fetchContainersList]);
 
   const displayInsights: InsightRecord[] = [...insights];
   if (node && !node.online) {

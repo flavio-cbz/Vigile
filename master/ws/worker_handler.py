@@ -294,9 +294,9 @@ async def _run_enrollment(
                 """
                 INSERT INTO nodes (
                     id, name, hostname, machine_id, arch, os, public_key,
-                    state, ip_prefix, node_group, version,
+                    state, ip_prefix, node_group, version, worker_version,
                     enrolled_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node_id,
@@ -309,6 +309,7 @@ async def _run_enrollment(
                     NodeState.CONNECTED.value,
                     ip_prefix,
                     pending_group,
+                    version,
                     version,
                     now,
                     now,
@@ -325,11 +326,23 @@ async def _run_enrollment(
                     os = ?,
                     public_key = ?,
                     version = ?,
+                    worker_version = ?,
                     enrolled_at = ?,
                     updated_at = ?
                 WHERE id = ?
                 """,
-                (hostname, machine_id, arch, os_name, public_key_b64, version, now, now, node_id),
+                (
+                    hostname,
+                    machine_id,
+                    arch,
+                    os_name,
+                    public_key_b64,
+                    version,
+                    version,
+                    now,
+                    now,
+                    node_id,
+                ),
             )
 
         worker_token, lifecycle = get_security_instance().generate_worker_token(node_id)
@@ -498,10 +511,11 @@ async def _run_reconnect(
                 arch = ?,
                 os = ?,
                 version = ?,
+                worker_version = ?,
                 updated_at = ?
             WHERE id = ?
             """,
-            (hostname, machine_id, arch, os_name, version, now, node_id),
+            (hostname, machine_id, arch, os_name, version, version, now, node_id),
         )
         # Revoke old token
         old_token_hash = security.worker_token_hash(worker_token)
@@ -633,6 +647,13 @@ async def _run_operational(
         if msg_type == "HEARTBEAT":
             await node_manager.touch_heartbeat(node_id)
             await _send(websocket, {"type": "HEARTBEAT_ACK", "ts": time.time()}, node_id=node_id)
+            hv = msg.get("version")
+            if hv:
+                await db.execute(
+                    "UPDATE nodes SET worker_version = ?, updated_at = ? WHERE id = ?",
+                    (hv, time.time(), node_id),
+                )
+                await db.commit()
 
         elif msg_type == "INTENT_RESULT":
             intent_id = msg.get("intent_id", "?")
@@ -684,6 +705,14 @@ async def _run_operational(
                     )
             else:
                 logger.warning("Node %s: invalid STATUS_REPORT rejected", node_id)
+
+            sv = msg.get("version")
+            if sv:
+                await db.execute(
+                    "UPDATE nodes SET worker_version = ?, updated_at = ? WHERE id = ?",
+                    (sv, time.time(), node_id),
+                )
+                await db.commit()
 
         else:
             logger.warning("Node %s: unknown message type '%s'", node_id, msg_type)

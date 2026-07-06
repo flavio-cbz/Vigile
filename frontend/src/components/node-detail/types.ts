@@ -60,4 +60,5 @@ export interface NodeRecord {
   memory_percent?: number;
   disk_percent?: number;
   uptime_seconds?: number;
+  version?: string;
 }

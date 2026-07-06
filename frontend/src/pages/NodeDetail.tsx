@@ -68,9 +68,9 @@ export const NodeDetail: React.FC = () => {
   }, [searchParams]);
 
   useEffect(() => {
-    if (activeTab === 'services') fetchServicesList();
-    if (activeTab === 'containers') fetchContainersList();
-  }, [activeTab, id, fetchServicesList, fetchContainersList]);
+    if (activeTab === 'services' && !loadingServices) fetchServicesList();
+    if (activeTab === 'containers' && !loadingContainers) fetchContainersList();
+  }, [activeTab, id, fetchServicesList, fetchContainersList, loadingServices, loadingContainers]);
 
   usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 15000, activeTab === 'metrics');
   usePolling('detail_logs_poll', () => fetchNodeLogs(true), 10000, activeTab === 'logs');
@@ -104,9 +104,7 @@ export const NodeDetail: React.FC = () => {
   const tabs = useNodeDetailTabs({
     insightsCount: displayInsights?.length ?? 0,
     servicesCount: services?.length ?? 0,
-    servicesLoading: loadingServices,
     containersCount: containers?.length ?? 0,
-    containersLoading: loadingContainers,
   });
 
   if (loadingNode) {

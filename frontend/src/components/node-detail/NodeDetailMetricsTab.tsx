@@ -38,6 +38,78 @@ const ChartCard: React.FC<{
   </div>
 );
 
+const DiskPredictionCard: React.FC<{
+  statsHistory: StatsPoint[];
+  t: (key: string, variables?: Record<string, string | number>) => string;
+}> = ({ statsHistory, t }) => {
+  const n = statsHistory.length;
+  const values = statsHistory.map((p) => p.disk);
+
+  const sumX = values.reduce((sum, _, i) => sum + i, 0);
+  const sumY = values.reduce((sum, y) => sum + y, 0);
+  const sumXY = values.reduce((sum, y, i) => sum + i * y, 0);
+  const sumX2 = values.reduce((sum, _, i) => sum + i * i, 0);
+
+  const divider = n * sumX2 - sumX * sumX;
+  if (divider === 0) return null;
+
+  const slope = (n * sumXY - sumX * sumY) / divider;
+  const intercept = (sumY - slope * sumX) / n;
+
+  const meanY = sumY / n;
+  const ssRes = values.reduce((sum, y, i) => sum + (y - (slope * i + intercept)) ** 2, 0);
+  const ssTot = values.reduce((sum, y) => sum + (y - meanY) ** 2, 0);
+  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+
+  if (r2 < 0.3) {
+    return (
+      <div className="p-4 border border-border rounded-xl bg-surface col-span-full">
+        <p className="text-xs text-text-3">{t('metrics.prediction_low_confidence')}</p>
+      </div>
+    );
+  }
+
+  const predict = (indexDelta: number) => {
+    const idx = n - 1 + indexDelta;
+    const val = slope * idx + intercept;
+    return Math.min(100, Math.max(0, val));
+  };
+
+  const timeTo90 = slope > 0 ? Math.round((90 - intercept) / slope) : Infinity;
+  const hoursTo90 = Math.round((timeTo90 - (n - 1)) / 60);
+
+  return (
+    <div className="p-4 border border-border rounded-xl bg-surface col-span-full">
+      <div className="text-xs font-interface font-bold uppercase tracking-wide text-text-1 mb-3">
+        {t('metrics.prediction_title')}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[10px] font-mono">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-text-3">{t('metrics.prediction_1h')}</span>
+          <span className="font-semibold">{predict(60).toFixed(1)}%</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-text-3">{t('metrics.prediction_6h')}</span>
+          <span className="font-semibold">{predict(360).toFixed(1)}%</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-text-3">{t('metrics.prediction_24h')}</span>
+          <span className="font-semibold">{predict(1440).toFixed(1)}%</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-text-3">{t('metrics.prediction_48h')}</span>
+          <span className="font-semibold">{predict(2880).toFixed(1)}%</span>
+        </div>
+      </div>
+      {slope > 0 && hoursTo90 > 0 && hoursTo90 < 720 && (
+        <div className="mt-2 text-[10px] text-severity-warning">
+          {t('metrics.prediction_full', { hours: hoursTo90 })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const NodeDetailMetricsTab: React.FC<{
   statsHistory: StatsPoint[];
   loading: boolean;
@@ -80,6 +152,7 @@ export const NodeDetailMetricsTab: React.FC<{
             color="var(--severity-info)"
             data={statsHistory}
           />
+          {statsHistory.length >= 10 && <DiskPredictionCard statsHistory={statsHistory} t={t} />}
         </div>
       )}
     </div>

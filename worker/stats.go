@@ -16,49 +16,60 @@ import (
 )
 
 var ignoredDiskFilesystemTypes = map[string]struct{}{
-	"autofs":       {},
-	"binfmt_misc":  {},
-	"bpf":          {},
-	"cgroup":       {},
-	"cgroup2":      {},
-	"configfs":     {},
-	"debugfs":      {},
-	"devpts":       {},
-	"devtmpfs":     {},
-	"fusectl":      {},
-	"hugetlbfs":    {},
-	"mqueue":       {},
-	"nsfs":         {},
-	"overlay":      {},
-	"pstore":       {},
-	"proc":         {},
-	"ramfs":        {},
-	"rpc_pipefs":   {},
-	"securityfs":   {},
-	"squashfs":     {},
-	"sysfs":        {},
-	"tmpfs":        {},
-	"tracefs":      {},
+	"autofs":      {},
+	"binfmt_misc": {},
+	"bpf":         {},
+	"cgroup":      {},
+	"cgroup2":     {},
+	"configfs":    {},
+	"debugfs":     {},
+	"devpts":      {},
+	"devtmpfs":    {},
+	"fusectl":     {},
+	"hugetlbfs":   {},
+	"mqueue":      {},
+	"nsfs":        {},
+	"overlay":     {},
+	"pstore":      {},
+	"proc":        {},
+	"ramfs":       {},
+	"rpc_pipefs":  {},
+	"securityfs":  {},
+	"squashfs":    {},
+	"sysfs":       {},
+	"tmpfs":       {},
+	"tracefs":     {},
+}
+
+// DiskMount describes a single mounted filesystem's usage.
+type DiskMount struct {
+	MountPoint string  `json:"mount_point"`
+	FsType     string  `json:"fs_type"`
+	Device     string  `json:"device"`
+	TotalBytes int64   `json:"total_bytes"`
+	UsedBytes  int64   `json:"used_bytes"`
+	Percent    float64 `json:"percent"`
 }
 
 // MetricsSnapshot contains the system metrics collected from /proc.
 type MetricsSnapshot struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	CPULoad1m     float64 `json:"cpu_load_1m,omitempty"`
-	CPULoad5m     float64 `json:"cpu_load_5m,omitempty"`
-	CPULoad15m    float64 `json:"cpu_load_15m,omitempty"`
-	CPUCores      int     `json:"cpu_cores,omitempty"`
-	MemTotalBytes int64   `json:"mem_total_bytes"`
-	MemUsedBytes  int64   `json:"mem_used_bytes"`
-	MemPercent    float64 `json:"mem_percent"`
-	SwapTotal     int64   `json:"swap_total_bytes"`
-	SwapUsed      int64   `json:"swap_used_bytes"`
-	DiskTotal     int64   `json:"disk_total_bytes"`
-	DiskUsed      int64   `json:"disk_used_bytes"`
-	DiskPercent   float64 `json:"disk_percent"`
-	UptimeSeconds float64 `json:"uptime_seconds"`
-	Processes     int     `json:"processes,omitempty"`
-	CollectedAt   float64 `json:"collected_at"`
+	CPUPercent    float64     `json:"cpu_percent"`
+	CPULoad1m     float64     `json:"cpu_load_1m,omitempty"`
+	CPULoad5m     float64     `json:"cpu_load_5m,omitempty"`
+	CPULoad15m    float64     `json:"cpu_load_15m,omitempty"`
+	CPUCores      int         `json:"cpu_cores,omitempty"`
+	MemTotalBytes int64       `json:"mem_total_bytes"`
+	MemUsedBytes  int64       `json:"mem_used_bytes"`
+	MemPercent    float64     `json:"mem_percent"`
+	SwapTotal     int64       `json:"swap_total_bytes"`
+	SwapUsed      int64       `json:"swap_used_bytes"`
+	DiskTotal     int64       `json:"disk_total_bytes"`
+	DiskUsed      int64       `json:"disk_used_bytes"`
+	DiskPercent   float64     `json:"disk_percent"`
+	Disks         []DiskMount `json:"disks,omitempty"`
+	UptimeSeconds float64     `json:"uptime_seconds"`
+	Processes     int         `json:"processes,omitempty"`
+	CollectedAt   float64     `json:"collected_at"`
 }
 
 // collectMetrics gathers all system metrics from /proc (Linux) or sysctl/ps (macOS).
@@ -67,7 +78,7 @@ func collectMetrics() MetricsSnapshot {
 	if runtime.GOOS == "darwin" {
 		return collectDarwinMetrics(now)
 	}
-	diskTotal, diskUsed, diskPercent := getDiskMetrics()
+	diskTotal, diskUsed, diskPercent, disks := getDiskMetrics()
 	return MetricsSnapshot{
 		CPUPercent:    getCPUPercent(),
 		CPULoad1m:     getLoadAvg(0),
@@ -82,6 +93,7 @@ func collectMetrics() MetricsSnapshot {
 		DiskTotal:     diskTotal,
 		DiskUsed:      diskUsed,
 		DiskPercent:   diskPercent,
+		Disks:         disks,
 		UptimeSeconds: getUptime(),
 		Processes:     getProcessCount(),
 		CollectedAt:   now,
@@ -111,14 +123,15 @@ func getCPUPercent() float64 {
 		for i, f := range fields[1:] {
 			v, _ := strconv.ParseUint(f, 10, 64)
 			total += v
-			if i == 3 { // idle (field 4 in /proc/stat: user nice system idle)
-				idle = v
+			if i == 3 || i == 4 { // idle + iowait (fields 4 and 5 in /proc/stat)
+				idle += v
 			}
 		}
 		if prevTotal.Load() == 0 {
 			prevIdle.Store(idle)
 			prevTotal.Store(total)
-			return 0
+			time.Sleep(500 * time.Millisecond)
+			return getCPUPercent()
 		}
 		diffIdle := idle - prevIdle.Load()
 		diffTotal := total - prevTotal.Load()
@@ -200,55 +213,70 @@ func getSwapUsed() int64 {
 
 // ── Disk (all mounted filesystems on Linux, root fallback elsewhere) ──────
 
-func getDiskMetrics() (int64, int64, float64) {
+func getDiskMetrics() (int64, int64, float64, []DiskMount) {
 	if runtime.GOOS == "darwin" {
 		return getDarwinDiskMetrics()
 	}
 	return getLinuxDiskMetrics()
 }
 
-func getDarwinDiskMetrics() (int64, int64, float64) {
-	return getRootDiskMetrics("/")
+func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
+	total, used, percent := getRootDiskMetrics("/")
+	return total, used, percent, nil
 }
 
-func getLinuxDiskMetrics() (int64, int64, float64) {
+func getLinuxDiskMetrics() (int64, int64, float64, []DiskMount) {
 	file, err := os.Open("/proc/mounts")
 	if err != nil {
-		return getRootDiskMetrics("/")
+		total, used, percent := getRootDiskMetrics("/")
+		return total, used, percent, nil
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	seenMounts := make(map[string]struct{})
+	seenDevices := make(map[string]struct{})
 	var total, used int64
+	var disks []DiskMount
 
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) < 3 {
 			continue
 		}
+		device := fields[0]
 		mountPoint := unescapeMountField(fields[1])
 		fsType := fields[2]
 		if _, ignored := ignoredDiskFilesystemTypes[fsType]; ignored {
 			continue
 		}
-		if _, exists := seenMounts[mountPoint]; exists {
+
+		// Deduplicate by device to prevent double-counting disks with multiple mount points
+		if _, exists := seenDevices[device]; exists {
 			continue
 		}
-		seenMounts[mountPoint] = struct{}{}
+		seenDevices[device] = struct{}{}
 
-		mountTotal, mountUsed, _ := getRootDiskMetrics(mountPoint)
+		mountTotal, mountUsed, mountPercent := getRootDiskMetrics(mountPoint)
 		if mountTotal <= 0 {
 			continue
 		}
 		total += mountTotal
 		used += mountUsed
+		disks = append(disks, DiskMount{
+			MountPoint: mountPoint,
+			FsType:     fsType,
+			Device:     device,
+			TotalBytes: mountTotal,
+			UsedBytes:  mountUsed,
+			Percent:    mountPercent,
+		})
 	}
 
 	if total <= 0 {
-		return getRootDiskMetrics("/")
+		rootTotal, rootUsed, rootPercent := getRootDiskMetrics("/")
+		return rootTotal, rootUsed, rootPercent, nil
 	}
-	return total, used, math.Round(float64(used)/float64(total)*1000) / 10
+	return total, used, math.Round(float64(used)/float64(total)*1000) / 10, disks
 }
 
 func getRootDiskMetrics(path string) (int64, int64, float64) {
@@ -337,23 +365,25 @@ func handleGetStats(intent Intent) IntentResult {
 func buildStatusReport() map[string]interface{} {
 	m := collectMetrics()
 	return map[string]interface{}{
-		"type":            "STATUS_REPORT",
-		"cpu_percent":     m.CPUPercent,
-		"cpu_load_1m":     m.CPULoad1m,
-		"cpu_load_5m":     m.CPULoad5m,
-		"cpu_load_15m":    m.CPULoad15m,
-		"cpu_cores":       m.CPUCores,
-		"mem_total_bytes": m.MemTotalBytes,
-		"mem_used_bytes":  m.MemUsedBytes,
-		"mem_percent":     m.MemPercent,
+		"type":             "STATUS_REPORT",
+		"version":          Version,
+		"cpu_percent":      m.CPUPercent,
+		"cpu_load_1m":      m.CPULoad1m,
+		"cpu_load_5m":      m.CPULoad5m,
+		"cpu_load_15m":     m.CPULoad15m,
+		"cpu_cores":        m.CPUCores,
+		"mem_total_bytes":  m.MemTotalBytes,
+		"mem_used_bytes":   m.MemUsedBytes,
+		"mem_percent":      m.MemPercent,
 		"swap_total_bytes": m.SwapTotal,
-		"swap_used_bytes": m.SwapUsed,
+		"swap_used_bytes":  m.SwapUsed,
 		"disk_total_bytes": m.DiskTotal,
-		"disk_used_bytes": m.DiskUsed,
-		"disk_percent":    m.DiskPercent,
-		"uptime_seconds":  m.UptimeSeconds,
-		"processes":       m.Processes,
-		"collected_at":    m.CollectedAt,
+		"disk_used_bytes":  m.DiskUsed,
+		"disk_percent":     m.DiskPercent,
+		"disks":            m.Disks,
+		"uptime_seconds":   m.UptimeSeconds,
+		"processes":        m.Processes,
+		"collected_at":     m.CollectedAt,
 	}
 }
 
@@ -361,7 +391,7 @@ func buildStatusReport() map[string]interface{} {
 
 func collectDarwinMetrics(now float64) MetricsSnapshot {
 	cores := runtime.NumCPU()
-	diskTotal, diskUsed, diskPercent := getDiskMetrics()
+	diskTotal, diskUsed, diskPercent, disks := getDiskMetrics()
 
 	cpuPercent := getDarwinCPUPercent()
 	load1, load5, load15 := getDarwinLoadAvg()
@@ -384,6 +414,7 @@ func collectDarwinMetrics(now float64) MetricsSnapshot {
 		DiskTotal:     diskTotal,
 		DiskUsed:      diskUsed,
 		DiskPercent:   diskPercent,
+		Disks:         disks,
 		UptimeSeconds: uptime,
 		Processes:     procCount,
 		CollectedAt:   now,
