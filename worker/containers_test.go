@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 )
 
@@ -11,7 +12,7 @@ func TestHandleRestartContainerRejectsEmptyRequestedBy(t *testing.T) {
 		RequestedBy: "",
 		Params:      map[string]interface{}{"container_id": "abc123"},
 	}
-	result := handleRestartContainer(intent)
+	result := handleRestartContainer(context.Background(), intent)
 	if result.Success {
 		t.Fatal("expected restart to be rejected when requested_by is empty")
 	}
@@ -27,7 +28,7 @@ func TestHandleRestartContainerAllowsWithRequestedBy(t *testing.T) {
 		RequestedBy: "admin",
 		Params:      map[string]interface{}{"container_id": "abc123"},
 	}
-	result := handleRestartContainer(intent)
+	result := handleRestartContainer(context.Background(), intent)
 	if result.Error == "missing requested_by context" {
 		t.Fatal("expected restart to proceed when requested_by is set")
 	}

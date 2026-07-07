@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 )
 
@@ -11,7 +12,7 @@ func TestHandleRestartServiceRejectsEmptyRequestedBy(t *testing.T) {
 		RequestedBy: "",
 		Params:      map[string]interface{}{"service": "ssh"},
 	}
-	result := handleRestartService(intent)
+	result := handleRestartService(context.Background(), intent)
 	if result.Success {
 		t.Fatal("expected restart to be rejected when requested_by is empty")
 	}
@@ -27,7 +28,7 @@ func TestHandleRestartServiceAllowsWithRequestedBy(t *testing.T) {
 		RequestedBy: "admin",
 		Params:      map[string]interface{}{"service": "ssh"},
 	}
-	result := handleRestartService(intent)
+	result := handleRestartService(context.Background(), intent)
 	if result.Error == "missing requested_by context" {
 		t.Fatal("expected restart to proceed when requested_by is set")
 	}

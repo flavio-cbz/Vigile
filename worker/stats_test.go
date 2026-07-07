@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"sync"
 	"testing"
 )
@@ -40,7 +41,7 @@ func TestCPUStatsAtomicDirectAccess(t *testing.T) {
 }
 
 func TestCollectMetrics(t *testing.T) {
-	m := collectMetrics()
+	m := collectMetrics(context.Background())
 	t.Logf("Collected: %+v", m)
 }
 
