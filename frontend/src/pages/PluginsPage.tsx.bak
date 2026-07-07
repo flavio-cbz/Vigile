@@ -69,6 +69,19 @@ export const PluginsPage: React.FC = () => {
     }
   };
 
+  // const fetchRegistry = async () => {
+    setLoadingRegistry(true);
+    try {
+      const data = await api<{ plugins: RegistryPlugin[] }>('/api/admin/plugins/registry');
+      if (data && data.plugins) {
+        setRegistryPlugins(data.plugins);
+      }
+    } catch (err) {
+      console.error('Failed to fetch registry:', err);
+    } finally {
+      setLoadingRegistry(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -88,8 +101,8 @@ export const PluginsPage: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'registry') {
-      const id = setTimeout(() => setLoadingRegistry(true), 0);
       (async () => {
+        setLoadingRegistry(true);
         try {
           const data = await api<{ plugins: RegistryPlugin[] }>('/api/admin/plugins/registry');
           if (data && data.plugins) {
@@ -98,7 +111,6 @@ export const PluginsPage: React.FC = () => {
         } catch (err) {
           console.error('Failed to fetch registry:', err);
         } finally {
-          clearTimeout(id);
           setLoadingRegistry(false);
         }
       })();

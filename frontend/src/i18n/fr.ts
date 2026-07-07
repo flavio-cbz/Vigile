@@ -491,6 +491,7 @@ export const fr = {
   "node_detail.chart_cpu": "Charge Processeur (%)",
   "node_detail.chart_ram": "Charge Mémoire (%)",
   "node_detail.chart_disk": "Stockage Disque (%)",
+  "node_detail.chart_disk_days": "Disque — Jours restants avant saturation",
   "node_detail.services_search_placeholder": "Rechercher un service systemd...",
   "node_detail.services_filter_all": "Tous les états",
   "node_detail.services_filter_running": "En cours d'exécution",
@@ -536,6 +537,13 @@ export const fr = {
   "metrics.prediction_48h": "48 heures",
   "metrics.prediction_full": "Disque estimé plein dans {hours} heures",
   "metrics.prediction_low_confidence": "Confiance de prédiction trop faible (R² < 0.3)",
+  "metrics.disks_title": "Points de montage disques",
+  "metrics.disk_device": "Périphérique",
+  "metrics.disk_mount": "Point de montage",
+  "metrics.disk_type": "Type",
+  "metrics.disk_usage": "Utilisation",
+  "metrics.days_label": "jours",
+
 
   // Modals
   "modal.close_aria": "Fermer",

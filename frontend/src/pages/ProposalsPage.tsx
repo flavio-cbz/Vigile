@@ -176,7 +176,19 @@ export const ProposalsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchProposals();
+    (async () => {
+      try {
+        const url = filterStatus === 'ALL'
+          ? '/api/chat/proposals'
+          : `/api/chat/proposals?status=${filterStatus}`;
+        const data = await api<ActionProposal[]>(url);
+        if (data) setProposals(data);
+      } catch (err) {
+        console.error('Failed to fetch proposals:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [filterStatus]);
 
   const handleApprove = async (id: string) => {

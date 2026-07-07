@@ -1,13 +1,10 @@
-import React, { useId } from 'react';
+import React from 'react';
 
 interface VigileLogoProps {
   className?: string;
 }
 
 export const VigileLogo: React.FC<VigileLogoProps> = ({ className }) => {
-  const id = useId();
-  const gradId = `luxGrad-${id}`;
-
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -15,33 +12,15 @@ export const VigileLogo: React.FC<VigileLogoProps> = ({ className }) => {
       className={className}
       fill="none"
     >
-      <defs>
-        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f8fafc" />
-          <stop offset="100%" stopColor="#94a3b8" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M 45,45
-          C 45,110 75,155 100,155
-          C 125,155 155,110 155,45
-          C 140,55 125,82 100,90
-          C 75,98 85,115 100,115
-          C 115,115 125,98 100,90"
-        fill="none"
-        stroke={`url(#${gradId})`}
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+      {/* Rounded square frame — bold, theme-aware */}
+      <rect
+        x="28" y="28" width="144" height="144" rx="28" ry="28"
+        stroke="currentColor" strokeWidth="10" fill="none"
       />
-      <circle cx="100" cy="102" r="3.5" fill="#f8fafc" />
+      {/* Letter V — bold geometric strokes meeting at bottom-center */}
       <path
-        d="M 75,70 C 85,55 115,55 125,70"
-        fill="none"
-        stroke="#94a3b8"
-        strokeWidth="0.75"
-        strokeLinecap="round"
-        opacity="0.6"
+        d="M 56,52 L 100,158 L 144,52"
+        stroke="currentColor" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" fill="none"
       />
     </svg>
   );

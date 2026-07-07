@@ -14,10 +14,9 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
 
   useEffect(() => {
     if (!lastUpdated) return;
-    setSecondsAgo(Math.floor((Date.now() - lastUpdated) / 1000));
-    const interval = setInterval(() => {
-      setSecondsAgo(Math.floor((Date.now() - lastUpdated) / 1000));
-    }, 1000);
+    const tick = () => setSecondsAgo(Math.floor((Date.now() - lastUpdated) / 1000));
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [lastUpdated]);
 

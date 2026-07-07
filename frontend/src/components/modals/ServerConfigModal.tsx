@@ -16,19 +16,21 @@ export const ServerConfigModal = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Reset form when pending node changes
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!pending) {
+    if (pending) {
+      setName(pending.hostname || pending.name || '');
+      setGroup(pending.group || '');
+    } else {
       setName('');
       setGroup('');
-      setError(null);
-      setSubmitting(false);
-      return;
     }
-    setName(pending.hostname || pending.name || '');
-    setGroup(pending.group || '');
     setError(null);
     setSubmitting(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending?.id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!pending) return;

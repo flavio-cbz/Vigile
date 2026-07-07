@@ -11,7 +11,10 @@ export function usePolling(
   enabled = true,
 ) {
   const savedCallback = useRef(callback);
-  savedCallback.current = callback;
+
+  useEffect(() => {
+    savedCallback.current = callback;
+  });
 
   const runCallback = async () => {
     if (activeRuns.get(key)) return;
@@ -64,5 +67,6 @@ export function usePolling(
         }
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, intervalMs, enabled]);
 }

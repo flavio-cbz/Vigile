@@ -8,34 +8,33 @@ import { api } from '../hooks/useApi';
 import { useLocale } from '../i18n';
 import { ParticleCanvas } from '../components/login/ParticleCanvas';
 import type { MeResponse, LoginLocationState } from '../types';
+const LOG_LINES = [
+  'SECURE MANAGER: Cryptography layer loaded (Ed25519 standard).',
+  'DATABASE: aiosqlite pool initialized.',
+  'AUDIT: Append-only hash chain checked. Integrity validated.',
+  'WEBSOCKET: join listener configured on port 8000.',
+  'NODE MANAGER: Loading active worker inventory...',
+  'SYSTEM: 3 nodes loaded. Health checks resolved.',
+  'PLUGINS: metric snapshot scanning active (60s tick).',
+  'RATE LIMITER: Sliding window setup initialized.',
+  'LLM INTEGRITY: Custom OpenAI complete client active.',
+  'SYSTEM: challenge response handshake initialized.',
+];
+
 const BootLogs: React.FC = () => {
   const { t } = useLocale();
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<string[]>(() =>
+    LOG_LINES.slice(0, 6).map((log, i) => {
+      const ts = new Date(Date.now() - (6 - i) * 3000).toLocaleTimeString();
+      return `[${ts}] ${log}`;
+    })
+  );
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const raw = [
-      'SECURE MANAGER: Cryptography layer loaded (Ed25519 standard).',
-      'DATABASE: aiosqlite pool initialized.',
-      'AUDIT: Append-only hash chain checked. Integrity validated.',
-      'WEBSOCKET: join listener configured on port 8000.',
-      'NODE MANAGER: Loading active worker inventory...',
-      'SYSTEM: 3 nodes loaded. Health checks resolved.',
-      'PLUGINS: metric snapshot scanning active (60s tick).',
-      'RATE LIMITER: Sliding window setup initialized.',
-      'LLM INTEGRITY: Custom OpenAI complete client active.',
-      'SYSTEM: challenge response handshake initialized.',
-    ];
-
-    const initial = raw.slice(0, 6).map((log, i) => {
-      const ts = new Date(Date.now() - (6 - i) * 3000).toLocaleTimeString();
-      return `[${ts}] ${log}`;
-    });
-    setLogs(initial);
-
     const interval = setInterval(() => {
       setLogs((prev) => {
-        const next = raw[Math.floor(Math.random() * raw.length)];
+        const next = LOG_LINES[Math.floor(Math.random() * LOG_LINES.length)];
         const ts = new Date().toLocaleTimeString();
         const full = `[${ts}] ${next}`;
         const update = [...prev, full];
@@ -125,6 +124,7 @@ export const LoginPage: React.FC = () => {
             return;
           }
         } catch {
+          // not a JSON error response, proceed to re-throw
         }
         throw err;
       }

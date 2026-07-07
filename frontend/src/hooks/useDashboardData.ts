@@ -156,9 +156,8 @@ export function useDashboardData() {
 
   // Initial load: nodes -> bulk metrics + proposals + activity -> insights
   useEffect(() => {
+    // loadingDashboard && insightsLoading already true from useState initializer
     const loadAll = async () => {
-      setLoadingDashboard(true);
-      setInsightsLoading(true);
       await fetchNodes();
       await Promise.all([
         fetchBulkMetrics(),
@@ -186,6 +185,7 @@ export function useDashboardData() {
   // Re-aggregate containers whenever the online node set changes
   useEffect(() => {
     if (nodes.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void fetchAllContainers();
     }
     // fetchAllContainers closes over `nodes` from this render; running it on

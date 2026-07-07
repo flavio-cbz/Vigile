@@ -47,6 +47,11 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
   const [period, setPeriod] = useState<'24h' | '7d'>(
     () => (localStorage.getItem('vigile_trend_period') as '24h' | '7d') || '24h'
   );
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const interval = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handlePeriodChange = (p: '24h' | '7d') => {
     setPeriod(p);
@@ -97,8 +102,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
     };
   }, [nodes, period]);
 
-  const getTimelineData = (node: Node, snapshots: Snapshot[]): BarData[] => {
-    const nowSec = Math.floor(Date.now() / 1000);
+  const getTimelineData = (node: Node, snapshots: Snapshot[], nowSec: number): BarData[] => {
     const durationSec = period === '24h' ? 24 * 3600 : 7 * 24 * 3600;
     const totalBars = 30;
     const slotDurationSec = durationSec / totalBars;
@@ -331,7 +335,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
         ) : (
           nodes.map((node, nodeIdx) => {
             const nodeSnaps = nodesStats[node.id] || [];
-            const timelineBars = getTimelineData(node, nodeSnaps);
+            const timelineBars = getTimelineData(node, nodeSnaps, nowSec);
             const uptimePct = calculateUptime(timelineBars);
             const nodeIncidents = getIncidents(timelineBars);
 

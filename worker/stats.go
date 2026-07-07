@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -40,6 +41,14 @@ var ignoredDiskFilesystemTypes = map[string]struct{}{
 	"sysfs":       {},
 	"tmpfs":       {},
 	"tracefs":     {},
+}
+
+var procPrefix = ""
+
+func init() {
+	if _, err := os.Stat("/host/proc"); err == nil {
+		procPrefix = "/host"
+	}
 }
 
 // DiskMount describes a single mounted filesystem's usage.
@@ -106,7 +115,7 @@ func collectMetrics(ctx context.Context) MetricsSnapshot {
 var prevIdle, prevTotal atomic.Uint64
 
 func getCPUPercent() float64 {
-	data, err := os.ReadFile("/proc/stat")
+	data, err := os.ReadFile(procPrefix + "/proc/stat")
 	if err != nil {
 		return 0
 	}
@@ -141,13 +150,15 @@ func getCPUPercent() float64 {
 		if diffTotal == 0 {
 			return 0
 		}
-		return math.Round((1-float64(diffIdle)/float64(diffTotal))*1000) / 10
+		pct := math.Round((1-float64(diffIdle)/float64(diffTotal))*1000) / 10
+		log.Printf("[DEBUG CPU] diffIdle: %d, diffTotal: %d, pct: %.1f", diffIdle, diffTotal, pct)
+		return pct
 	}
 	return 0
 }
 
 func getLoadAvg(index int) float64 {
-	data, err := os.ReadFile("/proc/loadavg")
+	data, err := os.ReadFile(procPrefix + "/proc/loadavg")
 	if err != nil {
 		return 0
 	}
@@ -166,7 +177,7 @@ func getCPUCores() int {
 // ── Memory ───────────────────────────────────────────────────────────
 
 func getMemField(field string) int64 {
-	data, err := os.ReadFile("/proc/meminfo")
+	data, err := os.ReadFile(procPrefix + "/proc/meminfo")
 	if err != nil {
 		return 0
 	}
@@ -222,12 +233,83 @@ func getDiskMetrics() (int64, int64, float64, []DiskMount) {
 }
 
 func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
-	total, used, percent := getRootDiskMetrics("/")
-	return total, used, percent, nil
+	cmd := exec.Command("df", "-k")
+	out, err := cmd.Output()
+	if err != nil {
+		total, used, percent := getRootDiskMetrics("/")
+		return total, used, percent, nil
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var total, used int64
+	var disks []DiskMount
+	seenDevices := make(map[string]struct{})
+
+	for i, line := range lines {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 9 {
+			continue
+		}
+		device := fields[0]
+		// Ignore virtual filesystems / devfs / map
+		if device == "devfs" || strings.HasPrefix(device, "map ") || device == "map" {
+			continue
+		}
+		mountPoint := fields[8]
+		// Reconstruct mountPoint if it contains spaces
+		if len(fields) > 9 {
+			mountPoint = strings.Join(fields[8:], " ")
+		}
+		// Ignore standard macOS noise partitions
+		if strings.HasPrefix(mountPoint, "/System/Volumes/Preboot") ||
+			strings.HasPrefix(mountPoint, "/System/Volumes/VM") ||
+			strings.HasPrefix(mountPoint, "/System/Volumes/Update") {
+			continue
+		}
+
+		// Deduplicate by device
+		if _, exists := seenDevices[device]; exists {
+			continue
+		}
+		seenDevices[device] = struct{}{}
+
+		totalKB, _ := strconv.ParseInt(fields[1], 10, 64)
+		usedKB, _ := strconv.ParseInt(fields[2], 10, 64)
+
+		mountTotal := totalKB * 1024
+		mountUsed := usedKB * 1024
+
+		var mountPercent float64
+		if mountTotal > 0 {
+			mountPercent = math.Round(float64(mountUsed)/float64(mountTotal)*1000) / 10
+		}
+
+		total += mountTotal
+		used += mountUsed
+
+		disks = append(disks, DiskMount{
+			MountPoint: mountPoint,
+			FsType:     "apfs",
+			Device:     device,
+			TotalBytes: mountTotal,
+			UsedBytes:  mountUsed,
+			Percent:    mountPercent,
+		})
+	}
+
+	if total <= 0 {
+		rootTotal, rootUsed, rootPercent := getRootDiskMetrics("/")
+		return rootTotal, rootUsed, rootPercent, nil
+	}
+
+	return total, used, math.Round(float64(used)/float64(total)*1000) / 10, disks
 }
 
 func getLinuxDiskMetrics() (int64, int64, float64, []DiskMount) {
-	file, err := os.Open("/proc/mounts")
+	file, err := os.Open(procPrefix + "/proc/mounts")
 	if err != nil {
 		total, used, percent := getRootDiskMetrics("/")
 		return total, used, percent, nil
@@ -310,7 +392,7 @@ func unescapeMountField(value string) string {
 // ── System ───────────────────────────────────────────────────────────
 
 func getUptime() float64 {
-	data, err := os.ReadFile("/proc/uptime")
+	data, err := os.ReadFile(procPrefix + "/proc/uptime")
 	if err != nil {
 		return 0
 	}
@@ -323,7 +405,7 @@ func getUptime() float64 {
 }
 
 func getProcessCount() int {
-	d, err := os.Open("/proc")
+	d, err := os.Open(procPrefix + "/proc")
 	if err != nil {
 		return 0
 	}
@@ -437,6 +519,7 @@ func getDarwinCPUPercent(ctx context.Context) float64 {
 		if line == "" || line == "%CPU" {
 			continue
 		}
+		line = strings.ReplaceAll(line, ",", ".")
 		val, err := strconv.ParseFloat(line, 64)
 		if err == nil {
 			sum += val

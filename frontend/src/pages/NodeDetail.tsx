@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { usePolling } from '../hooks/usePolling';
 import { Spinner } from '../components/primitives/Spinner';
@@ -10,7 +10,8 @@ import { useNodeDetailData } from '../hooks/useNodeDetailData';
 import { ArrowLeft } from 'lucide-react';
 import { NodeSettingsTab } from '../components/dashboard/NodeSettingsTab';
 import { NodeDetailHeader } from '../components/node-detail/NodeDetailHeader';
-import { NodeDetailTabs, useNodeDetailTabs } from '../components/node-detail/NodeDetailTabs';
+import { NodeDetailTabs } from '../components/node-detail/NodeDetailTabs';
+import { useNodeDetailTabs } from '../components/node-detail/useNodeDetailTabs';
 import { NodeDetailMetricsTab } from '../components/node-detail/NodeDetailMetricsTab';
 import { NodeDetailLogsTab } from '../components/node-detail/NodeDetailLogsTab';
 import { NodeDetailServicesTab } from '../components/node-detail/NodeDetailServicesTab';
@@ -58,14 +59,15 @@ export const NodeDetail: React.FC = () => {
     setRestartingContainer,
   } = data;
 
-  const [activeTab, setActiveTab] = useState<NodeDetailTabId>('insights');
-  const [searchParams] = useSearchParams();
-  useEffect(() => {
-    const tabParam = searchParams.get('tab');
-    if (tabParam && ['insights', 'metrics', 'services', 'containers', 'logs', 'settings'].includes(tabParam)) {
-      setActiveTab(tabParam as NodeDetailTabId);
-    }
-  }, [searchParams]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromParams = searchParams.get('tab');
+  const activeTab = tabFromParams && ['insights', 'metrics', 'services', 'containers', 'logs', 'settings'].includes(tabFromParams)
+    ? (tabFromParams as NodeDetailTabId)
+    : 'insights';
+  const handleTabChange = useCallback(
+    (tab: NodeDetailTabId) => setSearchParams({ tab }, { replace: true }),
+    [setSearchParams],
+  );
 
   useEffect(() => {
     if (activeTab === 'services' && !loadingServices) fetchServicesList();
@@ -136,7 +138,7 @@ export const NodeDetail: React.FC = () => {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
       <NodeDetailHeader node={node} />
 
-      <NodeDetailTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+      <NodeDetailTabs tabs={tabs} activeTab={activeTab} onChange={handleTabChange} />
 
       <div className="min-h-96">
         {activeTab === 'insights' && (

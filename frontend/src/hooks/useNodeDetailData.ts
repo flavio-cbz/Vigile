@@ -8,6 +8,7 @@ import type {
   NodeRecord,
   ServiceRecord,
   StatsPoint,
+  DiskMount,
 } from '../components/node-detail/types';
 
 interface StatsSnapshot {
@@ -15,6 +16,7 @@ interface StatsSnapshot {
   cpu_percent: number;
   mem_percent: number;
   disk_percent: number;
+  disks?: DiskMount[];
 }
 
 export interface NodeDetailData {
@@ -93,6 +95,7 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
           cpu: snap.cpu_percent,
           ram: snap.mem_percent,
           disk: snap.disk_percent,
+          disks: snap.disks,
         }));
         setStatsHistory(ordered);
       }
@@ -134,8 +137,14 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     setLoadingLogs(true);
     try {
       const query = `?lines=${logsLimit}${logsService ? `&service=${logsService}` : ''}`;
-      const data = await api<{ output: string }>(`/api/nodes/${nodeId}/logs${query}`, { skipToast });
-      if (data) setLogs(data.output || t('node_detail.logs_selection_empty'));
+      const data = await api<{ output: string; error?: string }>(`/api/nodes/${nodeId}/logs${query}`, { skipToast });
+      if (data) {
+        if (data.error) {
+          setLogs(`Error: ${data.error}`);
+        } else {
+          setLogs(data.output || t('node_detail.logs_selection_empty'));
+        }
+      }
     } catch (err) {
       console.error('Failed to fetch logs:', err);
       if (!skipToast) {

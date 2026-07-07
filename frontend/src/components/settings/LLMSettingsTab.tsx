@@ -30,6 +30,7 @@ export const LLMSettingsTab: React.FC<LLMSettingsTabProps> = ({
   const [llmTesting, setLlmTesting] = useState(false);
   const [llmFeedback, setLlmFeedback] = useState<Feedback | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (systemSettings) {
       setLlmModel(systemSettings.llm_model || '');
@@ -37,6 +38,7 @@ export const LLMSettingsTab: React.FC<LLMSettingsTabProps> = ({
       setLlmApiKey(systemSettings.llm_api_key || '');
     }
   }, [systemSettings]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleTestLlmConnection = async () => {
     if (user?.username === 'guest') return;

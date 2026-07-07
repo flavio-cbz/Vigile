@@ -83,6 +83,12 @@ export const ServersPage: React.FC = () => {
   const [deleteNode, setDeleteNode] = useState<Node | null>(null);
   const setAddNodeModalOpen = useLayoutStore((s) => s.setAddNodeModalOpen);
 
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const interval = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   const fetchBulkMetrics = async () => {
     try {
       const data = await api<{ statuses: Record<string, NodeMetrics> }>('/api/nodes/bulk/status');
@@ -96,7 +102,9 @@ export const ServersPage: React.FC = () => {
 
   useEffect(() => {
     fetchNodes();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBulkMetrics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = nodes.filter((n: Node) => {
@@ -113,7 +121,7 @@ export const ServersPage: React.FC = () => {
 
   const formatTime = (ts: number | null): string => {
     if (!ts) return '—';
-    const seconds = Math.floor((Date.now() / 1000) - ts);
+    const seconds = Math.floor(nowSec - ts);
     if (seconds < 60) return `il y a ${seconds}s`;
     if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)}min`;
     if (seconds < 86400) return `il y a ${Math.floor(seconds / 3600)}h`;

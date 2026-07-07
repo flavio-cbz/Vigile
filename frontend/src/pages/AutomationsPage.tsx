@@ -146,12 +146,21 @@ export const AutomationsPage: React.FC = () => {
   }, [addToast]);
 
   useEffect(() => {
-    fetchRules();
+    (async () => {
+      try {
+        const data = await api<AutomationRule[]>('/api/admin/automations');
+        if (data) setRules(data);
+      } catch {
+        addToast('error', 'Erreur', 'Erreur de chargement des règles.');
+      } finally {
+        setLoading(false);
+      }
+    })();
     // Also fetch nodes for test modal
     api<{ id: string; name: string }[]>('/api/nodes').then(d => {
       if (d) setNodes(d);
     });
-  }, [fetchRules]);
+  }, [addToast]);
 
   const handleToggle = async (rule: AutomationRule) => {
     setTogglingId(rule.id);

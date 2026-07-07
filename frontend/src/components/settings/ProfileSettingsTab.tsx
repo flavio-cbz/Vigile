@@ -85,12 +85,7 @@ export const ProfileSettingsTab: React.FC = () => {
                 {user?.user_id?.substring(0, 8)}…
               </span>
             </div>
-            <div className="flex justify-between items-center py-1.5">
-              <span className="text-text-3 font-medium">{t('settings.demo_mode')}</span>
-              <span className="font-bold text-text-2">
-                {user?.username === 'guest' ? t('settings.enabled') : t('settings.disabled')}
-              </span>
-            </div>
+
           </div>
         </div>
 
@@ -138,6 +133,7 @@ export const ProfileSettingsTab: React.FC = () => {
 
             <div className="border-t border-border/40 my-4" />
 
+            {/* NOTE: This selector also sets the LLM response language (sent via Accept-Language to /api/chat) */}
             <label className="block text-[10px] font-bold text-text-3 uppercase tracking-wider mb-1.5 font-interface">
               {t('settings.language')}
             </label>

@@ -28,7 +28,6 @@ export const SwimLane: React.FC<SwimLaneProps> = ({
   skeletonCount = 4,
   skeletonComponent,
   className = '',
-  layout: _layout = 'grid',
   gridClassName = '',
 }) => {
   const { t } = useLocale();

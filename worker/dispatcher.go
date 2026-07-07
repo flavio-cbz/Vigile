@@ -145,11 +145,17 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to locate executable: %v", err)}
 	}
-	// Use default temp dir (e.g. /tmp) — the executable's own directory
-	// may be read-only (e.g. Docker --read-only rootfs).
-	tmpFile, err := os.CreateTemp("", "vigile-worker-new-*")
+	// Try /tmp first (writable tmpfs in most Linux setups + Docker).
+	// Fall back to /etc/vigile (ReadWritePaths in systemd unit).
+	var tmpFile *os.File
+	for _, dir := range []string{"/tmp", "/etc/vigile", ""} {
+		tmpFile, err = os.CreateTemp(dir, "vigile-worker-new-*")
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create temporary file: %v", err)}
+		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create temporary file (tried /tmp, /etc/vigile, and os.TempDir): %v", err)}
 	}
 	tmpPath := tmpFile.Name()
 	defer func() {

@@ -76,7 +76,7 @@
 
   /* Shadow colors for layout components */
   --shadow-dropdown: color-mix(in srgb, var(--text-1) 50%, transparent);
-  --shadow-sidebar: rgba(0, 0, 0, 0.35);
+  --shadow-sidebar: rgba(0, 0, 0, 0.15);
   --shadow-topbar: color-mix(in srgb, var(--text-1) 8%, transparent);
   --shadow-toggle: color-mix(in srgb, var(--text-1) 30%, transparent);
 

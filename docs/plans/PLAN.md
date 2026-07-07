@@ -456,7 +456,7 @@ vigile/
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/                   # 9 pages réelles (~3000 lignes)
+│   │   ├── pages/                   # 8 pages réelles (~2750 lignes)
 │   │   │   ├── Dashboard.tsx         # Vue d'ensemble (Insights/Servers/Containers/Activity)
 │   │   │   ├── LoginPage.tsx        # Authentification
 │   │   │   ├── ServersPage.tsx      # Liste des serveurs
@@ -464,8 +464,7 @@ vigile/
 │   │   │   ├── ProposalsPage.tsx    # Propositions IA (approuver/rejeter)
 │   │   │   ├── PluginsPage.tsx      # Catalogue des plugins
 │   │   │   ├── AutomationsPage.tsx  # Règles d'automatisation (586 lignes)
-│   │   │   ├── SettingsPage.tsx     # Paramètres utilisateur
-│   │   │   └── AuditPage.tsx        # Registre d'audit
+│   │   │   └── SettingsPage.tsx      # Paramètres utilisateur
 │   │   ├── components/              # Nombreux composants réutilisables
 │   │   │   ├── dashboard/
 │   │   │   ├── ui/
@@ -528,7 +527,6 @@ vigile/
 - ✅ `CopilotPanel` (ChatPanel) : streaming SSE natif, historique de conversation
 - ✅ `ProposalInline` / `ProposalCard` (ActionProposal) : carte d'approbation avec contexte et niveau de risque
 - ✅ `NodeCard` / `NodeDetail` : état, métriques temps réel, logs
-- ✅ `AuditPage` (AuditLog) : timeline des actions approuvées
 - ✅ Auth UI : login, gestion de session JWT
 - ✅ `PluginsPage` : catalogue des plugins
 - ✅ `AutomationsPage` : moteur d'automatisations (règles, déclencheurs, actions)
@@ -626,7 +624,7 @@ Le passage en production nécessite de verrouiller les limites du système et d'
 
 #### 3. Registre d'Audit Cryptographique
 
-- ❌ **Supprimer la page** : La page « Registre d'Audit Cryptographique » et son entrée dans la topbar ne présentent pas d'utilité pour l'utilisateur courant. Les retirer de l'UI.
+- ✅ **Page supprimée** : La page « Registre d'Audit Cryptographique » et son entrée dans la topbar ont été retirées de l'UI (aucune route `/audit`, aucun composant `AuditPage`). L'audit reste accessible via l'endpoint API `GET /api/audit` et la vérification `GET /api/admin/audit-verify`.
 
 #### 4. Nettoyage UX — Bruit et Hiérarchie
 

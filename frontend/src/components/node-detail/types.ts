@@ -22,11 +22,21 @@ export interface ContainerRecord {
   [key: string]: unknown;
 }
 
+export interface DiskMount {
+  mount_point: string;
+  fs_type: string;
+  device: string;
+  total_bytes: number;
+  used_bytes: number;
+  percent: number;
+}
+
 export interface StatsPoint {
   time: string;
   cpu: number;
   ram: number;
   disk: number;
+  disks?: DiskMount[];
 }
 
 export type Severity = 'ok' | 'warning' | 'critical' | 'offline' | 'info';

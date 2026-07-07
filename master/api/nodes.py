@@ -1052,6 +1052,15 @@ class LogsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class DiskMountResponse(BaseModel):
+    mount_point: str
+    fs_type: str
+    device: str
+    total_bytes: int
+    used_bytes: int
+    percent: float
+
+
 class MetricsSnapshotResponse(BaseModel):
     """Single metrics snapshot exposed via the stats endpoint."""
 
@@ -1069,6 +1078,7 @@ class MetricsSnapshotResponse(BaseModel):
     disk_total_bytes: int
     disk_used_bytes: int
     disk_percent: float
+    disks: list[DiskMountResponse] | None = None
     uptime_seconds: float
     processes: int | None = None
 
@@ -1109,6 +1119,7 @@ async def get_node_stats(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
+    import json
     rows: list[dict] = []
     async with db.execute(
         """
@@ -1118,7 +1129,7 @@ async def get_node_stats(
             mem_total_bytes, mem_used_bytes, mem_percent,
             swap_total_bytes, swap_used_bytes,
             disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes
+            uptime_seconds, processes, disks_json
         FROM metrics_snapshots
         WHERE node_id = ?
         ORDER BY collected_at DESC
@@ -1127,7 +1138,13 @@ async def get_node_stats(
         (node_id, limit),
     ) as cursor:
         for row in await cursor.fetchall():
-            rows.append(dict(row))
+            d = dict(row)
+            if d.get("disks_json"):
+                try:
+                    d["disks"] = json.loads(d["disks_json"])
+                except Exception:
+                    d["disks"] = None
+            rows.append(d)
 
     return NodeStatsResponse(
         node_id=node_id,
@@ -1183,7 +1200,7 @@ async def get_node_logs(
 
     effective_path = path
     if service:
-        action = WorkerAction.READ_LOGS
+        action = WorkerAction.READ_LOGS_SERVICE
         params = {"service": service, "lines": lines}
     elif effective_path:
         action = WorkerAction.READ_LOGS

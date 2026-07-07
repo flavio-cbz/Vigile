@@ -33,16 +33,13 @@ const colorForLine = (log: string): string => {
 
 export const BootLogs: React.FC = () => {
   const { t } = useLocale();
-  const [logs, setLogs] = useState<string[]>([]);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const initial = BOOT_LOG_LINES.slice(0, INITIAL_LOG_LINES).map((log, i) => {
+  const [logs, setLogs] = useState<string[]>(() =>
+    BOOT_LOG_LINES.slice(0, INITIAL_LOG_LINES).map((log, i) => {
       const ts = new Date(Date.now() - (INITIAL_LOG_LINES - i) * LOG_TIMING_OFFSET_MS).toLocaleTimeString();
       return `[${ts}] ${log}`;
-    });
-    setLogs(initial);
-  }, []);
+    })
+  );
+  const ref = useRef<HTMLDivElement>(null);
 
   usePolling('login_boot_logs_tick', () => {
     setLogs((prev) => {

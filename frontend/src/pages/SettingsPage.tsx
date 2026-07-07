@@ -22,28 +22,25 @@ export const SettingsPage: React.FC = () => {
   const [systemLoading, setSystemLoading] = useState(false);
   const [systemError, setSystemError] = useState<string | null>(null);
 
-  const fetchSystemSettings = async () => {
-    if (!can('view-settings')) return;
-    setSystemLoading(true);
-    setSystemError(null);
-    try {
-      const data = await api<SystemSettingsResponse>('/api/admin/settings');
-      if (data) {
-        setSystemSettings(data);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t('settings.load_error');
-      setSystemError(message);
-    } finally {
-      setSystemLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (activeTab === 'system' && can('view-settings') && !systemSettings) {
-      fetchSystemSettings();
+      (async () => {
+        setSystemLoading(true);
+        setSystemError(null);
+        try {
+          const data = await api<SystemSettingsResponse>('/api/admin/settings');
+          if (data) {
+            setSystemSettings(data);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : t('settings.load_error');
+          setSystemError(message);
+        } finally {
+          setSystemLoading(false);
+        }
+      })();
     }
-  }, [activeTab, can]);
+  }, [activeTab, can, t, systemSettings]);
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in font-interface">

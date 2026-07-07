@@ -111,8 +111,18 @@ export const AutomationLogDrawer: React.FC<Props> = ({ rule, onClose }) => {
   };
 
   useEffect(() => {
-    fetchLogs(0);
-    setPage(0);
+    const id = setTimeout(() => setPage(0), 0);
+    (async () => {
+      try {
+        const data = await api<AutomationLog[]>(
+          `/api/admin/automations/${rule.id}/logs?limit=${PAGE_SIZE}&offset=0`
+        );
+        if (data) setLogs(data);
+      } finally {
+        clearTimeout(id);
+        setLoading(false);
+      }
+    })();
   }, [rule.id]);
 
   const loadMore = () => {

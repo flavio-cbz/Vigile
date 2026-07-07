@@ -97,8 +97,6 @@ export const Sidebar: React.FC = () => {
   };
 
   const renderNav = () => {
-    const { t } = useLocale();
-
     const primaryItems = [
       { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true },
       { to: '/servers', label: t('nav.servers'), icon: Server },

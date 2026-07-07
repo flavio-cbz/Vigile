@@ -130,6 +130,7 @@ export async function api<T = unknown>(
               displayMessage = parsed.detail || parsed.error || displayMessage;
             }
           } catch {
+            // ignore parse error, use default message
           }
           if (!skipToast) {
             useToastStore.getState().addToast('warning', 'Limite de débit atteinte', displayMessage);
@@ -149,6 +150,7 @@ export async function api<T = unknown>(
             displayMessage = parsed.detail || parsed.message || parsed.error || errorText;
           }
         } catch {
+          // ignore parse error, use plain text
         }
         const error = new Error(displayMessage || `HTTP ${response.status}`);
         if (response.status >= 500 && !skipToast) {

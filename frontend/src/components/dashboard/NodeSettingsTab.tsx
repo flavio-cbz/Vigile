@@ -97,7 +97,7 @@ export const NodeSettingsTab = ({ node }: NodeSettingsTabProps) => {
     try {
       const next = !n.disabled;
       await nodeMutations.setNodeDisabled(n.id, next);
-      n.disabled = next;
+      // n.disabled updated via store mutation in setNodeDisabled; local state not needed
       addToast(
         'success',
         next ? t('servers.toast.disabled') : t('servers.toast.enabled'),

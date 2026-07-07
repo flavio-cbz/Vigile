@@ -32,6 +32,13 @@ export const CommandPalette: React.FC = () => {
   const openCopilot = useUiStore((s) => s.openCopilot);
   const closeCopilot = useUiStore((s) => s.closeCopilot);
 
+  const closePalette = () => {
+    setPaletteOpen(false);
+    setSearch('');
+    setSelectedIndex(0);
+    closeCopilot();
+  };
+
   const commands: CommandItem[] = useMemo(
     () => [
       { id: 'dashboard', label: t('ui.cmd_dashboard'), icon: LayoutDashboard, action: () => navigate('/') },
@@ -41,17 +48,13 @@ export const CommandPalette: React.FC = () => {
       { id: 'chat', label: t('ui.cmd_chat'), icon: MessageSquareCode, action: () => navigate('/chat') },
       { id: 'copilot', label: t('ui.cmd_toggle_copilot'), icon: Bot, action: () => openCopilot({ trigger: 'manual' }) },
     ],
-    [navigate, openCopilot],
+    [navigate, openCopilot, t],
   );
 
   const filteredCommands = useMemo(
     () => commands.filter((cmd) => cmd.label.toLowerCase().includes(search.toLowerCase())),
     [commands, search],
   );
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [search]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -82,13 +85,6 @@ export const CommandPalette: React.FC = () => {
       useUiStore.getState().closeCopilot();
     };
   }, [navigate]);
-
-  const closePalette = () => {
-    setPaletteOpen(false);
-    setSearch('');
-    setSelectedIndex(0);
-    closeCopilot();
-  };
 
   const handlePanelKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {
@@ -133,7 +129,10 @@ export const CommandPalette: React.FC = () => {
             type="text"
             placeholder={t('ui.command_placeholder')}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setSelectedIndex(0);
+            }}
             className="flex-1 bg-transparent border-none outline-none py-4 text-sm text-ink placeholder-ink-dim font-mono"
           />
           <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 text-[0.625rem] font-bold text-ink-muted bg-surface border border-border-custom rounded">
