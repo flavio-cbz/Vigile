@@ -81,9 +81,6 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
     >
       <div className="flex items-start justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <span className="text-[10px] font-extrabold font-interface tracking-wide text-accent uppercase bg-accent-muted px-1.5 py-0.5 rounded border border-accent/20 whitespace-nowrap shrink-0">
-            {t('prop.badge')}
-          </span>
           <span className={`text-[10px] font-extrabold font-interface tracking-wide uppercase px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0 ${getRiskStyles(proposal.risk_level)}`}>
             {getRiskLabel(proposal.risk_level)}
           </span>

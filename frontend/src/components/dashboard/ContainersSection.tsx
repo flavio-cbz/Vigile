@@ -23,7 +23,7 @@ export const ContainersSection: React.FC<ContainersSectionProps> = ({
   onRefresh,
 }) => {
   const { t } = useLocale();
-  const [showAll] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const filteredContainers = showAll
     ? containers
@@ -34,9 +34,19 @@ export const ContainersSection: React.FC<ContainersSectionProps> = ({
       title={t('dash.containers')}
       icon={Layers}
       subtitle={
-        !showAll
-          ? `${filteredContainers.length} non-stable`
-          : `${containers.length} total`
+        <span className="flex items-center gap-2">
+          <span>
+            {!showAll
+              ? `${filteredContainers.length} non-stable`
+              : `${containers.length} total`}
+          </span>
+          <button
+            onClick={() => setShowAll((v) => !v)}
+            className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider border border-border-strong/20 rounded text-text-2 hover:text-text-1 hover:border-accent/30 transition-colors cursor-pointer"
+          >
+            {showAll ? 'Failed only' : 'Show all'}
+          </button>
+        </span>
       }
       isLoading={isLoading && containers.length === 0}
       className="border-t border-border/30 pt-6 mt-6"

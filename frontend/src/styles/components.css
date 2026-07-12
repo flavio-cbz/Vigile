@@ -26,7 +26,7 @@
 .card-insight {
   width: 320px;
   max-width: 100%;
-  height: 208px;
+  min-height: 208px;
 }
 
 .card-server {

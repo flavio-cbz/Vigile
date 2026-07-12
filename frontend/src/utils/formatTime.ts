@@ -42,6 +42,18 @@ export const formatOfflineDuration = (timestamp: number | null | undefined): str
  * Formats a Unix timestamp or Date into a human-readable datetime string "JJ/MM à HH:MM".
  * e.g., "12/06 à 14:30"
  */
+export const formatUptime = (seconds: number | undefined | null): string => {
+  if (seconds === undefined || seconds === null) return '—';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = seconds / 60;
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.round(hours)}h`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = Math.round(hours % 24);
+  return `${days}j ${remainingHours}h`;
+};
+
 export const formatDateTime = (timestamp: number | null | undefined): string => {
   if (!timestamp) {
     return translate('common.unknown');

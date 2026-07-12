@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Package, Upload, ToggleLeft, ToggleRight, RefreshCw, Grid, FileCode, Download } from 'lucide-react';
+import { Package, Upload, ToggleLeft, ToggleRight, RefreshCw, Grid, FileCode, Download, Trash2 } from 'lucide-react';
 import { api } from '../hooks/useApi';
 import { useAuthStore } from '../store/authStore';
 import { usePermission } from '../hooks/usePermission';
@@ -47,6 +47,7 @@ export const PluginsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<'installed' | 'registry'>('installed');
@@ -142,6 +143,25 @@ export const PluginsPage: React.FC = () => {
       addToast('error', t('settings.error'), err instanceof Error ? err.message : t('plugins.registry.install_failed', { name: pluginName }));
     } finally {
       setInstallingPlugin(null);
+    }
+  };
+
+  const handleDelete = async (pluginId: string) => {
+    if (!isAdmin) return;
+    if (!confirm(`Delete plugin "${pluginId}"?`)) return;
+    setDeleting(pluginId);
+    try {
+      const res = await api<{ status: string }>(`/api/admin/plugins/${pluginId}`, {
+        method: 'DELETE',
+      });
+      if (res && res.status === 'deleted') {
+        addToast('success', t('plugins.title'), `Plugin "${pluginId}" deleted`);
+        await fetchPlugins();
+      }
+    } catch (err: unknown) {
+      addToast('error', t('settings.error'), err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -307,22 +327,42 @@ export const PluginsPage: React.FC = () => {
                         </div>
                       </div>
                       {isAdmin && (
-                        <button
-                          onClick={() => handleToggle(plugin.id)}
-                          disabled={toggling === plugin.id}
-                          className="shrink-0 p-1 rounded hover:bg-surface-3 transition-colors cursor-pointer disabled:opacity-50"
-                          title={isLoaded ? t('plugins.deactivate') : t('plugins.activate')}
-                        >
-                          {toggling === plugin.id ? (
-                            <Spinner size="sm" />
-                          ) : isLoaded ? (
-                            <ToggleRight className="w-4 h-4 text-accent" />
-                          ) : (
-                            <ToggleLeft className="w-4 h-4 text-text-3" />
-                          )}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleToggle(plugin.id)}
+                            disabled={toggling === plugin.id}
+                            className="shrink-0 p-1 rounded hover:bg-surface-3 transition-colors cursor-pointer disabled:opacity-50"
+                            title={isLoaded ? t('plugins.deactivate') : t('plugins.activate')}
+                          >
+                            {toggling === plugin.id ? (
+                              <Spinner size="sm" />
+                            ) : isLoaded ? (
+                              <ToggleRight className="w-4 h-4 text-accent" />
+                            ) : (
+                              <ToggleLeft className="w-4 h-4 text-text-3" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(plugin.id)}
+                            disabled={deleting === plugin.id}
+                            className="shrink-0 p-1 rounded hover:bg-severity-critical/15 transition-colors cursor-pointer disabled:opacity-50 text-text-3 hover:text-severity-critical"
+                            title="Uninstall"
+                          >
+                            {deleting === plugin.id ? (
+                              <Spinner size="sm" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        </>
                       )}
                     </div>
+
+                    {plugin.description && (
+                      <p className="text-[10px] text-text-2 mb-2 line-clamp-2 leading-relaxed">
+                        {plugin.description}
+                      </p>
+                    )}
 
                     <div className="mb-2">
                       <code className="text-[9px] font-mono text-text-3 bg-surface-3 px-1.5 py-0.5 rounded truncate block">

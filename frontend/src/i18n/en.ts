@@ -161,7 +161,6 @@ export const en = {
   "prop.btn.reject": "Reject",
   "prop.reject_reason_title": "Rejection Reason",
   "prop.reject_reason_placeholder": "Explain why you reject this proposal...",
-  "prop.badge": "AI PROPOSAL",
   "prop.on_node": "On {node}",
   "prop.readonly": "Read-only (Permissions required)",
   "prop.status_executed": "ACTION EXECUTED AND APPROVED",

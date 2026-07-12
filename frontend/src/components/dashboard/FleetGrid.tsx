@@ -3,6 +3,7 @@ import { useLocale } from '../../i18n';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import type { Node } from '../../store/nodeStore';
 import type { InsightItem } from '../../store/uiStore';
+import { formatUptime } from '../../utils/formatTime';
 
 export interface FleetMetrics {
   cpu?: number;
@@ -192,7 +193,7 @@ export const FleetGrid: React.FC<FleetGridProps> = ({
                 {cell.severity === 'offline' && t('severity.outage')}
               </span>
               <span className="text-[9px] font-mono text-text-3">
-                {cell.metrics?.uptime !== undefined ? `${Math.round(cell.metrics.uptime)}s` : '—'}
+                {cell.metrics?.uptime !== undefined ? formatUptime(cell.metrics.uptime) : '—'}
               </span>
             </div>
           </div>

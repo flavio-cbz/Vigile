@@ -204,10 +204,10 @@ const ChartCard: React.FC<{
             <XAxis dataKey="time" stroke="var(--text-2)" fontSize={8} tickLine={false} />
             <YAxis stroke="var(--text-2)" fontSize={8} tickLine={false} domain={[0, 100]} />
             <Tooltip
-              contentStyle={{ background: 'var(--surface-2)', borderColor: 'var(--border-strong)', fontSize: '10px' }}
+              contentStyle={{ background: 'var(--surface-2)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius)', padding: '8px 12px', boxShadow: '0 4px 16px var(--shadow-sidebar)', fontSize: '10px' }}
               cursor={{ stroke: 'var(--text-3)', strokeWidth: 1, strokeDasharray: '3 3' }}
             />
-            <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5} dot={false} activeDot={{ r: 4, strokeWidth: 1.5, fill: 'var(--surface)' }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -363,7 +363,7 @@ export const NodeDetailMetricsTab: React.FC<{
                   </thead>
                   <tbody>
                     {disks.map((d, idx) => (
-                      <tr key={idx} className="border-b border-border last:border-0 text-text-2 hover:text-text-1">
+                      <tr key={idx} className="border-b border-border last:border-0 text-text-2 hover:text-text-1 hover:bg-surface-2/50 transition-colors duration-150">
                         <td className="py-2.5">{d.device}</td>
                         <td className="py-2.5 font-semibold text-accent">{d.mount_point}</td>
                         <td className="py-2.5 text-text-3">{d.fs_type}</td>

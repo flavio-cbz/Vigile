@@ -161,7 +161,6 @@ export const fr = {
   "prop.btn.reject": "Rejeter",
   "prop.reject_reason_title": "Raison du rejet",
   "prop.reject_reason_placeholder": "Expliquez pourquoi vous rejetez cette proposition...",
-  "prop.badge": "PROPOSITION IA",
   "prop.on_node": "Sur {node}",
   "prop.readonly": "Lecture seule (Droits requis)",
   "prop.status_executed": "ACTION EXÉCUTÉE ET APPROUVÉE",

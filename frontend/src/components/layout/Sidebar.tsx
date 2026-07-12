@@ -18,6 +18,8 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
+  Container,
+  Activity,
 } from 'lucide-react';
 import { VigileLogo } from '../ui/VigileLogo';
 import { useLocale } from '../../i18n';
@@ -100,6 +102,16 @@ export const Sidebar: React.FC = () => {
     const primaryItems = [
       { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true },
       { to: '/servers', label: t('nav.servers'), icon: Server },
+      {
+        to: '/services',
+        label: t('nav.services'),
+        icon: Activity,
+      },
+      {
+        to: '/docker',
+        label: t('nav.docker'),
+        icon: Container,
+      },
       {
         to: '/proposals',
         label: t('nav.proposals'),
