@@ -320,6 +320,25 @@ func (wc *WorkerConn) RunOperational() error {
 					logger.Printf("Failed to send INTENT_RESULT: %v", err)
 				}
 
+			case "TOKEN_ROTATION_COMMAND":
+				newToken, ok := msgObj["worker_token"].(string)
+				if !ok || newToken == "" {
+					logger.Printf("TOKEN_ROTATION: missing worker_token in command")
+					continue
+				}
+				wc.mu.Lock()
+				wc.workerToken = newToken
+				wc.mu.Unlock()
+				if err := persistWorkerToken(newToken); err != nil {
+					logger.Printf("Warning: failed to persist rotated token: %v", err)
+				}
+				if err := wc.sendJSON(map[string]interface{}{
+					"type": "TOKEN_ROTATION_ACK",
+				}); err != nil {
+					logger.Printf("Warning: failed to send TOKEN_ROTATION_ACK: %v", err)
+				}
+				logger.Printf("TOKEN_ROTATION: worker token rotated successfully")
+
 			default:
 				logger.Printf("Unknown message type: %s", msgType)
 			}

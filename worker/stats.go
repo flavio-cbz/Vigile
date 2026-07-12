@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -61,10 +62,19 @@ type DiskMount struct {
 	Percent    float64 `json:"percent"`
 }
 
+// ProcessInfo describes a single running process with its CPU and memory usage.
+type ProcessInfo struct {
+	PID        int     `json:"pid"`
+	Name       string  `json:"name"`
+	CPUPercent float64 `json:"cpu_percent"`
+	MemRSSKB   int64   `json:"mem_rss_kb"`
+	State      string  `json:"state"`
+}
+
 // MetricsSnapshot contains the system metrics collected from /proc.
 type MetricsSnapshot struct {
-	CPUPercent    float64     `json:"cpu_percent"`
-	CPULoad1m     float64     `json:"cpu_load_1m,omitempty"`
+	CPUPercent    float64       `json:"cpu_percent"`
+	CPULoad1m     float64       `json:"cpu_load_1m,omitempty"`
 	CPULoad5m     float64     `json:"cpu_load_5m,omitempty"`
 	CPULoad15m    float64     `json:"cpu_load_15m,omitempty"`
 	CPUCores      int         `json:"cpu_cores,omitempty"`
@@ -78,8 +88,9 @@ type MetricsSnapshot struct {
 	DiskPercent   float64     `json:"disk_percent"`
 	Disks         []DiskMount `json:"disks,omitempty"`
 	UptimeSeconds float64     `json:"uptime_seconds"`
-	Processes     int         `json:"processes,omitempty"`
-	CollectedAt   float64     `json:"collected_at"`
+	Processes     int           `json:"processes,omitempty"`
+	TopProcesses  []ProcessInfo `json:"top_processes,omitempty"`
+	CollectedAt   float64       `json:"collected_at"`
 }
 
 // collectMetrics gathers all system metrics from /proc (Linux) or sysctl/ps (macOS).
@@ -106,6 +117,7 @@ func collectMetrics(ctx context.Context) MetricsSnapshot {
 		Disks:         disks,
 		UptimeSeconds: getUptime(),
 		Processes:     getProcessCount(),
+		TopProcesses:  getTopProcesses(10),
 		CollectedAt:   now,
 	}
 }
@@ -432,6 +444,83 @@ func isNumeric(s string) bool {
 	return len(s) > 0
 }
 
+// ── Per-process CPU & Memory (Linux via /proc) ──────────────────────
+
+func parseProcStat(data []byte) (name, state string, utime, stime, starttime uint64, rssPages int64) {
+	s := string(data)
+	openIdx := strings.IndexByte(s, '(')
+	closeIdx := strings.LastIndexByte(s, ')')
+	if openIdx == -1 || closeIdx == -1 || closeIdx <= openIdx {
+		return "", "", 0, 0, 0, 0
+	}
+	name = s[openIdx+1 : closeIdx]
+	fields := strings.Fields(s[closeIdx+2:])
+	if len(fields) < 23 {
+		return name, "", 0, 0, 0, 0
+	}
+	state = fields[0]
+	utime, _ = strconv.ParseUint(fields[11], 10, 64)
+	stime, _ = strconv.ParseUint(fields[12], 10, 64)
+	starttime, _ = strconv.ParseUint(fields[19], 10, 64)
+	rssPages, _ = strconv.ParseInt(fields[22], 10, 64)
+	return
+}
+
+func getTopProcesses(limit int) []ProcessInfo {
+	if limit <= 0 {
+		limit = 10
+	}
+	d, err := os.Open(procPrefix + "/proc")
+	if err != nil {
+		return nil
+	}
+	defer d.Close()
+	entries, err := d.Readdirnames(-1)
+	if err != nil {
+		return nil
+	}
+	uptime := getUptime()
+	if uptime <= 0 {
+		return nil
+	}
+	hz := 100.0
+	procs := make([]ProcessInfo, 0, len(entries))
+	for _, pidStr := range entries {
+		if !isNumeric(pidStr) {
+			continue
+		}
+		data, err := os.ReadFile(procPrefix + "/proc/" + pidStr + "/stat")
+		if err != nil {
+			continue
+		}
+		pName, pState, utime, stime, starttime, rssPages := parseProcStat(data)
+		if pName == "" {
+			continue
+		}
+		totalJiffies := float64(utime + stime)
+		elapsedJiffies := uptime*hz - float64(starttime)
+		var cpuPct float64
+		if elapsedJiffies > 0 {
+			cpuPct = math.Round(totalJiffies/elapsedJiffies*1000) / 10
+		}
+		pid, _ := strconv.Atoi(pidStr)
+		procs = append(procs, ProcessInfo{
+			PID:        pid,
+			Name:       pName,
+			CPUPercent: cpuPct,
+			MemRSSKB:   rssPages * 4,
+			State:      pState,
+		})
+	}
+	sort.Slice(procs, func(i, j int) bool {
+		return procs[i].CPUPercent > procs[j].CPUPercent
+	})
+	if len(procs) > limit {
+		procs = procs[:limit]
+	}
+	return procs
+}
+
 // ── Intent handler ───────────────────────────────────────────────────
 
 // handleGetStats collects metrics and returns them as a STATUS_REPORT.
@@ -466,6 +555,7 @@ func buildStatusReport(ctx context.Context) map[string]interface{} {
 		"disks":            m.Disks,
 		"uptime_seconds":   m.UptimeSeconds,
 		"processes":        m.Processes,
+		"top_processes":    m.TopProcesses,
 		"collected_at":     m.CollectedAt,
 	}
 }
