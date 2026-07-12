@@ -509,7 +509,7 @@ vigile/
 - ✅ Plugin `metrics` : CPU, RAM, disque, uptime (cross-platform, sans dépendance)
 - ✅ Plugin `docker` : list containers, restart, logs (si Docker détecté dynamiquement)
 - ✅ Plugin `systemd` : list services, status, restart (si Linux)
-- ✅ `kickstart.sh` complet : détection OS/arch, vérification SHA256, cascade installation
+- ✅ `kickstart.sh` généré dynamiquement par l'API : `GET /api/nodes/kickstart.sh` + version PowerShell `GET /api/nodes/kickstart.ps1`
 - ✅ API : `GET /api/nodes`, `GET /api/nodes/{id}/stats`, `GET /api/nodes/{id}/logs`
 
 ### Sprint 3 — Couche IA et Human-in-the-Loop ✅
@@ -533,14 +533,14 @@ vigile/
 - ✅ `SettingsPage`, `ServersPage`, `Dashboard` avec sections Insight/Servers/Containers/Activity/Fleet
 
 **Bugs connus (à corriger dans Sprint 7-8) :**
-- ❌ CPU indique 0-1% au lieu de la valeur réelle
-- ❌ Un seul disque visible au lieu de 3
-- ❌ Erreur réseau "Request timed out" sur l'onglet Docker
-- ❌ Badge de navigation affiche `(.)` au lieu du count
-- ❌ Logs chargés en boucle infinie
-- ❌ Surlignage des métriques au survol non fonctionnel
-- ❌ Carte "État de la flotte" : le temps déborde de la carte
-- ❌ Prédiction disque aberrante (+2145 Go/j)
+- ~~❌ CPU 0-1%~~ ✅ **Corrigé dans Sprint 7**
+- ~~❌ Un seul disque visible~~ ✅ **Corrigé dans Sprint 7**
+- ~~❌ Erreur réseau timeout~~ ✅ **Corrigé dans Sprint 7**
+- ❌ Badge navigation `(.)` au lieu du count (Sprint 8)
+- ~~❌ Logs en boucle infinie~~ ✅ **Corrigé dans Sprint 7**
+- ❌ Surlignage métriques au survol non fonctionnel (Sprint 8)
+- ❌ Carte "État de la flotte" : temps déborde (Sprint 8)
+- ~~❌ Prédiction disque aberrante~~ ✅ **Corrigé dans Sprint 7**
 
 ### Sprint 5 — Plugin Ecosystem (Sandbox + Automations) ⚠️ (core OK, extension UI à venir)
 
@@ -550,43 +550,63 @@ vigile/
 - ✅ **Moteur d'automatisations** : backend `automation_engine.py` + API `automations.py` + frontend `AutomationsPage.tsx` (586 lignes) — règles, déclencheurs, conditions, actions enum
 - ✅ **Plugins existants** : docker, systemd, metrics, clean_logs, discord_alert, slack_alert — 6 plugins fonctionnels au format `register(pm)`
 - ✅ **Plugin SDK** : documentation `docs/PLUGIN_SDK.md` + template
-- ❌ **Format profond (dossier + manifest.json + pages auto-découvertes)** : n'existe pas — c'est le Sprint 9
+- ✅ **Format profond (dossier + manifest.json + pages auto-découvertes)** : Implémenté dans Sprint 9 (PluginEngine, Scanner, RouteRegistrar, DBAuto avec préfixe d'isolation) — 148 tests passent
 - ❌ **Marketplace 1-clic depuis l'UI** : le catalogue frontend existe mais l'installation distale automatique n'est pas finalisée
-- ❌ **Plugins avec pages dédiées** : tous les plugins sont des fichiers `.py` uniques, aucun n'a de composant React — c'est le Sprint 9-10
+- ❌ **Plugins avec pages dédiées** : tous les plugins sont encore des fichiers `.py` uniques, aucun n'a de composant React
 
-### Sprint 6 — Production Hardening ❌ (sauf rate limiter)
+### Sprint 6 — Production Hardening ⚠️ (bien avancé mais TLS non branché)
 
 Le passage en production nécessite de verrouiller les limites du système et d'automatiser le cycle de vie des credentials.
 
-> **Note** : Le rate limiter middleware + endpoint `/metrics` Prometheus sont les seules parties entamées (commit `3f9ae11`). Le reste est à zéro.
+> **Note** : Beaucoup plus avancé que le statut initial — CI complète, builds cross-platform, Prometheus, config prod. Le vrai blocker est TLS.
 
-#### 1. Rate Limiting Multi-Niveaux (FastAPI Middleware) ⚠️
-- ✅ **Sliding-window rate limiter** : Implémenté via `master/core/rate_limiter.py`, endpoints `/metrics` Prometheus opérationnels (commit `3f9ae11`).
+#### 1. Rate Limiting Multi-Niveaux (FastAPI Middleware) ✅
+- ✅ **Sliding-window rate limiter** : Implémenté via `master/core/rate_limiter.py`.
+- ✅ **Endpoints Prometheus `/metrics`** opérationnels dans `master/main.py` (`vigile_connected_workers_total`, `vigile_proposals_pending_total`, `vigile_database_latency_seconds`).
 - ❌ **Limites configurables via `settings`** : Les defaults (5/min login, 10/min script, 100/min API) ne sont pas encore branchés aux settings.
 
-#### 2. Rotation Automatique des `WORKER_TOKEN`
-- **Mécanisme** : Lors du heartbeat, si `rotation_due` (7 jours écoulés depuis `issued_at`), le Master génère un nouveau token et l'envoie dans une payload asynchrone :
-  ```json
-  { "type": "TOKEN_ROTATION_COMMAND", "new_worker_token": "JWT..." }
-  ```
-- **Validation** : Le Worker stocke le nouveau binaire de clé/token, recharge sa configuration, répond avec un message `TOKEN_ROTATION_ACK`, puis bascule sur le nouveau token. Le Master marque l'ancien token comme `revoked`.
+#### 1b. Configuration Production ✅
+- ✅ `ENFORCE_HTTPS=True` par défaut dans `master/config.py`
+- ✅ `COOKIE_SECURE=True` par défaut
+- ✅ `TRUSTED_PROXIES` configurable via env var
 
-#### 3. Mode Offline & Distribution Hermétique
-- **Binaires préchargés** : Option `OFFLINE_MODE=true` dans `settings` forçant le Master à servir des binaires compilés localement sous `data/binaries/` au lieu de tenter un téléchargement distant.
-- **Script `kickstart.sh` hors-ligne** : Support des certificats CA personnalisés pour les environnements d'entreprise isolés.
+#### 2. Rotation Automatique des `WORKER_TOKEN` ❌
+- **Non implémenté** — `rotation_due` stocké mais pas exploité.
+- Aucun `TOKEN_ROTATION_COMMAND` réel dans `worker_handler.py`.
+- Le champ terrain (youcloud.ovh) montre un worker en crashloop avec JOIN_TOKEN expiré.
 
-#### 4. Pipeline de Build Cross-Platform (`scripts/build_worker.sh`)
-- Script Go de compilation croisée ciblant :
-  - `GOOS=linux GOARCH=amd64` (Linux standard)
-  - `GOOS=linux GOARCH=arm64` (Raspberry Pi 4/5, serveurs ARM)
-  - `GOOS=darwin GOARCH=arm64` (macOS Apple Silicon)
-  - `GOOS=freebsd GOARCH=amd64` (Homelabs TrueNAS Core)
+#### 3. CI/CD Pipeline ✅
+- ✅ **`.github/workflows/ci.yml`** : 3 jobs parallèles :
+  - `backend` : pytest unitaire avec couverture
+  - `frontend` : npm lint + npm build (⚠️ build cassée actuellement)
+  - `worker` : go build + go test (tous verts)
+- ✅ **`.github/workflows/release-worker.yml`** : Release automatisée sur tag git avec :
+  - Compilation 8 plateformes (linux/amd64, linux/arm64, linux/armv7, darwin/amd64, darwin/arm64, freebsd/amd64, freebsd/arm64, freebsd/armv7)
+  - SHA256 checksums
+  - Signature minisign
+  - Génération manifest.json
+  - Upload vers GitHub Release
+- ❌ **Pre-commit hooks** : Aucun `.pre-commit-config.yaml` ou `.githooks/`
 
-#### 5. Métriques & Health Checks Master
-- Point d'entrée `/metrics` exposant des métriques natives au format Prometheus :
-  - `vigile_connected_workers_total` : Nombre de connexions WebSocket actives.
-  - `vigile_proposals_pending_total` : Actions en attente d'approbation humaine.
-  - `vigile_database_latency_seconds` : Temps de réponse des requêtes aiosqlite.
+#### 4. Pipeline de Build Cross-Platform ✅
+- ✅ **`scripts/build_worker.sh`** : Script Go de compilation croisée ciblant 4 plateformes :
+  - `linux/amd64`, `linux/arm64`, `darwin/arm64`, `freebsd/amd64`
+  - SHA256 checksums + manifest.json
+  - Utilisable en local (`./scripts/build_worker.sh` ou `--target linux/amd64`)
+
+#### 5. Tests Worker Go ✅
+- ✅ **6 fichiers de test** dans `worker/` : `stats_test.go`, `services_test.go`, `containers_test.go`, `wsclient_test.go`, `reconnect_test.go`, `logs_test.go`
+- ✅ Tous verts (`go test -v ./...` — 0.65s, PASS)
+
+#### 6. Mode Offline & Distribution Hermétique ❌
+- ❌ Option `OFFLINE_MODE=true` non implémentée
+- ❌ Script kickstart.sh hors-ligne (de toute façon manquant)
+
+#### 7. TLS / Caddy ❌ (bloquant prod)
+- ✅ `docker/Caddyfile` existe avec configuration complète (tls internal, HSTS, security headers, HTTP→HTTPS redir)
+- ❌ **Service caddy absent du docker-compose.yml** — le port Master est exposé directement (`8003:8000`)
+- ❌ `ALLOW_INSECURE=true` par défaut dans le worker Compose
+- ❌ Pas de profil `prod` dans docker-compose
 
 ---
 ---
@@ -637,7 +657,7 @@ Le passage en production nécessite de verrouiller les limites du système et d'
 - ❌ **Appliquer le thème Warm Dark confirmé** : Le thème actuel (Glass Dark Ops / teal / Inter) est à remplacer par le Warm Dark validé : fond `#0e0d0c`, accent orange `#E8650A`, titrage DM Serif Display. Vérifier la cohérence sur toutes les pages (modales, cartes, sidebar, formulaires).
 - ❌ **Règle d'usage de l'orange** : `#E8650A` sert à la fois d'accent décoratif (boutons, titres) et d'alerte (warning, critique). Risque de confusion visuelle si un bouton orange "Nouveau conteneur" est perçu comme une alerte. Définir une règle d'usage : orange réservé aux alertes + actions critiques ; accents décoratifs sur une teinte dérivée (ex: `#F59E0B` amber plus doux) ou le blanc cassé.
 
-### Sprint 9 — Moteur de Plugins — Core Engine ❌
+### Sprint 9 — Moteur de Plugins — Core Engine ✅
 
 > **Problème** : Le système actuel (`PluginManager` avec hooks et sandbox sous-processus) permet aux plugins
 > de réagir à des évènements et de s'isoler, mais ils n'ont aucune notion d'UI, de page dédiée, de stockage
@@ -971,7 +991,7 @@ C'est le fichier le plus important. Il déclare tout ce que le plugin peut faire
 
 ---
 
-### Sprint 10 — Moteur de Plugins — Intégration Frontend ❌
+### Sprint 10 — Moteur de Plugins — Intégration Frontend ❌ (bloqué par Sprint 8)
 
 > Construire l'interface entre le moteur de plugins et le frontend React : découverte automatique des pages,
 > injection dans le routeur, SDK pour écrire des plugins en quelques lignes, et exemples concrets

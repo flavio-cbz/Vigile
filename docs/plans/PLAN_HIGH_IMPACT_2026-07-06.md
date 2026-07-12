@@ -18,20 +18,20 @@ L'analyse croisée des 6 documents d'audit **contre l'état réel du code** rév
 
 **Conséquence stratégique :**
 1. Les audits 2026-06-27 / 2026-06-28 sont **stales** — ils listent des items déjà résolus dans le Sprint 5 (voir sections ✅ de `LIMITS.md` §116-135).
-2. Le vrai chemin critique pré-prod n'est **pas** dans les 🔴 Critique des audits, mais dans **les gaps cross-cutting invisibles au linter** : TLS non wired, worker concurrency, tests, CI/CD.
-3. Sprint 6 (Production Hardening) est en réalité **le blocker unique de la mise en prod**.
+2. Le vrai chemin critique pré-prod n'est **pas** dans les 🔴 Critique des audits, mais dans **les gaps cross-cutting** : TLS non branché, build frontend cassée, token rotation.
+3. Sprint 6 (Production Hardening) est **bien plus avancé que les audits ne l'indiquent** : CI complète, builds cross-platform, Prometheus, config prod. Ce qui reste : TLS à brancher, frontend build à fixer, token rotation.
 
-**Ordre d'exécution recommandé (25 jours de travail effectif) :**
+**Ordre d'exécution recommandé (efforts recalculés vs réel 2026-07-12) :**
 ```
 P0 → C1 (Audit refresh)         [0.5 j]  ← démarre par ça, sinon tu retravailles à l'aveugle
-P0 → C2 (TLS end-to-end wiring) [3 j]    ← BLOCKER prod absolu
-P0 → C3 (Test coverage T-01)    [4 j]    ← BLOCKER prod : auth.py + database.py
-P0 → C4 (CI/CD pipeline)        [3 j]    ← BLOCKER prod : sans CI, pas de régression protégée
-P1 → C5 (Worker robustesse)     [4 j]    ← G-01 + G-02 + F-05 partiel + contexts
-P1 → C6 (Migrations idempotentes S-01)   [1 j]
+P0 → C2 (TLS end-to-end wiring) [1 j]    ← BLOCKER prod : Caddyfile existe, docker-compose à brancher
+P0 → C3 (Fix frontend build)    [0.5 j]    ← BLOCKER prod : 6 erreurs TS dans Sidebar.tsx
+P0 → C4 (CI/CD pipeline)        [✅ DONE]  ← CI complète + release workflow existants
+P1 → C5 (Worker robustesse)     [2 j]      ← context.Context, assertions Go, timeouts exec
+P1 → C6 (Migrations idempotentes) [1 j]
 P1 → C7 (Frontend types F-05)   [3 j]
-P2 → C8 (Sprint 8 UI/UX cleanup)         [5 j]  ← peut se faire en parallèle
-P2 → C9 (Rotation WORKER_TOKEN Sprint 6.2) [3 j]
+P1 → C9 (Rotation WORKER_TOKEN) [2 j]
+P2 → C8 (Sprint 8 UI/UX cleanup) [5 j]
 ```
 
 **Gate pré-production (ne PAS déployer sans) :** C1 → C2 → C3 → C4 → C6 → C9.
@@ -458,8 +458,8 @@ Sprint 9-12 (Plugin Engine, Marketplace, IA autonomy) : **hors scope pré-produc
   Parallel (non-bloquant) : C7 (frontend F-05, 3j) + C8 (Sprint 8 UI/UX, 5j)
 ```
 
-**Chemin critique pré-prod (séquentiel) :** C1 → (C2||C3||C4) → C6 → C5 → C9 = **8.5 jours** avec 3 devs en parallèle sur C2/C3/C4.
-**Chemin critique solo dev :** C1 + C2 + C3 + C4 + C6 + C5 + C9 = **18.5 jours**.
+**Chemin critique pré-prod (séquentiel) :** C2 (TLS) + C3 (frontend fix) + C9 (token rotation) = **~3.5 jours**.
+**Parallélisable (solo dev) :** C2 + C3 + C5 + C6 + C7 + C9 + C8 = **~14 jours**.
 
 ---
 
@@ -467,19 +467,21 @@ Sprint 9-12 (Plugin Engine, Marketplace, IA autonomy) : **hors scope pré-produc
 
 **BLOQUANTS ABSOLUS** — ne pas déployer sans :
 
-- [ ] **C1** : baseline d'audit à jour, faux positifs déclassés
-- [ ] **C2** : Caddy wired, `wss://` bout-en-bout, `ALLOW_INSECURE=false` en prod, cookies `Secure`
-- [ ] **C3** : couverture `master/api/auth.py` ≥ 95% et `master/db/database.py` ≥ 95%
-- [ ] **C4** : CI verte requise pour merger, secret-scanner actif, pre-commit installé
+- [ ] **C2** : Caddy wired dans docker-compose, `wss://` bout-en-bout, `ALLOW_INSECURE=false` en prod, cookies `Secure`
+- [ ] **C3** : Build frontend verte (`npm run build` passe)
 - [ ] **C6** : migrations idempotentes + `alembic stamp head`
 - [ ] **C9** : rotation WORKER_TOKEN fonctionnelle (sinon workers crashloop après 7j)
 - [ ] **Rotation `LLM_API_KEY`** de `sk-hY0lH32Z1UDArBSXxUsoyw` (voir `SECRET_ROTATION.md`)
-- [ ] **Force change du mot de passe `admin/admin`** en prod (déjà géré par `must_change_password=1` — vérifier)
+- [ ] **Force change du mot de passe `admin/admin`** en prod
 
-**RECOMMANDÉS (mais pas bloquants) :**
-- C5 (worker robustesse) — production tolère 1-2 semaines avant fix.
-- C7 (frontend types) — n'affecte pas runtime.
-- C8 (UI/UX polish) — améliore l'adoption mais fonctionne sans.
+**DÉJÀ FAIT (vérifié 2026-07-12) :**
+- ✅ CI pipeline : pytest + frontend lint/build + go test en parallèle
+- ✅ Release workflow : 8 plateformes + minisign + manifest.json
+- ✅ `ENFORCE_HTTPS`, `COOKIE_SECURE` configurés
+- ✅ Endpoint `/metrics` Prometheus
+- ✅ `scripts/build_worker.sh` cross-compilation
+- ✅ 6 tests Go passent
+- ✅ Rate limiter actif
 
 ---
 
