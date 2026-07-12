@@ -64,9 +64,9 @@ async def test_db_reset_active_connection():
     # Create an active connection
     fd, path = tempfile.mkstemp()
     os.close(fd)
+    orig = db_mod._db
     try:
         # Save current connection
-        orig = db_mod._db
         db_mod._db = None
         conn = await db_mod.init_db(path)
         assert db_mod._db is not None
@@ -159,8 +159,8 @@ async def test_close_db():
 
     fd, path = tempfile.mkstemp()
     os.close(fd)
+    orig = db_mod._db
     try:
-        orig = db_mod._db
         db_mod._db = None
         await db_mod.init_db(path)
         assert db_mod._db is not None
@@ -183,8 +183,8 @@ async def test_pool_acquire_release():
 
     fd, path = tempfile.mkstemp()
     os.close(fd)
+    orig = db_mod._db
     try:
-        orig = db_mod._db
         db_mod._db = None
         await db_mod.init_db(path, pool_size=2)
 
@@ -197,9 +197,11 @@ async def test_pool_acquire_release():
 
         assert db_mod._pool._pool.qsize() == 2
     finally:
-        db_mod._db = orig
+        # close_db() must run while `_db` still points at this connection;
+        # restoring `orig` first orphans it (non-daemon thread -> interpreter hang).
         await db_mod.close_db()
         await db_mod.reset_db()
+        db_mod._db = orig
         try:
             os.remove(path)
         except Exception:
@@ -214,8 +216,8 @@ async def test_db_pool_timeout():
 
     fd, path = tempfile.mkstemp()
     os.close(fd)
+    orig = db_mod._db
     try:
-        orig = db_mod._db
         db_mod._db = None
         # Pool size of 1
         await db_mod.init_db(path, pool_size=1)
@@ -230,9 +232,11 @@ async def test_db_pool_timeout():
             
         await db_mod._pool.release(conn1)
     finally:
-        db_mod._db = orig
+        # close_db() must run while `_db` still points at this connection;
+        # restoring `orig` first orphans it (non-daemon thread -> interpreter hang).
         await db_mod.close_db()
         await db_mod.reset_db()
+        db_mod._db = orig
         try:
             os.remove(path)
         except Exception:
