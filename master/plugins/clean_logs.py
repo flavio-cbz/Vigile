@@ -51,7 +51,7 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
     # 1. Fetch plugin config from DB
     try:
         cursor = await db.execute(
-            "SELECT config_json FROM plugin_configs WHERE plugin_id = 'clean_logs'"
+            "SELECT config_json FROM plugins WHERE id = 'clean_logs'"
         )
         row = await cursor.fetchone()
         if not row:

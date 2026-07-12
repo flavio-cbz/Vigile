@@ -141,6 +141,12 @@ class MetricsSnapshot(BaseModel):
         description="Per-mount disk stats: mount_point, fs_type, device, total_bytes, used_bytes, percent",
     )
 
+    # Per-process CPU & memory (top N by CPU)
+    top_processes: list[dict] | None = Field(
+        default=None,
+        description="Top CPU-consuming processes: pid, name, cpu_percent, mem_rss_kb, state",
+    )
+
     @property
     def mem_free_bytes(self) -> int:
         """Derived: free memory = total - used."""
@@ -300,8 +306,8 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             mem_total_bytes, mem_used_bytes, mem_percent,
             swap_total_bytes, swap_used_bytes,
             disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes, disks_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            uptime_seconds, processes, disks_json, top_processes_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_id,
@@ -324,6 +330,7 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             snapshot.get("uptime_seconds", 0),
             snapshot.get("processes"),
             json.dumps(snapshot["disks"]) if snapshot.get("disks") else None,
+            json.dumps(snapshot["top_processes"]) if snapshot.get("top_processes") else None,
         ),
     )
     await db.commit()

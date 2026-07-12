@@ -59,7 +59,17 @@ async def setup_temp_plugins_dir(tmp_path):
     shutil.copy("master/plugins/systemd_plugin.py", temp_dir / "systemd.py")
     shutil.copy("master/plugins/docker_plugin.py", temp_dir / "docker.py")
 
-    # Reset plugin_manager in-memory lists
+    # Fully reset plugin_manager singleton so tests are order-independent.
+    # A prior test's app lifespan (e.g. test_main) may have left _engine set and
+    # _sandbox=True on the shared singleton, which makes `loaded_plugins` delegate
+    # to the engine (unaware of these fixture loads) and makes load_plugin use the
+    # subprocess branch. Reset to a clean standalone state before each test.
+    plugin_manager._engine = None
+    plugin_manager._sandbox = False
+    plugin_manager._enabled_plugins = None
+    plugin_manager._wrappers = {}
+    plugin_manager._draining_plugins = set()
+    plugin_manager._active_calls = {}
     plugin_manager._loaded_plugins.clear()
     plugin_manager._hooks.clear()
     await plugin_manager.load_plugins_from_dir(str(temp_dir))

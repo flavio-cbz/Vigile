@@ -278,6 +278,7 @@ def test_plugin_edge_cases():
         "disk_percent",
         "uptime_seconds",
         "processes",
+        "top_processes",
         "collected_at",
         "disks",
     }

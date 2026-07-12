@@ -56,7 +56,7 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
     # 1. Fetch plugin config from DB
     try:
         cursor = await db.execute(
-            "SELECT config_json FROM plugin_configs WHERE plugin_id = 'slack_alert'"
+            "SELECT config_json FROM plugins WHERE id = 'slack_alert'"
         )
         row = await cursor.fetchone()
         if not row:

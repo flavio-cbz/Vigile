@@ -30,8 +30,8 @@ from master.api.rate_limits import WORKER_CONTROL_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
 from master.core.rate_limiter import rate_limiter
-from master.plugins.docker_plugin import parse_container_list
-from master.plugins.systemd_plugin import (
+from master.core.plugin_helpers import (
+    parse_container_list,
     parse_service_list,
     parse_service_status,
 )

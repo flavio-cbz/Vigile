@@ -47,7 +47,7 @@ from master.core.audit import AuditAction, log_action
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager
 from master.core.structured_llm import StructuredLLM
-from master.plugins.docker_plugin import parse_container_list
+from master.core.plugin_helpers import parse_container_list
 
 logger = logging.getLogger(__name__)
 

@@ -223,6 +223,21 @@ CREATE TABLE IF NOT EXISTS plugin_configs (
 """
 
 # ---------------------------------------------------------------------------
+# plugins  (Plugin registry with version, status, and manifest metadata)
+# ---------------------------------------------------------------------------
+CREATE_PLUGINS = """
+CREATE TABLE IF NOT EXISTS plugins (
+    id             TEXT PRIMARY KEY,
+    version        TEXT NOT NULL DEFAULT '0.0.0',
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    status         TEXT NOT NULL DEFAULT 'INSTALLED',
+    config_json    TEXT NOT NULL DEFAULT '{}',
+    manifest_hash  TEXT,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+# ---------------------------------------------------------------------------
 # automation_rules  (Trigger → Condition → Action automation engine)
 # ---------------------------------------------------------------------------
 CREATE_AUTOMATION_RULES = """
@@ -283,6 +298,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_node ON chat_sessions(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_plugin_configs_enabled ON plugin_configs(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_plugins_enabled ON plugins(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_plugins_status ON plugins(status)",
     "CREATE INDEX IF NOT EXISTS idx_automation_rules_enabled ON automation_rules(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules(trigger_type)",
     "CREATE INDEX IF NOT EXISTS idx_automation_logs_rule ON automation_logs(rule_id, triggered_at DESC)",
@@ -301,6 +318,7 @@ ALL_TABLES = [
     CREATE_PROPOSALS,
     CREATE_CHAT_SESSIONS,
     CREATE_PLUGIN_CONFIGS,
+    CREATE_PLUGINS,
     CREATE_AUTOMATION_RULES,
     CREATE_AUTOMATION_LOGS,
 ]

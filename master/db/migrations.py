@@ -76,11 +76,14 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "disks_json" not in metrics_columns:
         await db.execute("ALTER TABLE metrics_snapshots ADD COLUMN disks_json TEXT DEFAULT NULL")
         mutated = True
+    if "top_processes_json" not in metrics_columns:
+        await db.execute("ALTER TABLE metrics_snapshots ADD COLUMN top_processes_json TEXT DEFAULT NULL")
+        mutated = True
 
     if mutated:
         await db.commit()
         logger.info(
-            "Added insights/caching/group/disabled/version/worker_version/disks_json columns."
+            "Added insights/caching/group/disabled/version/worker_version/disks_json/top_processes columns."
         )
 
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
@@ -90,13 +93,16 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     # Self-healing: drop legacy FK on join_tokens.node_id -> nodes.id if present (migration 006)
     await _drop_join_tokens_fk_if_present(db)
 
+    # Migration 008: rename plugin_configs -> plugins and add version/status/manifest_hash columns
+    await _migrate_plugin_configs_to_plugins(db)
+
     # Stamp Alembic version if not already versioned (idempotent)
     await db.execute(
         "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
     )
     await db.execute(
         "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
-        ("007",),
+        ("008",),
     )
     await db.commit()
 
@@ -138,17 +144,62 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
 
 async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
     """
-    Seed default plugins in plugin_configs table if empty.
+    Seed default plugins in the plugins table if not present.
+    Each default plugin is seeded at version 1.0.0 with status RUNNING.
     """
-    defaults = [("metrics", 1, "{}"), ("systemd", 1, "{}"), ("docker", 1, "{}")]
-    for plugin_id, enabled, config in defaults:
+    defaults = [("metrics", 1, "1.0.0", "RUNNING"), ("systemd", 1, "1.0.0", "RUNNING"), ("docker", 1, "1.0.0", "RUNNING")]
+    for plugin_id, enabled, version, status in defaults:
         await db.execute(
             """
-            INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO plugins (id, version, enabled, status, config_json)
+            VALUES (?, ?, ?, ?, '{}')
             """,
-            (plugin_id, enabled, config),
+            (plugin_id, version, enabled, status),
         )
+    await db.commit()
+
+
+async def _migrate_plugin_configs_to_plugins(db: aiosqlite.Connection) -> None:
+    """
+    Migration 008: rename legacy plugin_configs table to plugins and add
+    version, status, and manifest_hash columns.
+
+    The legacy plugin_configs table (plugin_id, enabled, config_json) is
+    copied into the new plugins schema (id, version, enabled, status,
+    config_json, manifest_hash, updated_at). Existing plugin_configs rows are
+    preserved verbatim: version defaults to '0.0.0', status to 'INSTALLED',
+    manifest_hash to NULL. Then ADD COLUMN brings the new columns onto any
+    pre-existing plugins table created by CREATE_PLUGINS.
+
+    Idempotent: a no-op when the rename already occurred.
+    """
+    async with db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='plugin_configs'"
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if row is not None:
+        logger.info("Migration 008: migrating plugin_configs -> plugins.")
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO plugins (id, enabled, config_json)
+            SELECT plugin_id, enabled, config_json FROM plugin_configs
+            """
+        )
+        await db.execute("DROP TABLE plugin_configs")
+        await db.commit()
+        logger.info("Migration 008: plugin_configs renamed to plugins.")
+
+    # Ensure new columns exist on plugins table (idempotent for fresh + migrated DBs)
+    async with db.execute("PRAGMA table_info(plugins)") as cursor:
+        cols = {row["name"] for row in await cursor.fetchall()}
+
+    if "version" not in cols:
+        await db.execute("ALTER TABLE plugins ADD COLUMN version TEXT NOT NULL DEFAULT '0.0.0'")
+    if "status" not in cols:
+        await db.execute("ALTER TABLE plugins ADD COLUMN status TEXT NOT NULL DEFAULT 'INSTALLED'")
+    if "manifest_hash" not in cols:
+        await db.execute("ALTER TABLE plugins ADD COLUMN manifest_hash TEXT")
     await db.commit()
 
 

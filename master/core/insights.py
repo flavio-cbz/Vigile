@@ -8,8 +8,10 @@ Implements the 3-phase insights and profiling system:
 """
 
 import asyncio
+import enum
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -29,40 +31,91 @@ logger = logging.getLogger(__name__)
 
 
 class HeavyProcessConfig(BaseModel):
-    """Configuration for a heavy CPU process (container or systemd service)."""
-
-    container_name: str | None = Field(default=None, description="Name of the Docker container")
-    service_name: str | None = Field(default=None, description="Name of the Systemd service")
+    container_name: str | None = Field(default=None)
+    service_name: str | None = Field(default=None)
     cpu_threshold_percent: float = Field(
         description="CPU percentage threshold above which this is considered active"
     )
-    label: str = Field(description="Human-friendly label of this process (e.g. 'Transcodage Plex')")
+    label: str = Field(description="Human-friendly label (e.g. 'Transcodage Plex')")
 
 
-# ---------------------------------------------------------------------------
-# Image-based classification helpers (avoids misidentifying LLM gateways as
-# reverse proxies based solely on container name substring matching).
-# ---------------------------------------------------------------------------
+class ServiceCategory(str, enum.Enum):
+    MEDIA = "media"
+    DATABASE = "database"
+    LLM = "llm"
+    REVERSE_PROXY = "reverse_proxy"
+    CI_CD = "ci_cd"
+    SYSTEM = "system"
+    MONITORING = "monitoring"
+    OTHER = "other"
 
-_LLM_IMAGE_KEYWORDS = frozenset({
-    "litellm", "ollama", "vllm", "openai", "localai",
-    "text-generation-inference", "tgi",
-})
+
+class ClassifiedService(BaseModel):
+    name: str
+    service_type: str
+    category: ServiceCategory
+    label: str
+    cpu_threshold_percent: float
 
 
-def _is_llm_related(container_name: str, image: str) -> bool:
-    """Return True if the container name or image references an LLM/AI tool.
+class NodeServiceClassification(BaseModel):
+    services: list[ClassifiedService]
+    context_label: str
+    baseline_ram_percent: float
 
-    Used to prevent LLM API gateways (e.g. litellm-proxy) from being
-    misclassified as reverse proxies by the heuristic fallback profile.
-    """
-    haystack = f"{container_name.lower()} {image.lower()}"
-    return any(kw in haystack for kw in _LLM_IMAGE_KEYWORDS)
+
+_CONTAINER_PATTERNS: list[tuple[str, ServiceCategory, str, float]] = [
+    (r"plex|jellyfin|emby", ServiceCategory.MEDIA, "Transcodage Multimédia (Plex/Jellyfin)", 50.0),
+    (r"postgres(ql)?|pg-\w+", ServiceCategory.DATABASE, "Requêtes Base de Données (PostgreSQL)", 40.0),
+    (r"mysql|mariadb", ServiceCategory.DATABASE, "Requêtes Base de Données (MySQL)", 40.0),
+    (r"litellm|ollama|vllm|openai|localai|text-generation-inference|tgi", ServiceCategory.LLM, "Passerelle API LLM (IA Générative)", 40.0),
+    (r"nginx|traefik|haproxy|caddy", ServiceCategory.REVERSE_PROXY, "Trafic Web (Reverse Proxy)", 30.0),
+    (r"(runner|gitlab|jenkins|drone|woodpecker)", ServiceCategory.CI_CD, "Compilation / Pipeline CI-CD", 60.0),
+    (r"(prometheus|grafana|netdata|node-exporter|telegraf|influxdb|victoria-metrics)", ServiceCategory.MONITORING, "Monitoring / Métriques", 20.0),
+]
+
+_SERVICE_PATTERNS: list[tuple[str, ServiceCategory, str, float]] = [
+    (r"plex", ServiceCategory.MEDIA, "Transcodage Plex Media Server", 50.0),
+    (r"postgresql|mysql|mariadb", ServiceCategory.DATABASE, "Activité Base de Données", 45.0),
+    (r"nginx|apache2?|httpd", ServiceCategory.REVERSE_PROXY, "Pic de Trafic Web", 35.0),
+    (r"fail2ban", ServiceCategory.SYSTEM, "Analyse d'intrusions Fail2ban", 20.0),
+]
+
+_IMAGE_PATTERNS: list[tuple[str, ServiceCategory, str, float]] = [
+    (r"litellm|ollama|vllm|openai|localai|tgi", ServiceCategory.LLM, "Passerelle API LLM (IA Générative)", 40.0),
+    (r"^(nginx|traefik|haproxy|caddy)(:|$)", ServiceCategory.REVERSE_PROXY, "Trafic Web (Reverse Proxy)", 30.0),
+    (r"postgres|mysql|mariadb|redis", ServiceCategory.DATABASE, "Service Base de Données", 40.0),
+]
+
+
+def _match_classification(
+    name: str,
+    patterns: list[tuple[str, ServiceCategory, str, float]],
+) -> tuple[ServiceCategory, str, float] | None:
+    name_lower = name.lower()
+    for pattern, category, label, threshold in patterns:
+        if re.search(pattern, name_lower):
+            return category, label, threshold
+    return None
+
+
+def _guess_context(hostname: str, containers: list[dict[str, Any]]) -> str:
+    host_lower = hostname.lower()
+    if "web" in host_lower or "nginx" in host_lower:
+        return "Serveur Web / Applicatif"
+    elif "db" in host_lower or "sql" in host_lower or "postgres" in host_lower:
+        return "Serveur de Base de Données"
+    elif (
+        "plex" in host_lower
+        or "media" in host_lower
+        or "nas" in host_lower
+        or any("plex" in c.get("name", "").lower() for c in containers)
+    ):
+        return "Homelab Médias & Stockage"
+    return "Serveur général"
 
 
 class NodeProfile(BaseModel):
-    """Memory profile of a node generated by LLM (or fallback) in Phase 1."""
-
     node_id: str
     known_heavy_processes: list[HeavyProcessConfig] = Field(default_factory=list)
     baseline_ram_percent: float = Field(
@@ -113,24 +166,16 @@ class InsightsManager:
         force: bool = False,
         locale: str = "fr",
     ) -> NodeProfile:
-        """
-        Generate or update the node profile (Phase 1).
-        Attempts to call the LLM, falls back to local rules if LLM fails or is disabled.
-        """
         logger.info("Generating profile for node %s (force=%s)...", node_id, force)
 
-        # 1. Fetch node info
         node = await nm.get_node(db, node_id)
         if not node:
             raise ValueError(f"Node not found: {node_id}")
 
         hostname = node.get("hostname") or ""
-        os_name = node.get("os") or ""
-        arch = node.get("arch") or ""
 
-        # 2. Get containers and services lists (from cache, or live query if empty)
-        services = []
-        containers = []
+        services: list[dict[str, Any]] = []
+        containers: list[dict[str, Any]] = []
 
         cached_services = node.get("cached_services_json")
         if cached_services:
@@ -146,11 +191,10 @@ class InsightsManager:
             except Exception:
                 pass
 
-        # If cache is empty and node is connected, try to query them live to feed the profile
         if node.get("online"):
             if not services:
                 try:
-                    from master.plugins.systemd_plugin import parse_service_list
+                    from master.core.plugin_helpers import parse_service_list
 
                     result = await nm.send_intent(node_id, {"action": "LIST_SERVICES"}, timeout=8.0)
                     if result.get("success"):
@@ -162,7 +206,7 @@ class InsightsManager:
 
             if not containers:
                 try:
-                    from master.plugins.docker_plugin import parse_container_list
+                    from master.core.plugin_helpers import parse_container_list
 
                     result = await nm.send_intent(
                         node_id, {"action": "LIST_CONTAINERS"}, timeout=8.0
@@ -174,52 +218,32 @@ class InsightsManager:
                 except Exception as e:
                     logger.warning("Profile gen: failed live containers query: %s", e)
 
-        # 3. Call LLM to generate profile
-        profile = None
-        if self._sllm and self._llm_client and self._llm_client.base_url:
-            lang_instruction = (
-                "You must write the node context label in English."
-                if locale == "en"
-                else "Tu dois obligatoirement rédiger le label de contexte (context_label) en français."
-            )
-            try:
-                messages = [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Generate a NodeProfile for server '{node.get('name')}' with the following details:\n"
-                            f"- Hostname: {hostname}\n"
-                            f"- OS/Arch: {os_name} / {arch}\n"
-                            f"- Active Systemd Services: {json.dumps(services[:30])}\n"
-                            f"- Running Docker Containers: {json.dumps(containers[:30])}\n\n"
-                            f"Analyze this server's context. Identify heavy CPU/RAM applications (like Plex, Jellyfin, PostgreSQL, Nginx, CI/CD runners, backups) "
-                            f"and determine appropriate CPU utilization thresholds (e.g. 50% for Plex transcoding) "
-                            f"where we should flag activity to the operator. Suggest a context label and expected baseline RAM. "
-                            f"{lang_instruction}"
-                        ),
-                    }
-                ]
-                profile = await self._sllm.create(
-                    response_model=NodeProfile,
-                    messages=messages,
-                    max_retries=2,
-                )
-                logger.info("✓ Node profile generated successfully via LLM for node %s", node_id)
-            except Exception as ex:
-                logger.warning(
-                    "LLM profile generation failed for node %s: %s. Using local fallback.",
-                    node_id,
-                    ex,
-                )
+        classification = await self.classify_node_services(
+            node_id, db, nm, locale=locale, services=services, containers=containers
+        )
 
-        # 4. Fallback to local heuristic rules
-        if not profile:
-            profile = self.generate_fallback_profile(
-                node_id, hostname, os_name, services, containers
-            )
-            logger.info("✓ Generated fallback profile for node %s", node_id)
+        context_label = classification.context_label
+        baseline_ram_percent = classification.baseline_ram_percent
 
-        # 5. Persist profile to DB
+        known_heavy = [
+            HeavyProcessConfig(
+                container_name=s.name if s.service_type == "container" else None,
+                service_name=s.name if s.service_type == "systemd" else None,
+                cpu_threshold_percent=s.cpu_threshold_percent,
+                label=s.label,
+            )
+            for s in classification.services
+        ]
+
+        profile = NodeProfile(
+            node_id=node_id,
+            known_heavy_processes=known_heavy,
+            baseline_ram_percent=baseline_ram_percent,
+            context_label=context_label,
+        )
+
+        logger.info("Profile ready for node %s", node_id)
+
         now = time.time()
         await db.execute(
             """
@@ -242,122 +266,137 @@ class InsightsManager:
 
         return profile
 
+    def _classify_services_fallback(
+        self,
+        services: list[dict[str, Any]],
+        containers: list[dict[str, Any]],
+    ) -> list[HeavyProcessConfig]:
+        known_heavy: list[HeavyProcessConfig] = []
+
+        for c in containers:
+            match = _match_classification(c.get("name", ""), _CONTAINER_PATTERNS)
+            if not match:
+                match = _match_classification(c.get("image", ""), _IMAGE_PATTERNS)
+            if match:
+                known_heavy.append(
+                    HeavyProcessConfig(
+                        container_name=c.get("name"),
+                        cpu_threshold_percent=match[2],
+                        label=match[1],
+                    )
+                )
+
+        for s in services:
+            match = _match_classification(s.get("name", ""), _SERVICE_PATTERNS)
+            if match:
+                known_heavy.append(
+                    HeavyProcessConfig(
+                        service_name=s.get("name"),
+                        cpu_threshold_percent=match[2],
+                        label=match[1],
+                    )
+                )
+
+        return known_heavy
+
+    async def classify_node_services(
+        self,
+        node_id: str,
+        db: aiosqlite.Connection,
+        nm: NodeManager,
+        locale: str = "fr",
+        services: list[dict[str, Any]] | None = None,
+        containers: list[dict[str, Any]] | None = None,
+    ) -> NodeServiceClassification:
+        logger.info("Classifying services for node %s...", node_id)
+        node = await nm.get_node(db, node_id)
+        if not node:
+            raise ValueError(f"Node not found: {node_id}")
+
+        hostname = node.get("hostname") or ""
+
+        if services is None:
+            services = []
+            cached = node.get("cached_services_json")
+            if cached:
+                try:
+                    services = json.loads(cached)
+                except Exception:
+                    pass
+
+        if containers is None:
+            containers = []
+            cached = node.get("cached_containers_json")
+            if cached:
+                try:
+                    containers = json.loads(cached)
+                except Exception:
+                    pass
+
+        if self._sllm and self._llm_client and self._llm_client.base_url:
+            lang = (
+                "Write the label and context_label in English."
+                if locale == "en"
+                else "Écris le label et le context_label en français."
+            )
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Classify every container and service running on server '{node.get('name')}'.\n\n"
+                            f"Systemd services:\n{json.dumps(services[:30], indent=2)}\n\n"
+                            f"Docker containers (with image):\n{json.dumps(containers[:30], indent=2)}\n\n"
+                            f"For each entry, determine:\n"
+                            f"- category: one of {[e.value for e in ServiceCategory]}\n"
+                            f"- label: short human-friendly description in French\n"
+                            f"- cpu_threshold_percent: CPU % above which this process is considered actively loaded "
+                            f"(e.g. 50 for Plex transcoding, 30 for a reverse proxy, 40 for a database)\n"
+                            f"- service_type: \"container\" or \"systemd\"\n\n"
+                            f"Also suggest:\n"
+                            f"- context_label: overall role of this server (e.g. \"Serveur Médias\", \"Base de Données\", \"Passerelle LLM\")\n"
+                            f"- baseline_ram_percent: normal baseline RAM usage for this server\n\n"
+                            f"{lang}"
+                        ),
+                    }
+                ]
+                result = await self._sllm.create(
+                    response_model=NodeServiceClassification,
+                    messages=messages,
+                    max_retries=2,
+                )
+                logger.info("LLM classification successful for node %s", node_id)
+                return result
+            except Exception as ex:
+                logger.warning("LLM classification failed for node %s: %s", node_id, ex)
+
+        known_heavy = self._classify_services_fallback(services, containers)
+        context = _guess_context(hostname, containers)
+        classified = [
+            ClassifiedService(
+                name=h.container_name or h.service_name or "",
+                service_type="container" if h.container_name else "systemd",
+                category=ServiceCategory.OTHER,
+                label=h.label,
+                cpu_threshold_percent=h.cpu_threshold_percent,
+            )
+            for h in known_heavy
+        ]
+        return NodeServiceClassification(
+            services=classified,
+            context_label=context,
+            baseline_ram_percent=65.0,
+        )
+
     def generate_fallback_profile(
         self,
         node_id: str,
         hostname: str,
-        os_name: str,
         services: list[dict[str, Any]],
         containers: list[dict[str, Any]],
     ) -> NodeProfile:
-        """Generate a basic, rules-based NodeProfile when LLM is unavailable."""
-        known_heavy = []
-
-        # Analyze Docker containers
-        for c in containers:
-            c_name = c.get("name", "").lower()
-            if "plex" in c_name or "jellyfin" in c_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=50.0,
-                        label="Transcodage Multimédia (Plex/Jellyfin)",
-                    )
-                )
-            elif "postgres" in c_name or "pg-" in c_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=40.0,
-                        label="Requêtes Base de Données (PostgreSQL)",
-                    )
-                )
-            elif "mysql" in c_name or "mariadb" in c_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=40.0,
-                        label="Requêtes Base de Données (MySQL)",
-                    )
-                )
-            elif _is_llm_related(c_name, c.get("image", "")):
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=40.0,
-                        label="Passerelle API LLM (IA Générative)",
-                    )
-                )
-            elif "nginx" in c_name or "traefik" in c_name or "haproxy" in c_name or (
-                "proxy" in c_name and not _is_llm_related(c_name, c.get("image", ""))
-            ):
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=30.0,
-                        label="Trafic Web (Reverse Proxy)",
-                    )
-                )
-            elif "runner" in c_name or "gitlab" in c_name or "jenkins" in c_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=60.0,
-                        label="Compilation / Pipeline CI-CD",
-                    )
-                )
-
-        # Analyze systemd services
-        for s in services:
-            s_name = s.get("name", "").lower()
-            if "plex" in s_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        service_name=s.get("name"),
-                        cpu_threshold_percent=50.0,
-                        label="Transcodage Plex Media Server",
-                    )
-                )
-            elif "postgresql" in s_name or "mysql" in s_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        service_name=s.get("name"),
-                        cpu_threshold_percent=45.0,
-                        label="Activité Base de Données",
-                    )
-                )
-            elif "nginx" in s_name or "apache" in s_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        service_name=s.get("name"),
-                        cpu_threshold_percent=35.0,
-                        label="Pic de Trafic Web",
-                    )
-                )
-            elif "fail2ban" in s_name:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        service_name=s.get("name"),
-                        cpu_threshold_percent=20.0,
-                        label="Analyse d'intrusions Fail2ban",
-                    )
-                )
-
-        # Context label suggestion
-        context = "Serveur général"
-        host_lower = hostname.lower()
-        if "web" in host_lower or "nginx" in host_lower:
-            context = "Serveur Web / Applicatif"
-        elif "db" in host_lower or "sql" in host_lower or "postgres" in host_lower:
-            context = "Serveur de Base de Données"
-        elif (
-            "plex" in host_lower
-            or "media" in host_lower
-            or "nas" in host_lower
-            or any("plex" in c.get("name", "").lower() for c in containers)
-        ):
-            context = "Homelab Médias & Stockage"
-
+        known_heavy = self._classify_services_fallback(services, containers)
+        context = _guess_context(hostname, containers)
         return NodeProfile(
             node_id=node_id,
             known_heavy_processes=known_heavy,
@@ -596,7 +635,16 @@ class InsightsManager:
         """Match current CPU load against node profile rules and active processes."""
         cpu_percent = latest_snap.get("cpu_percent", 0.0)
 
-        # Parse active containers and services cache
+        top_procs: list[dict[str, Any]] = []
+        raw_top = latest_snap.get("top_processes_json")
+        if isinstance(raw_top, str):
+            try:
+                top_procs = json.loads(raw_top)
+            except Exception:
+                pass
+        elif isinstance(latest_snap.get("top_processes"), list):
+            top_procs = latest_snap["top_processes"]
+
         active_containers = []
         cached_containers = node.get("cached_containers_json")
         if cached_containers:
@@ -621,15 +669,13 @@ class InsightsManager:
             except Exception:
                 pass
 
-        # Identify heavy processes that are active and exceed threshold
         culprit = None
+        culprit_pct: float | None = None
         headline = "Serveur au repos"
         detail = "Activités d'arrière-plan normales"
         icon = "💤"
 
-        # Check rules
         for p in profile.known_heavy_processes:
-            # Check if this process config is running
             is_running = False
             if p.container_name and p.container_name in active_containers:
                 is_running = True
@@ -637,16 +683,30 @@ class InsightsManager:
                 is_running = True
 
             if is_running and cpu_percent >= p.cpu_threshold_percent:
-                culprit = p
-                # If multiple processes exceed threshold, choose the one with higher threshold
-                break
+                if not culprit or p.cpu_threshold_percent > culprit.cpu_threshold_percent:
+                    culprit = p
+
+        if culprit and top_procs:
+            culprit_name = (culprit.container_name or culprit.service_name or "").lower()
+            for tp in top_procs:
+                tp_name = tp.get("name", "").lower()
+                if culprit_name in tp_name or tp_name in culprit_name:
+                    culprit_pct = tp.get("cpu_percent")
+                    break
 
         if cpu_percent > 75:
             if culprit:
                 severity = "warning"
                 icon = "🔥"
                 headline = f"Activité intense · {culprit.label}"
-                detail = f"Charge soutenue ({cpu_percent:.0f}%) imputée à {culprit.container_name or culprit.service_name}"
+                actual = f" ({culprit_pct:.0f}% CPU)" if culprit_pct else ""
+                detail = f"Charge soutenue ({cpu_percent:.0f}%) imputée à {culprit.container_name or culprit.service_name}{actual}"
+            elif top_procs and top_procs[0].get("cpu_percent", 0) > 10:
+                severity = "warning"
+                icon = "⚠️"
+                top = top_procs[0]
+                headline = f"Charge élevée anormale"
+                detail = f"Processus {top['name']} actif ({top['cpu_percent']:.0f}%)"
             else:
                 severity = "warning"
                 icon = "⚠️"
@@ -657,7 +717,14 @@ class InsightsManager:
                 severity = "info"
                 icon = "⚡"
                 headline = f"Charge modérée · {culprit.label}"
-                detail = f"Processus {culprit.container_name or culprit.service_name} actif ({cpu_percent:.0f}%)"
+                actual = f" ({culprit_pct:.0f}%)" if culprit_pct else ""
+                detail = f"Processus {culprit.container_name or culprit.service_name} actif ({cpu_percent:.0f}%){actual}"
+            elif top_procs and top_procs[0].get("cpu_percent", 0) > 5:
+                severity = "info"
+                icon = "🏃"
+                top = top_procs[0]
+                headline = f"Activité modérée"
+                detail = f"Processus {top['name']} actif ({top['cpu_percent']:.0f}%)"
             else:
                 severity = "info"
                 icon = "🏃"
@@ -679,6 +746,7 @@ class InsightsManager:
                 "cpu_percent": round(cpu_percent, 1),
                 "culprit_container": culprit.container_name if culprit else None,
                 "culprit_service": culprit.service_name if culprit else None,
+                "top_processes": top_procs[:5] if top_procs else None,
             },
         }
 

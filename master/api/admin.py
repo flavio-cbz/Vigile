@@ -302,21 +302,26 @@ async def list_plugins(
     plugin_db_states = {}
     try:
         async with db.execute(
-            "SELECT plugin_id, enabled, config_json FROM plugin_configs"
+            "SELECT id, enabled, config_json FROM plugins"
         ) as cursor:
             rows = await cursor.fetchall()
             for row in rows:
                 plugin_db_states[row[0]] = {"enabled": bool(row[1]), "config": json.loads(row[2])}
     except Exception as e:
-        logger.error("Failed to query plugin_configs table: %s", e)
+        logger.error("Failed to query plugins table: %s", e)
 
     # 2. Scan directory
     plugins_dir = settings.plugins_dir
     plugin_files = []
+    plugin_errors: dict[str, str] = {}
     if os.path.isdir(plugins_dir):
-        for fname in sorted(os.listdir(plugins_dir)):
-            if fname.endswith(".py") and not fname.startswith("_"):
-                plugin_files.append(fname[:-3])
+        for entry in sorted(os.listdir(plugins_dir)):
+            if entry.endswith(".py") and not entry.startswith("_"):
+                plugin_files.append(entry[:-3])
+            elif os.path.isdir(os.path.join(plugins_dir, entry)):
+                manifest_path = os.path.join(plugins_dir, entry, "manifest.json")
+                if os.path.isfile(manifest_path):
+                    plugin_files.append(entry)
 
     # 3. Build response for each plugin
     result = []
@@ -324,8 +329,14 @@ async def list_plugins(
         plugin_id = canonical_plugin_id(name)
         is_loaded = plugin_id in plugin_manager.loaded_plugins
         db_state = plugin_db_states.get(plugin_id, {"enabled": True, "config": {}})
+        version = db_state.get("version", db_state.get("config", {}).get("version", "0.0.0"))
 
-        # Dynamically inspect metadata and schema if loaded
+        path = os.path.join(plugins_dir, f"{name}.py")
+        if not os.path.isfile(path):
+            path = os.path.join(plugins_dir, name, "manifest.json")
+
+        module_name = f"vigile.plugins.{name}" if name != plugin_id else f"vigile.plugins.{name}"
+
         meta = {
             "name": name.replace("_", " ").title(),
             "description": "Custom Python extension module.",
@@ -333,7 +344,10 @@ async def list_plugins(
             "schema": {},
         }
 
-        module_name = f"vigile.plugins.{name}"
+        error: str | None = plugin_errors.get(plugin_id)
+        if error is None and not is_loaded and db_state["enabled"]:
+            error = "Plugin not loaded"
+
         if module_name in sys.modules:
             mod = sys.modules[module_name]
             if hasattr(mod, "get_config_schema"):
@@ -341,12 +355,19 @@ async def list_plugins(
                     meta.update(mod.get_config_schema())
                 except Exception:
                     pass
-        elif plugin_manager._sandbox and plugin_id in plugin_manager.loaded_plugins:
-            wrapper = plugin_manager._wrappers.get(plugin_id)
+        elif getattr(plugin_manager, "_sandbox", False) and plugin_id in plugin_manager.loaded_plugins:
+            wrapper = getattr(plugin_manager, "_wrappers", {}).get(plugin_id)
             if wrapper and wrapper.schema:
                 meta.update(wrapper.schema)
 
-        # Find hooks registered by this plugin
+        from master.core.plugin_manager import plugin_engine
+        if plugin_engine is not None and plugin_engine.scanner is not None:
+            manifest = plugin_engine.scanner.get_manifest(plugin_id)
+            if manifest is not None:
+                version = manifest.version
+                meta["name"] = manifest.name
+                meta["description"] = manifest.description or meta["description"]
+
         plugin_hooks = []
         hooks_registry = plugin_manager.get_hooks()
         for hook_name, plugins in hooks_registry.items():
@@ -364,6 +385,10 @@ async def list_plugins(
                 "config": db_state["config"],
                 "loaded": is_loaded,
                 "hooks": plugin_hooks,
+                "path": path,
+                "module": module_name,
+                "error": error,
+                "version": version,
             }
         )
 
@@ -543,7 +568,7 @@ async def install_plugin(
     # 7. Update database configuration
     db = get_db_conn()
     await db.execute(
-        "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, '{}')",
+        "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, '{}')",
         (plugin_name,),
     )
     await db.commit()
@@ -642,7 +667,7 @@ async def upload_plugin(
 
     db = get_db_conn()
     await db.execute(
-        "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, '{}')",
+        "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, '{}')",
         (plugin_name,),
     )
     await db.commit()
@@ -693,8 +718,8 @@ async def configure_plugin(
 
     config_str = json.dumps(config)
     await db.execute(
-        "INSERT INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, ?) "
-        "ON CONFLICT(plugin_id) DO UPDATE SET config_json = excluded.config_json",
+        "INSERT INTO plugins (id, enabled, config_json) VALUES (?, 1, ?) "
+        "ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",
         (plugin_id, config_str),
     )
     await db.commit()
@@ -735,7 +760,7 @@ async def toggle_plugin(
     # Get current state
     enabled = True
     async with db.execute(
-        "SELECT enabled FROM plugin_configs WHERE plugin_id = ?", (plugin_id,)
+        "SELECT enabled FROM plugins WHERE id = ?", (plugin_id,)
     ) as cursor:
         row = await cursor.fetchone()
         if row:
@@ -743,8 +768,8 @@ async def toggle_plugin(
 
     new_state = not enabled
     await db.execute(
-        "INSERT INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, ?, '{}') "
-        "ON CONFLICT(plugin_id) DO UPDATE SET enabled = excluded.enabled",
+        "INSERT INTO plugins (id, enabled, config_json) VALUES (?, ?, '{}') "
+        "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
         (plugin_id, int(new_state)),
     )
     await db.commit()
@@ -809,7 +834,7 @@ async def delete_plugin(
         )
 
     # 3. Clean up database entry
-    await db.execute("DELETE FROM plugin_configs WHERE plugin_id = ?", (plugin_id,))
+    await db.execute("DELETE FROM plugins WHERE id = ?", (plugin_id,))
     await db.commit()
 
     # 4. Log audit

@@ -210,8 +210,7 @@ class NodeManager:
 
     async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
         """Query and cache active services and Docker containers for online node(s)."""
-        from master.plugins.docker_plugin import parse_container_list
-        from master.plugins.systemd_plugin import parse_service_list
+        from master.core.plugin_helpers import parse_container_list, parse_service_list
 
         db = get_db_conn()
         connected = [node_id] if node_id else self.connected_node_ids()

@@ -44,7 +44,13 @@ from master.config import settings
 from master.core.automation_engine import automation_engine
 from master.core.enums import NodeState
 from master.core.node_manager import node_manager
-from master.core.plugin_manager import plugin_manager
+from master.core.plugin_manager import plugin_manager, plugin_engine as _plugin_engine_ref
+from master.core.plugin_engine import PluginEngine
+from master.core.hook_bus import HookBus
+from master.core.scheduler import Scheduler
+from master.core.route_registrar import RouteRegistrar
+from master.core.db_auto import DBAuto
+from master.core.scanner import Scanner
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import init_security, load_or_generate_master_key
 from master.db.database import close_db, init_db, transaction
@@ -263,12 +269,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         jwt_refresh_token_ttl=settings.jwt_refresh_token_ttl,
         master_private_key=master_key,
     )
-    # 4.5. Initialize PluginManager
+    hook_bus = HookBus()
+    scheduler = Scheduler()
+    route_registrar = RouteRegistrar(app)
+    db_auto = DBAuto(db)
+    scanner = Scanner(
+        plugins_dir=settings.plugins_dir,
+        db=db,
+    )
+    engine = PluginEngine(
+        hook_bus=hook_bus,
+        scheduler=scheduler,
+        route_registrar=route_registrar,
+        db_auto=db_auto,
+        scanner=scanner,
+        db=db,
+    )
+    scanner.set_lifecycle(engine.lifecycle)
+    plugin_manager.set_engine(engine)
+    import master.core.plugin_manager as _pm
+    _pm.plugin_engine = engine
     await plugin_manager.initialize(db, sandbox=settings.plugin_sandbox)
-
-    # 5. Load plugins
     loaded = await plugin_manager.load_plugins_from_dir(settings.plugins_dir)
     logger.info("Plugins loaded: %s", loaded or "none")
+    scan_result = await scanner.scan()
+    if scan_result.installed:
+        logger.info("Scanner installed new plugins: %s", scan_result.installed)
+    if scan_result.orphans:
+        logger.warning("Scanner found orphan plugins: %s", scan_result.orphans)
 
     # 6. Node Manager
     await node_manager.start(
@@ -313,6 +341,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
     await node_manager.stop()
+    await scheduler.shutdown()
     await close_db()
     logger.info("Shutdown complete.")
 

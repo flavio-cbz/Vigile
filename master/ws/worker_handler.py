@@ -655,6 +655,51 @@ async def _run_operational(
                 )
                 await db.commit()
 
+            # ── WORKER_TOKEN rotation check ──────────────────────────────
+            try:
+                async with db.execute(
+                    "SELECT token_hash, rotation_due FROM worker_tokens "
+                    "WHERE node_id = ? AND revoked = 0 ORDER BY issued_at DESC LIMIT 1",
+                    (node_id,),
+                ) as cursor:
+                    token_row = await cursor.fetchone()
+                if token_row and token_row["rotation_due"] < time.time():
+                    new_token, lifecycle = get_security_instance().generate_worker_token(node_id)
+                    new_token_hash = get_security_instance().worker_token_hash(new_token)
+                    token_id = str(uuid.uuid4())
+                    old_token_hash = token_row["token_hash"]
+                    async with transaction(db):
+                        await db.execute(
+                            "UPDATE worker_tokens SET revoked = 1, revoked_at = ? WHERE token_hash = ?",
+                            (time.time(), old_token_hash),
+                        )
+                        await db.execute(
+                            """
+                            INSERT INTO worker_tokens
+                                (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked)
+                            VALUES (?, ?, ?, ?, ?, ?, 0)
+                            """,
+                            (
+                                token_id,
+                                node_id,
+                                new_token_hash,
+                                lifecycle["issued_at"],
+                                lifecycle["rotation_due"],
+                                lifecycle["expires_at"],
+                            ),
+                        )
+                    await _send(
+                        websocket,
+                        {
+                            "type": "TOKEN_ROTATION_COMMAND",
+                            "worker_token": new_token,
+                        },
+                        node_id=node_id,
+                    )
+                    logger.info("Node %s: WORKER_TOKEN rotation sent (token_id=%s)", node_id, token_id)
+            except Exception:
+                logger.exception("Node %s: WORKER_TOKEN rotation failed", node_id)
+
         elif msg_type == "INTENT_RESULT":
             intent_id = msg.get("intent_id", "?")
             success = msg.get("success", False)

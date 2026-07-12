@@ -18,7 +18,7 @@ from master.plugins.slack_alert import register as register_slack
 async def test_discord_alert_plugin(db: aiosqlite.Connection):
     # 1. Enable the plugin in the database first
     await db.execute(
-        "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, ?)",
+        "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, ?)",
         (
             "discord_alert",
             json.dumps(
@@ -53,7 +53,7 @@ async def test_discord_alert_plugin(db: aiosqlite.Connection):
 async def test_slack_alert_plugin(db: aiosqlite.Connection):
     # 1. Enable the plugin in the database first
     await db.execute(
-        "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, ?)",
+        "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, ?)",
         (
             "slack_alert",
             json.dumps(
@@ -89,7 +89,7 @@ async def test_slack_alert_plugin(db: aiosqlite.Connection):
 async def test_clean_logs_plugin(db: aiosqlite.Connection):
     # 1. Enable the plugin in the database first
     await db.execute(
-        "INSERT OR IGNORE INTO plugin_configs (plugin_id, enabled, config_json) VALUES (?, 1, ?)",
+        "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, ?)",
         ("clean_logs", json.dumps({"disk_threshold": 75, "cleanup_patterns": "/var/log/*.1"})),
     )
     # Ensure test-node exists in nodes

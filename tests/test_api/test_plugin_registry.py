@@ -36,6 +36,8 @@ async def client(db):
 @pytest.fixture(autouse=True)
 def setup_temp_plugins_dir(tmp_path):
     old_plugins_dir = settings.plugins_dir
+    saved_loaded = list(plugin_manager._loaded_plugins)
+    saved_hooks = dict(plugin_manager._hooks)
     temp_dir = tmp_path / "plugins"
     temp_dir.mkdir()
     settings.plugins_dir = str(temp_dir)
@@ -58,6 +60,11 @@ def setup_temp_plugins_dir(tmp_path):
         master.api.admin.settings.plugins_dir = old_plugins_dir
     except Exception:
         pass
+    # Restore global plugin_manager state so later test modules are not polluted
+    plugin_manager._loaded_plugins.clear()
+    plugin_manager._loaded_plugins.extend(saved_loaded)
+    plugin_manager._hooks.clear()
+    plugin_manager._hooks.update(saved_hooks)
 
 
 @pytest.mark.asyncio
@@ -186,7 +193,7 @@ def register(pm):
 
     # Verify database insertion
     async with db.execute(
-        "SELECT enabled FROM plugin_configs WHERE plugin_id = ?", ("test_install",)
+        "SELECT enabled FROM plugins WHERE id = ?", ("test_install",)
     ) as cur:
         row = await cur.fetchone()
         assert row is not None

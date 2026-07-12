@@ -21,7 +21,10 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from master.core.plugin_engine import PluginEngine
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +264,7 @@ class PluginManager:
     Supports in-process (sandbox=False) and out-of-process (sandbox=True) runners.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, engine: Any | None = None) -> None:
         # { hook_name: [(plugin_name, callable)] }
         self._hooks: dict[str, list[tuple[str, Callable]]] = {}
         self._loaded_plugins: list[str] = []
@@ -271,6 +274,10 @@ class PluginManager:
         self._enabled_plugins: set[str] | None = None
         self._sandbox: bool = False
         self._wrappers: dict[str, PluginProcessWrapper] = {}
+        self._engine: Any = engine
+
+    def set_engine(self, engine: Any) -> None:
+        self._engine = engine
 
     async def initialize(self, db: Any, sandbox: bool = True) -> None:
         """
@@ -281,7 +288,7 @@ class PluginManager:
         self._sandbox = sandbox
         try:
             async with db.execute(
-                "SELECT plugin_id FROM plugin_configs WHERE enabled = 1"
+                "SELECT id FROM plugins WHERE enabled = 1"
             ) as cursor:
                 rows = await cursor.fetchall()
                 self._enabled_plugins = {row[0] for row in rows}
@@ -304,7 +311,7 @@ class PluginManager:
             return {}
         try:
             async with self._db.execute(
-                "SELECT config_json FROM plugin_configs WHERE plugin_id = ?", (plugin_name,)
+                "SELECT config_json FROM plugins WHERE id = ?", (plugin_name,)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -318,14 +325,15 @@ class PluginManager:
     # -----------------------------------------------------------------------
 
     def register(self, hook_name: str, fn: Callable, *, plugin_name: str = "anonymous") -> None:
-        """
-        Register a callable under a hook name.
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            self._engine.hook_bus.register(hook_name, fn, plugin_name=plugin_name)
+            return
         self._hooks.setdefault(hook_name, []).append((plugin_name, fn))
         logger.debug("Plugin '%s' registered hook '%s'", plugin_name, hook_name)
 
     def unregister(self, hook_name: str, plugin_name: str) -> int:
-        """Remove all implementations registered by a given plugin for a hook."""
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.unregister(hook_name, plugin_name)
         if hook_name not in self._hooks:
             return 0
         before = len(self._hooks[hook_name])
@@ -340,10 +348,8 @@ class PluginManager:
     # -----------------------------------------------------------------------
 
     def call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        """
-        Invoke all sync implementations registered for hook_name.
-        Async implementations (including sandboxed proxies) are skipped.
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.call(hook_name, **kwargs)
         results: list[Any] = []
         for plugin_name, fn in self._hooks.get(hook_name, []):
             if inspect.iscoroutinefunction(fn):
@@ -372,9 +378,8 @@ class PluginManager:
         return results
 
     def call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        """
-        Like call(), but returns only the first non-None result.
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.call_first(hook_name, **kwargs)
         for plugin_name, fn in self._hooks.get(hook_name, []):
             if inspect.iscoroutinefunction(fn):
                 continue
@@ -413,9 +418,8 @@ class PluginManager:
             self._active_calls[plugin_name] -= 1
 
     async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        """
-        Invoke all implementations concurrently.
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return await self._engine.hook_bus.async_call(hook_name, **kwargs)
         tasks: list[asyncio.Future] = []
 
         for plugin_name, fn in self._hooks.get(hook_name, []):
@@ -442,7 +446,8 @@ class PluginManager:
         return results
 
     async def async_call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        """Async version of call_first — returns the first non-None result."""
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return await self._engine.hook_bus.async_call_first(hook_name, **kwargs)
         results = await self.async_call(hook_name, **kwargs)
         return results[0] if results else None
 
@@ -598,15 +603,22 @@ class PluginManager:
     # -----------------------------------------------------------------------
 
     def get_hooks(self) -> dict[str, list[str]]:
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.get_hooks()
         return {hook: [pn for pn, _ in impls] for hook, impls in self._hooks.items()}
 
     @property
     def loaded_plugins(self) -> list[str]:
+        if self._engine is not None:
+            return self._engine.loaded_plugins
         return list(self._loaded_plugins)
 
     def has_hook(self, hook_name: str) -> bool:
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.has_hook(hook_name)
         return bool(self._hooks.get(hook_name))
 
 
 # Module-level singleton
 plugin_manager = PluginManager()
+plugin_engine: Any | None = None
