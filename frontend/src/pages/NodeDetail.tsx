@@ -4,6 +4,7 @@ import { usePolling } from '../hooks/usePolling';
 import { Spinner } from '../components/primitives/Spinner';
 import { api } from '../hooks/useApi';
 import { usePermission } from '../hooks/usePermission';
+import { useToastStore } from '../store/useToastStore';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { useLocale } from '../i18n';
 import { useNodeDetailData } from '../hooks/useNodeDetailData';
@@ -25,7 +26,7 @@ export const NodeDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const { isAdmin, can } = usePermission();
+  const { canRestartDirectly, can } = usePermission();
   const isAdminOrOperator = can('approve-action');
 
   const data = useNodeDetailData(id);
@@ -78,11 +79,16 @@ export const NodeDetail: React.FC = () => {
   usePolling('detail_logs_poll', () => fetchNodeLogs(true), 10000, activeTab === 'logs');
 
   const handleRestartService = async (serviceName: string) => {
-    if (!id || !isAdmin) return;
+    if (!id || !canRestartDirectly) return;
     setRestartingService(serviceName);
     try {
-      await api(`/api/nodes/${id}/services/${serviceName}/restart`, { method: 'POST' });
-      await fetchServicesList();
+      const res = await api<{ error?: string | null }>(`/api/nodes/${id}/services/${serviceName}/restart`, { method: 'POST' });
+      if (res?.error) {
+        useToastStore.getState().addToast('error', t('chat.toast.failure'), t('node_detail.toast.service_restart_failed', { name: serviceName, error: res.error }));
+      } else {
+        useToastStore.getState().addToast('success', t('chat.toast.success'), t('node_detail.toast.service_restarted', { name: serviceName }));
+        await fetchServicesList();
+      }
     } catch (err) {
       console.error('Service restart error:', err);
     } finally {
@@ -91,11 +97,18 @@ export const NodeDetail: React.FC = () => {
   };
 
   const handleRestartContainer = async (containerId: string) => {
-    if (!id || !isAdmin) return;
+    if (!id || !canRestartDirectly) return;
     setRestartingContainer(containerId);
+    const container = containers?.find(c => c.id === containerId);
+    const name = container?.name || containerId;
     try {
-      await api(`/api/nodes/${id}/containers/${containerId}/restart`, { method: 'POST' });
-      await fetchContainersList();
+      const res = await api<{ error?: string | null }>(`/api/nodes/${id}/containers/${containerId}/restart`, { method: 'POST' });
+      if (res?.error) {
+        useToastStore.getState().addToast('error', t('chat.toast.failure'), t('node_detail.toast.container_restart_failed', { name, error: res.error }));
+      } else {
+        useToastStore.getState().addToast('success', t('chat.toast.success'), t('node_detail.toast.container_restarted', { name }));
+        await fetchContainersList();
+      }
     } catch (err) {
       console.error('Container restart error:', err);
     } finally {
@@ -163,7 +176,7 @@ export const NodeDetail: React.FC = () => {
             services={services}
             loading={loadingServices}
             restartingService={restartingService}
-            isAdmin={isAdmin}
+            isAdmin={canRestartDirectly}
             isAdminOrOperator={isAdminOrOperator}
             onRefresh={fetchServicesList}
             onRestart={handleRestartService}
@@ -175,7 +188,7 @@ export const NodeDetail: React.FC = () => {
             containers={containers}
             loading={loadingContainers}
             restartingContainer={restartingContainer}
-            isAdmin={isAdmin}
+            isAdmin={canRestartDirectly}
             isAdminOrOperator={isAdminOrOperator}
             onRefresh={fetchContainersList}
             onRestart={handleRestartContainer}
