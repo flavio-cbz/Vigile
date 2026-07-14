@@ -14,7 +14,7 @@ from passlib.context import CryptContext
 
 from master.config import settings
 from master.core.audit import GENESIS_HASH, compute_entry_hash
-from master.db.models import ALL_TABLES, CREATE_INDEXES
+from master.db.models import ALL_TABLES, CREATE_INDEXES, CREATE_INVESTIGATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +80,55 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.execute("ALTER TABLE metrics_snapshots ADD COLUMN top_processes_json TEXT DEFAULT NULL")
         mutated = True
 
+    # Network I/O / Disk I/O / thermal / PSI / resource columns added with the
+    # richer MetricsSnapshot struct in worker v0.7+. These were never migrated,
+    # causing every STATUS_REPORT INSERT to fail with
+    # "table metrics_snapshots has no column named net_bytes_recv".
+    for col, ctype in [
+        ("net_bytes_recv", "INTEGER"), ("net_bytes_sent", "INTEGER"),
+        ("net_packets_recv", "INTEGER"), ("net_packets_sent", "INTEGER"),
+        ("net_errors_in", "INTEGER"), ("net_errors_out", "INTEGER"),
+        ("net_drops_in", "INTEGER"), ("net_drops_out", "INTEGER"),
+        ("disk_reads", "INTEGER"), ("disk_writes", "INTEGER"),
+        ("disk_read_bytes", "INTEGER"), ("disk_write_bytes", "INTEGER"),
+        ("temp_celsius", "REAL"), ("psi_cpu_avg10", "REAL"),
+        ("psi_mem_avg10", "REAL"), ("psi_io_avg10", "REAL"),
+        ("file_handles_used", "INTEGER"), ("file_handles_max", "INTEGER"),
+        ("entropy_avail", "INTEGER"), ("context_switches", "INTEGER"),
+        ("cpu_throttled_count", "INTEGER"),
+    ]:
+        if col not in metrics_columns:
+            await db.execute(
+                f"ALTER TABLE metrics_snapshots ADD COLUMN {col} {ctype} DEFAULT NULL"
+            )
+            mutated = True
+
     if mutated:
         await db.commit()
         logger.info(
             "Added insights/caching/group/disabled/version/worker_version/disks_json/top_processes columns."
         )
+
+    # Migration: add trust_level column to automation_rules (Sprint 9)
+    async with db.execute("PRAGMA table_info(automation_rules)") as cursor:
+        ar_columns = [row["name"] for row in await cursor.fetchall()]
+    if "trust_level" not in ar_columns:
+        await db.execute(
+            "ALTER TABLE automation_rules ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'auto'"
+        )
+        logger.info("Added trust_level column to automation_rules.")
+        await db.commit()
+
+    # Migration: create investigations table (Sprint 9) — CREATE TABLE IF NOT EXISTS handles new DBs
+    async with db.execute("PRAGMA table_info(investigations)") as cursor:
+        inv_columns = [row["name"] for row in await cursor.fetchall()]
+    if not inv_columns:
+        # Table doesn't exist in old DBs — CREATE TABLE IF NOT EXISTS above handles new ones
+        # but the table was already executed by ALL_TABLES at startup, so this is a no-op
+        # for new databases. For old ones it was missed — need separate CREATE.
+        await db.execute(CREATE_INVESTIGATIONS)
+        logger.info("Created investigations table.")
+        await db.commit()
 
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_disabled ON nodes(disabled)")

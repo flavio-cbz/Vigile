@@ -12,6 +12,7 @@ Tables:
   - action_proposals    : Human-in-the-Loop action lifecycle
   - automation_rules    : Trigger→Condition→Action automation rules
   - automation_logs     : Execution history for automation rules
+  - alerts              : Engine-evaluated alert lifecycle (firing → resolved)
 """
 
 # ---------------------------------------------------------------------------
@@ -165,6 +166,43 @@ CREATE TABLE IF NOT EXISTS metrics_snapshots (
     uptime_seconds   REAL NOT NULL DEFAULT 0,
     processes        INTEGER,
 
+    -- Network I/O
+    net_bytes_recv      INTEGER,
+    net_bytes_sent      INTEGER,
+    net_packets_recv    INTEGER,
+    net_packets_sent    INTEGER,
+    net_errors_in       INTEGER,
+    net_errors_out      INTEGER,
+    net_drops_in        INTEGER,
+    net_drops_out       INTEGER,
+
+    -- Disk I/O
+    disk_reads          INTEGER,
+    disk_writes         INTEGER,
+    disk_read_bytes     INTEGER,
+    disk_write_bytes    INTEGER,
+
+    -- Temperature
+    temp_celsius        REAL,
+
+    -- PSI
+    psi_cpu_avg10       REAL,
+    psi_mem_avg10       REAL,
+    psi_io_avg10        REAL,
+
+    -- File handles
+    file_handles_used   INTEGER,
+    file_handles_max    INTEGER,
+
+    -- Entropy
+    entropy_avail       INTEGER,
+
+    -- Context switches
+    context_switches    INTEGER,
+
+    -- CPU throttling
+    cpu_throttled_count INTEGER,
+
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 )
 """
@@ -253,6 +291,8 @@ CREATE TABLE IF NOT EXISTS automation_rules (
     target_node_id       TEXT,                      -- Scope: specific node (NULL = all nodes)
     target_group         TEXT,                      -- Scope: node group (NULL = all groups)
     cooldown_seconds     INTEGER NOT NULL DEFAULT 300, -- Anti-spam: min seconds between triggers
+    trust_level          TEXT NOT NULL DEFAULT 'auto' -- auto | always_approve | manual
+                        CHECK(trust_level IN ('auto','always_approve','manual')),
     created_by           TEXT NOT NULL,             -- user_id of the creator
     created_at           REAL NOT NULL,
     updated_at           REAL NOT NULL,
@@ -275,6 +315,50 @@ CREATE TABLE IF NOT EXISTS automation_logs (
     result_json      TEXT NOT NULL DEFAULT '{}',  -- Results of each action execution
     FOREIGN KEY (rule_id) REFERENCES automation_rules(id) ON DELETE CASCADE,
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE SET NULL
+)
+"""
+
+# ---------------------------------------------------------------------------
+# alerts  (Engine-evaluated alert lifecycle — firing → resolved)
+# ---------------------------------------------------------------------------
+CREATE_ALERTS = """
+CREATE TABLE IF NOT EXISTS alerts (
+    id            TEXT PRIMARY KEY,           -- UUID
+    node_id       TEXT NOT NULL,              -- FK → nodes.id
+    alert_name    TEXT NOT NULL,              -- ex: "disk_usage_high", "node_state_lost"
+    severity      TEXT NOT NULL DEFAULT 'warning',  -- info | warning | critical
+    status        TEXT NOT NULL DEFAULT 'firing'
+                  CHECK(status IN ('firing', 'resolved')),
+    message       TEXT NOT NULL DEFAULT '',
+    metric_value  REAL,                      -- Valeur au moment du déclenchement
+    threshold     REAL,                      -- Seuil qui a déclenché
+    details_json  TEXT NOT NULL DEFAULT '{}', -- Contexte additionnel (JSON)
+    created_at    REAL NOT NULL,             -- Premier déclenchement
+    resolved_at   REAL,                      -- Timestamp de résolution
+    updated_at    REAL NOT NULL,             -- Dernière mise à jour
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+# ---------------------------------------------------------------------------
+# investigations  (Alert-triggered diagnosis records — Sprint 9)
+# ---------------------------------------------------------------------------
+CREATE_INVESTIGATIONS = """
+CREATE TABLE IF NOT EXISTS investigations (
+    id                TEXT PRIMARY KEY,           -- UUID
+    alert_id          TEXT,                       -- FK → alerts.id (nullable for manual)
+    node_id           TEXT NOT NULL,              -- FK → nodes.id
+    alert_name        TEXT NOT NULL,              -- ex: "disk_usage_high"
+    severity          TEXT NOT NULL DEFAULT 'warning',
+    status            TEXT NOT NULL DEFAULT 'queued'
+                      CHECK(status IN ('queued', 'in_progress', 'completed', 'failed')),
+    context_json      TEXT NOT NULL DEFAULT '{}', -- Snapshot context at time of fire
+    result            TEXT,                       -- Phase 3 LLM diagnostic result (JSON)
+    created_at        REAL NOT NULL,
+    completed_at      REAL,
+    updated_at        REAL NOT NULL,
+    FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE SET NULL,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 )
 """
 
@@ -304,6 +388,13 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules(trigger_type)",
     "CREATE INDEX IF NOT EXISTS idx_automation_logs_rule ON automation_logs(rule_id, triggered_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_automation_logs_node ON automation_logs(node_id)",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_node_status ON alerts(node_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_name_status ON alerts(alert_name, node_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity, status)",
+    "CREATE INDEX IF NOT EXISTS idx_investigations_node ON investigations(node_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)",
+    "CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations(alert_id)",
 ]
 
 # All CREATE statements in dependency order
@@ -321,4 +412,6 @@ ALL_TABLES = [
     CREATE_PLUGINS,
     CREATE_AUTOMATION_RULES,
     CREATE_AUTOMATION_LOGS,
+    CREATE_ALERTS,
+    CREATE_INVESTIGATIONS,
 ]
