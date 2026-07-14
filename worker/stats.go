@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -73,24 +74,59 @@ type ProcessInfo struct {
 
 // MetricsSnapshot contains the system metrics collected from /proc.
 type MetricsSnapshot struct {
-	CPUPercent    float64       `json:"cpu_percent"`
-	CPULoad1m     float64       `json:"cpu_load_1m,omitempty"`
-	CPULoad5m     float64     `json:"cpu_load_5m,omitempty"`
-	CPULoad15m    float64     `json:"cpu_load_15m,omitempty"`
-	CPUCores      int         `json:"cpu_cores,omitempty"`
-	MemTotalBytes int64       `json:"mem_total_bytes"`
-	MemUsedBytes  int64       `json:"mem_used_bytes"`
-	MemPercent    float64     `json:"mem_percent"`
-	SwapTotal     int64       `json:"swap_total_bytes"`
-	SwapUsed      int64       `json:"swap_used_bytes"`
-	DiskTotal     int64       `json:"disk_total_bytes"`
-	DiskUsed      int64       `json:"disk_used_bytes"`
-	DiskPercent   float64     `json:"disk_percent"`
-	Disks         []DiskMount `json:"disks,omitempty"`
-	UptimeSeconds float64     `json:"uptime_seconds"`
+	// CPU
+	CPUPercent    float64 `json:"cpu_percent"`
+	CPULoad1m     float64 `json:"cpu_load_1m,omitempty"`
+	CPULoad5m     float64 `json:"cpu_load_5m,omitempty"`
+	CPULoad15m    float64 `json:"cpu_load_15m,omitempty"`
+	CPUCores      int     `json:"cpu_cores,omitempty"`
+	// Memory
+	MemTotalBytes int64   `json:"mem_total_bytes"`
+	MemUsedBytes  int64   `json:"mem_used_bytes"`
+	MemPercent    float64 `json:"mem_percent"`
+	// Swap
+	SwapTotal int64 `json:"swap_total_bytes"`
+	SwapUsed  int64 `json:"swap_used_bytes"`
+	// Disk (root partition)
+	DiskTotal   int64       `json:"disk_total_bytes"`
+	DiskUsed    int64       `json:"disk_used_bytes"`
+	DiskPercent float64     `json:"disk_percent"`
+	Disks       []DiskMount `json:"disks,omitempty"`
+	// System
+	UptimeSeconds float64       `json:"uptime_seconds"`
 	Processes     int           `json:"processes,omitempty"`
 	TopProcesses  []ProcessInfo `json:"top_processes,omitempty"`
-	CollectedAt   float64       `json:"collected_at"`
+	// Network I/O (cumulative since boot, aggregate across non-loopback interfaces)
+	NetBytesRecv  int64 `json:"net_bytes_recv,omitempty"`
+	NetBytesSent  int64 `json:"net_bytes_sent,omitempty"`
+	NetPktRecv    int64 `json:"net_packets_recv,omitempty"`
+	NetPktSent    int64 `json:"net_packets_sent,omitempty"`
+	NetErrIn      int64 `json:"net_errors_in,omitempty"`
+	NetErrOut     int64 `json:"net_errors_out,omitempty"`
+	NetDropIn     int64 `json:"net_drops_in,omitempty"`
+	NetDropOut    int64 `json:"net_drops_out,omitempty"`
+	// Disk I/O (cumulative since boot, aggregate across physical devices)
+	DiskReads      int64 `json:"disk_reads,omitempty"`
+	DiskWrites     int64 `json:"disk_writes,omitempty"`
+	DiskReadBytes  int64 `json:"disk_read_bytes,omitempty"`
+	DiskWriteBytes int64 `json:"disk_write_bytes,omitempty"`
+	// Temperature (max across thermal zones, in Celsius)
+	TempCelsius float64 `json:"temp_celsius,omitempty"`
+	// PSI — Pressure Stall Information (avg10)
+	PSICPUAvg10 float64 `json:"psi_cpu_avg10,omitempty"`
+	PSIMemAvg10 float64 `json:"psi_mem_avg10,omitempty"`
+	PSIOAvg10   float64 `json:"psi_io_avg10,omitempty"`
+	// File handles / inodes
+	FileHandlesUsed int64 `json:"file_handles_used,omitempty"`
+	FileHandlesMax  int64 `json:"file_handles_max,omitempty"`
+	// Entropy available
+	EntropyAvail int64 `json:"entropy_avail,omitempty"`
+	// Context switches since boot
+	ContextSwitches int64 `json:"context_switches,omitempty"`
+	// CPU throttling (aggregate core throttle count)
+	CPUThrottledCount int64 `json:"cpu_throttled_count,omitempty"`
+	// Timestamp
+	CollectedAt float64 `json:"collected_at"`
 }
 
 // collectMetrics gathers all system metrics from /proc (Linux) or sysctl/ps (macOS).
@@ -100,25 +136,50 @@ func collectMetrics(ctx context.Context) MetricsSnapshot {
 		return collectDarwinMetrics(ctx, now)
 	}
 	diskTotal, diskUsed, diskPercent, disks := getDiskMetrics()
+	netBR, netBS, netPR, netPS, netEI, netEO, netDI, netDO := getNetworkStats()
+	diskR, diskW, diskRB, diskWB := getDiskIO()
+	psiCPU, psiMem, psiIO := getPSI()
+	fhUsed, fhMax := getFileHandles()
 	return MetricsSnapshot{
-		CPUPercent:    getCPUPercent(),
-		CPULoad1m:     getLoadAvg(0),
-		CPULoad5m:     getLoadAvg(1),
-		CPULoad15m:    getLoadAvg(2),
-		CPUCores:      getCPUCores(),
-		MemTotalBytes: getMemField("MemTotal"),
-		MemUsedBytes:  getMemUsed(),
-		MemPercent:    getMemPercent(),
-		SwapTotal:     getMemField("SwapTotal"),
-		SwapUsed:      getSwapUsed(),
-		DiskTotal:     diskTotal,
-		DiskUsed:      diskUsed,
-		DiskPercent:   diskPercent,
-		Disks:         disks,
-		UptimeSeconds: getUptime(),
-		Processes:     getProcessCount(),
-		TopProcesses:  getTopProcesses(10),
-		CollectedAt:   now,
+		CPUPercent:       getCPUPercent(),
+		CPULoad1m:        getLoadAvg(0),
+		CPULoad5m:        getLoadAvg(1),
+		CPULoad15m:       getLoadAvg(2),
+		CPUCores:         getCPUCores(),
+		MemTotalBytes:    getMemField("MemTotal"),
+		MemUsedBytes:     getMemUsed(),
+		MemPercent:       getMemPercent(),
+		SwapTotal:        getMemField("SwapTotal"),
+		SwapUsed:         getSwapUsed(),
+		DiskTotal:        diskTotal,
+		DiskUsed:         diskUsed,
+		DiskPercent:      diskPercent,
+		Disks:            disks,
+		UptimeSeconds:    getUptime(),
+		Processes:        getProcessCount(),
+		TopProcesses:     getTopProcesses(10),
+		NetBytesRecv:     netBR,
+		NetBytesSent:     netBS,
+		NetPktRecv:       netPR,
+		NetPktSent:       netPS,
+		NetErrIn:         netEI,
+		NetErrOut:        netEO,
+		NetDropIn:        netDI,
+		NetDropOut:       netDO,
+		DiskReads:        diskR,
+		DiskWrites:       diskW,
+		DiskReadBytes:    diskRB,
+		DiskWriteBytes:   diskWB,
+		TempCelsius:      getTemperature(),
+		PSICPUAvg10:      psiCPU,
+		PSIMemAvg10:      psiMem,
+		PSIOAvg10:        psiIO,
+		FileHandlesUsed:  fhUsed,
+		FileHandlesMax:   fhMax,
+		EntropyAvail:     getEntropy(),
+		ContextSwitches:  getContextSwitches(),
+		CPUThrottledCount: getCPUThrottling(),
+		CollectedAt:      now,
 	}
 }
 
@@ -444,6 +505,253 @@ func isNumeric(s string) bool {
 	return len(s) > 0
 }
 
+// ── Network I/O ────────────────────────────────────────────────────
+
+func getNetworkStats() (bytesRecv, bytesSent, pktsRecv, pktsSent, errIn, errOut, dropIn, dropOut int64) {
+	data, err := os.ReadFile(procPrefix + "/proc/net/dev")
+	if err != nil {
+		return 0, 0, 0, 0, 0, 0, 0, 0
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		// Skip headers and loopback
+		if !strings.Contains(line, ":") || strings.HasPrefix(line, " ") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		iface := strings.TrimSpace(parts[0])
+		if iface == "lo" {
+			continue
+		}
+		fields := strings.Fields(parts[1])
+		if len(fields) < 16 {
+			continue
+		}
+		// RX: bytes(0), packets(1), errs(2), drop(3)
+		// TX: bytes(8), packets(9), errs(10), drop(11)
+		bytesRecv += parseInt64(fields[0])
+		pktsRecv += parseInt64(fields[1])
+		errIn += parseInt64(fields[2])
+		dropIn += parseInt64(fields[3])
+		bytesSent += parseInt64(fields[8])
+		pktsSent += parseInt64(fields[9])
+		errOut += parseInt64(fields[10])
+		dropOut += parseInt64(fields[11])
+	}
+	return
+}
+
+func parseInt64(s string) int64 {
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
+}
+
+// ── Disk I/O ────────────────────────────────────────────────────────
+
+func getDiskIO() (reads, writes, readBytes, writeBytes int64) {
+	data, err := os.ReadFile(procPrefix + "/proc/diskstats")
+	if err != nil {
+		return 0, 0, 0, 0
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 14 {
+			continue
+		}
+		devName := fields[2]
+		// Only aggregate physical devices (sd*, nvme*, vd*, xvd*, mmcblk*)
+		if !isPhysicalDisk(devName) {
+			continue
+		}
+		// fields[3] = reads completed, fields[4] = reads merged,
+		// fields[5] = sectors read, fields[6] = time reading
+		// fields[7] = writes completed, fields[8] = writes merged,
+		// fields[9] = sectors written, fields[10] = time writing
+		reads += parseInt64(fields[3])
+		writes += parseInt64(fields[7])
+		readBytes += parseInt64(fields[5]) * 512 // sectors to bytes
+		writeBytes += parseInt64(fields[9]) * 512
+	}
+	return
+}
+
+// isPhysicalDisk returns true if the device name looks like a physical disk
+// (whole device, not a partition). Partition device names end with a digit
+// (e.g. sda1, nvme0n1p1) while whole devices don't (e.g. sda, nvme0n1).
+func isPhysicalDisk(name string) bool {
+	// Must start with one of these prefixes
+	prefixOk := false
+	for _, prefix := range []string{"sd", "nvme", "vd", "xvd", "mmcblk"} {
+		if strings.HasPrefix(name, prefix) {
+			prefixOk = true
+			break
+		}
+	}
+	if !prefixOk {
+		return false
+	}
+	// Whole devices: last char is a letter OR the name ends with just "nX" (nvme)
+	last := name[len(name)-1]
+	if last >= 'a' && last <= 'z' {
+		return true // sda, sdb, vda, etc.
+	}
+	// Handle nvme0n1 (ends with digit but is a whole device — nvme0n1, nvme1n2)
+	if strings.HasPrefix(name, "nvme") {
+		// nvme whole device pattern: nvme<num>n<num> (ends with digit)
+		// partition would be nvme<num>n<num>p<num>
+		// So if there's no 'p' before the last digit, it's a whole device
+		lastP := strings.LastIndex(name, "p")
+		if lastP > 0 {
+			// Check if the 'p' is after "nvme" and before the end
+			if lastP > len("nvme0") && lastP < len(name)-1 {
+				return false // partition like nvme0n1p1
+			}
+		}
+		return true
+	}
+	// mmcblk whole device: mmcblk0, mmcblk1 (partition: mmcblk0p1)
+	if strings.HasPrefix(name, "mmcblk") {
+		if strings.Contains(name, "p") {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// ── Temperature ─────────────────────────────────────────────────────
+
+func getTemperature() float64 {
+	pattern := procPrefix + "/sys/class/thermal/thermal_zone*/temp"
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		// Try without procPrefix for sysfs (sysfs is never under /proc)
+		matches2, err2 := filepath.Glob("/sys/class/thermal/thermal_zone*/temp")
+		if err2 != nil || len(matches2) == 0 {
+			return 0
+		}
+		matches = matches2
+	}
+	var maxTemp float64
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+		if err != nil {
+			continue
+		}
+		celsius := v / 1000.0 // millicelsius → celsius
+		if celsius > maxTemp {
+			maxTemp = celsius
+		}
+	}
+	return maxTemp
+}
+
+// ── PSI (Pressure Stall Information) ────────────────────────────────
+
+func getPSI() (cpuAvg10, memAvg10, ioAvg10 float64) {
+	cpuAvg10 = readPSIFile(procPrefix + "/proc/pressure/cpu")
+	memAvg10 = readPSIFile(procPrefix + "/proc/pressure/memory")
+	ioAvg10 = readPSIFile(procPrefix + "/proc/pressure/io")
+	return
+}
+
+func readPSIFile(path string) float64 {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	// Format: "some avg10=0.00 avg60=0.00 avg300=0.00 total=0"
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "some ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		for _, f := range fields {
+			if strings.HasPrefix(f, "avg10=") {
+				v, err := strconv.ParseFloat(f[6:], 64)
+				if err != nil {
+					return 0
+				}
+				return v
+			}
+		}
+	}
+	return 0
+}
+
+// ── File Handles / Entropy / Context Switches / CPU Throttling ──────
+
+func getFileHandles() (used, max int64) {
+	data, err := os.ReadFile(procPrefix + "/proc/sys/fs/file-nr")
+	if err != nil {
+		return 0, 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) >= 3 {
+		used = parseInt64(fields[0])
+		max = parseInt64(fields[2])
+	}
+	return
+}
+
+func getEntropy() int64 {
+	data, err := os.ReadFile(procPrefix + "/proc/sys/kernel/random/entropy_avail")
+	if err != nil {
+		return 0
+	}
+	v, _ := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	return v
+}
+
+func getContextSwitches() int64 {
+	data, err := os.ReadFile(procPrefix + "/proc/stat")
+	if err != nil {
+		return 0
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "ctxt ") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				return parseInt64(fields[1])
+			}
+		}
+	}
+	return 0
+}
+
+func getCPUThrottling() int64 {
+	pattern := "/sys/devices/system/cpu/cpu*/thermal_throttle/core_throttle_count"
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return 0
+	}
+	var total int64
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+		if err != nil {
+			continue
+		}
+		total += v
+	}
+	return total
+}
+
 // ── Per-process CPU & Memory (Linux via /proc) ──────────────────────
 
 func parseProcStat(data []byte) (name, state string, utime, stime, starttime uint64, rssPages int64) {
@@ -537,26 +845,47 @@ func handleGetStats(ctx context.Context, intent Intent) IntentResult {
 func buildStatusReport(ctx context.Context) map[string]interface{} {
 	m := collectMetrics(ctx)
 	return map[string]interface{}{
-		"type":             "STATUS_REPORT",
-		"version":          Version,
-		"cpu_percent":      m.CPUPercent,
-		"cpu_load_1m":      m.CPULoad1m,
-		"cpu_load_5m":      m.CPULoad5m,
-		"cpu_load_15m":     m.CPULoad15m,
-		"cpu_cores":        m.CPUCores,
-		"mem_total_bytes":  m.MemTotalBytes,
-		"mem_used_bytes":   m.MemUsedBytes,
-		"mem_percent":      m.MemPercent,
-		"swap_total_bytes": m.SwapTotal,
-		"swap_used_bytes":  m.SwapUsed,
-		"disk_total_bytes": m.DiskTotal,
-		"disk_used_bytes":  m.DiskUsed,
-		"disk_percent":     m.DiskPercent,
-		"disks":            m.Disks,
-		"uptime_seconds":   m.UptimeSeconds,
-		"processes":        m.Processes,
-		"top_processes":    m.TopProcesses,
-		"collected_at":     m.CollectedAt,
+		"type":                "STATUS_REPORT",
+		"version":             Version,
+		"cpu_percent":         m.CPUPercent,
+		"cpu_load_1m":         m.CPULoad1m,
+		"cpu_load_5m":         m.CPULoad5m,
+		"cpu_load_15m":        m.CPULoad15m,
+		"cpu_cores":           m.CPUCores,
+		"mem_total_bytes":     m.MemTotalBytes,
+		"mem_used_bytes":      m.MemUsedBytes,
+		"mem_percent":         m.MemPercent,
+		"swap_total_bytes":    m.SwapTotal,
+		"swap_used_bytes":     m.SwapUsed,
+		"disk_total_bytes":    m.DiskTotal,
+		"disk_used_bytes":     m.DiskUsed,
+		"disk_percent":        m.DiskPercent,
+		"disks":               m.Disks,
+		"uptime_seconds":      m.UptimeSeconds,
+		"processes":           m.Processes,
+		"top_processes":       m.TopProcesses,
+		"net_bytes_recv":      m.NetBytesRecv,
+		"net_bytes_sent":      m.NetBytesSent,
+		"net_packets_recv":    m.NetPktRecv,
+		"net_packets_sent":    m.NetPktSent,
+		"net_errors_in":       m.NetErrIn,
+		"net_errors_out":      m.NetErrOut,
+		"net_drops_in":        m.NetDropIn,
+		"net_drops_out":       m.NetDropOut,
+		"disk_reads":          m.DiskReads,
+		"disk_writes":         m.DiskWrites,
+		"disk_read_bytes":     m.DiskReadBytes,
+		"disk_write_bytes":    m.DiskWriteBytes,
+		"temp_celsius":        m.TempCelsius,
+		"psi_cpu_avg10":       m.PSICPUAvg10,
+		"psi_mem_avg10":       m.PSIMemAvg10,
+		"psi_io_avg10":        m.PSIOAvg10,
+		"file_handles_used":   m.FileHandlesUsed,
+		"file_handles_max":    m.FileHandlesMax,
+		"entropy_avail":       m.EntropyAvail,
+		"context_switches":    m.ContextSwitches,
+		"cpu_throttled_count": m.CPUThrottledCount,
+		"collected_at":        m.CollectedAt,
 	}
 }
 
