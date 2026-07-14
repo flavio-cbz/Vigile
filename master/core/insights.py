@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager
 from master.core.structured_llm import StructuredLLM
+from master.core.plugin_manager import PluginManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class HeavyProcessConfig(BaseModel):
     cpu_threshold_percent: float = Field(
         description="CPU percentage threshold above which this is considered active"
     )
-    label: str = Field(description="Human-friendly label (e.g. 'Transcodage Plex')")
+    label: str = Field(description="Human-friendly label")
 
 
 class ServiceCategory(str, enum.Enum):
@@ -48,6 +49,14 @@ class ServiceCategory(str, enum.Enum):
     SYSTEM = "system"
     MONITORING = "monitoring"
     OTHER = "other"
+
+
+class PluginPattern(BaseModel):
+    container_pattern: str | None = Field(default=None, description="Regex pattern for container name/image")
+    service_pattern: str | None = Field(default=None, description="Regex pattern for systemd service name")
+    category: ServiceCategory
+    label: str
+    cpu_threshold_percent: float
 
 
 class ClassifiedService(BaseModel):
@@ -64,53 +73,13 @@ class NodeServiceClassification(BaseModel):
     baseline_ram_percent: float
 
 
-_CONTAINER_PATTERNS: list[tuple[str, ServiceCategory, str, float]] = [
-    (r"plex|jellyfin|emby", ServiceCategory.MEDIA, "Transcodage Multimédia (Plex/Jellyfin)", 50.0),
-    (r"postgres(ql)?|pg-\w+", ServiceCategory.DATABASE, "Requêtes Base de Données (PostgreSQL)", 40.0),
-    (r"mysql|mariadb", ServiceCategory.DATABASE, "Requêtes Base de Données (MySQL)", 40.0),
-    (r"litellm|ollama|vllm|openai|localai|text-generation-inference|tgi", ServiceCategory.LLM, "Passerelle API LLM (IA Générative)", 40.0),
-    (r"nginx|traefik|haproxy|caddy", ServiceCategory.REVERSE_PROXY, "Trafic Web (Reverse Proxy)", 30.0),
-    (r"(runner|gitlab|jenkins|drone|woodpecker)", ServiceCategory.CI_CD, "Compilation / Pipeline CI-CD", 60.0),
-    (r"(prometheus|grafana|netdata|node-exporter|telegraf|influxdb|victoria-metrics)", ServiceCategory.MONITORING, "Monitoring / Métriques", 20.0),
-]
-
-_SERVICE_PATTERNS: list[tuple[str, ServiceCategory, str, float]] = [
-    (r"plex", ServiceCategory.MEDIA, "Transcodage Plex Media Server", 50.0),
-    (r"postgresql|mysql|mariadb", ServiceCategory.DATABASE, "Activité Base de Données", 45.0),
-    (r"nginx|apache2?|httpd", ServiceCategory.REVERSE_PROXY, "Pic de Trafic Web", 35.0),
-    (r"fail2ban", ServiceCategory.SYSTEM, "Analyse d'intrusions Fail2ban", 20.0),
-]
-
-_IMAGE_PATTERNS: list[tuple[str, ServiceCategory, str, float]] = [
-    (r"litellm|ollama|vllm|openai|localai|tgi", ServiceCategory.LLM, "Passerelle API LLM (IA Générative)", 40.0),
-    (r"^(nginx|traefik|haproxy|caddy)(:|$)", ServiceCategory.REVERSE_PROXY, "Trafic Web (Reverse Proxy)", 30.0),
-    (r"postgres|mysql|mariadb|redis", ServiceCategory.DATABASE, "Service Base de Données", 40.0),
-]
-
-
-def _match_classification(
-    name: str,
-    patterns: list[tuple[str, ServiceCategory, str, float]],
-) -> tuple[ServiceCategory, str, float] | None:
-    name_lower = name.lower()
-    for pattern, category, label, threshold in patterns:
-        if re.search(pattern, name_lower):
-            return category, label, threshold
-    return None
-
-
 def _guess_context(hostname: str, containers: list[dict[str, Any]]) -> str:
     host_lower = hostname.lower()
-    if "web" in host_lower or "nginx" in host_lower:
+    if "web" in host_lower:
         return "Serveur Web / Applicatif"
-    elif "db" in host_lower or "sql" in host_lower or "postgres" in host_lower:
+    elif "db" in host_lower or "sql" in host_lower:
         return "Serveur de Base de Données"
-    elif (
-        "plex" in host_lower
-        or "media" in host_lower
-        or "nas" in host_lower
-        or any("plex" in c.get("name", "").lower() for c in containers)
-    ):
+    elif "media" in host_lower or "nas" in host_lower:
         return "Homelab Médias & Stockage"
     return "Serveur général"
 
@@ -147,12 +116,13 @@ class DiagnosticReport(BaseModel):
 class InsightsManager:
     """
     Manages node profiling, real-time insights generation, and anomaly diagnostics.
-    Follows Dependency Injection: receives LLMClient inside constructor.
+    Follows Dependency Injection: receives LLMClient and PluginManager inside constructor.
     """
 
-    def __init__(self, llm_client: LLMClient | None = None) -> None:
+    def __init__(self, llm_client: LLMClient | None = None, plugin_manager: PluginManager | None = None) -> None:
         self._llm_client = llm_client
         self._sllm = StructuredLLM(llm_client) if llm_client else None
+        self._plugin_manager = plugin_manager
 
     # -----------------------------------------------------------------------
     # Phase 1: Profile Generation
@@ -196,7 +166,9 @@ class InsightsManager:
                 try:
                     from master.core.plugin_helpers import parse_service_list
 
-                    result = await nm.send_intent(node_id, {"action": "LIST_SERVICES"}, timeout=8.0)
+                    result = await self._auto_profiling_intent(
+                        node_id, "LIST_SERVICES", {}, nm, db, timeout=8.0
+                    )
                     if result.get("success"):
                         parsed = parse_service_list(result.get("output", ""))
                         if parsed:
@@ -208,8 +180,8 @@ class InsightsManager:
                 try:
                     from master.core.plugin_helpers import parse_container_list
 
-                    result = await nm.send_intent(
-                        node_id, {"action": "LIST_CONTAINERS"}, timeout=8.0
+                    result = await self._auto_profiling_intent(
+                        node_id, "LIST_CONTAINERS", {}, nm, db, timeout=8.0
                     )
                     if result.get("success"):
                         parsed = parse_container_list(result.get("output", ""))
@@ -266,36 +238,147 @@ class InsightsManager:
 
         return profile
 
+    async def _auto_profiling_intent(
+        self,
+        node_id: str,
+        action: str,
+        params: dict[str, Any],
+        nm: NodeManager,
+        db: aiosqlite.Connection,
+        timeout: float = 8.0,
+    ) -> dict[str, Any]:
+        """
+        Create, auto-approve, execute, and complete a profiling intent.
+
+        Read-only profiling intents (LIST_SERVICES, LIST_CONTAINERS) are
+        auto-approved by 'system' — no human operator needed — but are still
+        tracked through ActionProposal for audit trail consistency.
+        """
+        from master.core.action_proposal import ActionProposal
+        from master.core.audit import AuditAction, log_action
+
+        proposal = ActionProposal(
+            node_id=node_id,
+            action=action,
+            params=params,
+            reasoning="Profiling intent (auto-approved, read-only).",
+            risk_level="LOW",
+            created_by="insights",
+            status="APPROVED",
+            approved_by="system",
+        )
+
+        data = proposal.to_db_dict()
+        await db.execute(
+            """INSERT INTO action_proposals
+               (id, node_id, action, params_json, reasoning, risk_level,
+                status, created_by, approved_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["id"], data["node_id"], data["action"], data["params_json"],
+                data["reasoning"], data["risk_level"],
+                data["status"], data["created_by"], data["approved_by"],
+                data["created_at"], data["updated_at"],
+            ),
+        )
+        await db.commit()
+
+        try:
+            result = await nm.send_intent(
+                node_id, {"action": action, "params": params}, timeout=timeout
+            )
+            success = result.get("success", False)
+            proposal.complete(success=success, result_data=result)
+        except RuntimeError as exc:
+            proposal.complete(success=False, result_data={"error": str(exc)})
+            result = {"success": False, "error": str(exc)}
+        except TimeoutError:
+            proposal.complete(success=False, result_data={"error": "worker_timeout"})
+            result = {"success": False, "error": "Worker did not respond in time"}
+
+        db_data = proposal.to_db_dict()
+        await db.execute(
+            """UPDATE action_proposals SET
+                status = ?, updated_at = ?, executed_at = ?, result_json = ?
+               WHERE id = ?""",
+            (
+                db_data["status"], db_data["updated_at"],
+                db_data["executed_at"], db_data["result_json"],
+                proposal.id,
+            ),
+        )
+        await db.commit()
+
+        await log_action(
+            db,
+            user_id="system",
+            action=AuditAction.AUTOMATION_TRIGGERED,
+            node_id=node_id,
+            details={
+                "proposal_id": proposal.id,
+                "action": action,
+                "status": proposal.status,
+            },
+        )
+
+        return result
+
+    def _get_plugin_patterns(self) -> list[PluginPattern]:
+        if not self._plugin_manager:
+            return []
+        try:
+            results = self._plugin_manager.call("get_heavy_process_patterns")
+            patterns = []
+            for result in results:
+                if isinstance(result, list):
+                    for item in result:
+                        if isinstance(item, dict):
+                            patterns.append(PluginPattern(**item))
+                        elif isinstance(item, PluginPattern):
+                            patterns.append(item)
+                elif isinstance(result, PluginPattern):
+                    patterns.append(result)
+            return patterns
+        except Exception as e:
+            logger.debug("Failed to collect plugin patterns: %s", e)
+            return []
+
     def _classify_services_fallback(
         self,
         services: list[dict[str, Any]],
         containers: list[dict[str, Any]],
     ) -> list[HeavyProcessConfig]:
         known_heavy: list[HeavyProcessConfig] = []
+        plugin_patterns = self._get_plugin_patterns()
 
         for c in containers:
-            match = _match_classification(c.get("name", ""), _CONTAINER_PATTERNS)
-            if not match:
-                match = _match_classification(c.get("image", ""), _IMAGE_PATTERNS)
-            if match:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        container_name=c.get("name"),
-                        cpu_threshold_percent=match[2],
-                        label=match[1],
-                    )
-                )
+            c_name = c.get("name", "")
+            c_image = c.get("image", "")
+            for pattern in plugin_patterns:
+                if pattern.container_pattern:
+                    if re.search(pattern.container_pattern, c_name.lower()) or re.search(pattern.container_pattern, c_image.lower()):
+                        known_heavy.append(
+                            HeavyProcessConfig(
+                                container_name=c_name,
+                                cpu_threshold_percent=pattern.cpu_threshold_percent,
+                                label=pattern.label,
+                            )
+                        )
+                        break
 
         for s in services:
-            match = _match_classification(s.get("name", ""), _SERVICE_PATTERNS)
-            if match:
-                known_heavy.append(
-                    HeavyProcessConfig(
-                        service_name=s.get("name"),
-                        cpu_threshold_percent=match[2],
-                        label=match[1],
-                    )
-                )
+            s_name = s.get("name", "")
+            for pattern in plugin_patterns:
+                if pattern.service_pattern:
+                    if re.search(pattern.service_pattern, s_name.lower()):
+                        known_heavy.append(
+                            HeavyProcessConfig(
+                                service_name=s_name,
+                                cpu_threshold_percent=pattern.cpu_threshold_percent,
+                                label=pattern.label,
+                            )
+                        )
+                        break
 
         return known_heavy
 
@@ -495,12 +578,12 @@ class InsightsManager:
             insights.append(disk_insight)
 
         # --- B. CPU INSIGHT ---
-        cpu_insight = self._calculate_cpu_insight(latest_snap, profile, node)
+        cpu_insight = self._calculate_cpu_insight(latest_snap, profile, node, locale=locale)
         if cpu_insight:
             insights.append(cpu_insight)
 
         # --- C. RAM INSIGHT ---
-        ram_insight = self._calculate_ram_insight(latest_snap, profile)
+        ram_insight = self._calculate_ram_insight(latest_snap, profile, locale=locale)
         if ram_insight:
             insights.append(ram_insight)
 
@@ -631,6 +714,7 @@ class InsightsManager:
         latest_snap: dict[str, Any],
         profile: NodeProfile,
         node: dict[str, Any],
+        locale: str = "fr",
     ) -> dict[str, Any]:
         """Match current CPU load against node profile rules and active processes."""
         cpu_percent = latest_snap.get("cpu_percent", 0.0)
@@ -671,10 +755,13 @@ class InsightsManager:
 
         culprit = None
         culprit_pct: float | None = None
-        headline = "Serveur au repos"
-        detail = "Activités d'arrière-plan normales"
+        culprit_ram_pct: float | None = None
+        headline = "Stable CPU" if locale == "en" else "CPU stable"
+        detail = "Server calm and stable" if locale == "en" else "Serveur calme et stable"
         icon = "💤"
 
+        # Phase 1: Find all running heavy processes
+        running_heavy: list[HeavyProcessConfig] = []
         for p in profile.known_heavy_processes:
             is_running = False
             if p.container_name and p.container_name in active_containers:
@@ -682,59 +769,116 @@ class InsightsManager:
             elif p.service_name and p.service_name in active_services:
                 is_running = True
 
-            if is_running and cpu_percent >= p.cpu_threshold_percent:
-                if not culprit or p.cpu_threshold_percent > culprit.cpu_threshold_percent:
-                    culprit = p
+            if is_running:
+                running_heavy.append(p)
 
-        if culprit and top_procs:
-            culprit_name = (culprit.container_name or culprit.service_name or "").lower()
-            for tp in top_procs:
-                tp_name = tp.get("name", "").lower()
-                if culprit_name in tp_name or tp_name in culprit_name:
-                    culprit_pct = tp.get("cpu_percent")
-                    break
+        # Phase 2: Match running heavy processes against actual CPU usage from top_processes
+        # Priority: use ACTUAL CPU usage, not threshold value
+        if running_heavy and top_procs:
+            best_actual_cpu = -1.0
+            for p in running_heavy:
+                p_name = (p.container_name or p.service_name or "").lower()
+                for tp in top_procs:
+                    tp_name = tp.get("name", "").lower()
+                    if p_name in tp_name or tp_name in p_name:
+                        tp_cpu = tp.get("cpu_percent", 0.0)
+                        if tp_cpu > best_actual_cpu:
+                            best_actual_cpu = tp_cpu
+                            culprit = p
+                            culprit_pct = tp_cpu
+                            mem_total = latest_snap.get("mem_total_bytes", 0)
+                            if mem_total > 0 and tp.get("mem_rss_kb"):
+                                culprit_ram_pct = (tp["mem_rss_kb"] * 1024) / mem_total * 100
+                            else:
+                                culprit_ram_pct = None
+                        break
+
+        # Phase 3: If no heavy process matched but CPU is high, use the top process directly
+        if not culprit and top_procs and cpu_percent > 40:
+            top = top_procs[0]
+            top_cpu = top.get("cpu_percent", 0.0)
+            if top_cpu > 10:
+                culprit_pct = top_cpu
+                mem_total = latest_snap.get("mem_total_bytes", 0)
+                if mem_total > 0 and top.get("mem_rss_kb"):
+                    culprit_ram_pct = (top["mem_rss_kb"] * 1024) / mem_total * 100
+
+        # Filter out culprit if its resource consumption is negligible (both CPU and RAM < 5.0%)
+        if culprit:
+            cpu_val = culprit_pct if culprit_pct is not None else cpu_percent
+            ram_val = culprit_ram_pct if culprit_ram_pct is not None else 0.0
+            if cpu_val < 5.0 and ram_val < 5.0:
+                culprit = None
 
         if cpu_percent > 75:
             if culprit:
                 severity = "warning"
                 icon = "🔥"
-                headline = f"Activité intense · {culprit.label}"
-                actual = f" ({culprit_pct:.0f}% CPU)" if culprit_pct else ""
-                detail = f"Charge soutenue ({cpu_percent:.0f}%) imputée à {culprit.container_name or culprit.service_name}{actual}"
+                raw_name = culprit.container_name or culprit.service_name or culprit.label or "inconnu"
+                culprit_display_name = raw_name[0].upper() + raw_name[1:] if raw_name else "Inconnu"
+                cpu_val = culprit_pct if culprit_pct is not None else cpu_percent
+                ram_val = culprit_ram_pct if culprit_ram_pct is not None else 0.0
+
+                resource_parts = []
+                if cpu_val >= 5.0:
+                    resource_parts.append(f"{cpu_val:.0f}% CPU" if locale == "en" else f"{cpu_val:.0f}% du processeur")
+                if ram_val >= 5.0:
+                    resource_parts.append(f"{ram_val:.0f}% RAM" if locale == "en" else f"{ram_val:.0f}% de la RAM")
+                
+                resource_str = (" and " if locale == "en" else " et ").join(resource_parts)
+                headline = f"Intense activity · {culprit_display_name}" if locale == "en" else f"Activité intense · {culprit_display_name}"
+                if resource_str:
+                    detail = f"Service '{raw_name}' uses {resource_str}." if locale == "en" else f"Le service '{raw_name}' utilise {resource_str}."
+                else:
+                    detail = f"Service '{raw_name}' is active." if locale == "en" else f"Le service '{raw_name}' est actif."
             elif top_procs and top_procs[0].get("cpu_percent", 0) > 10:
                 severity = "warning"
                 icon = "⚠️"
                 top = top_procs[0]
-                headline = f"Charge élevée anormale"
-                detail = f"Processus {top['name']} actif ({top['cpu_percent']:.0f}%)"
+                headline = "Unusually high load" if locale == "en" else "Charge élevée anormale"
+                detail = f"Active process {top['name']} ({top['cpu_percent']:.0f}%)" if locale == "en" else f"Processus {top['name']} actif ({top['cpu_percent']:.0f}%)"
             else:
                 severity = "warning"
                 icon = "⚠️"
-                headline = "Charge élevée anormale"
-                detail = "Aucun processus lourd connu n'est actif sur le système."
+                headline = "Unusually high load" if locale == "en" else "Charge élevée anormale"
+                detail = "No known heavy process is active." if locale == "en" else "Aucun processus lourd connu n'est actif sur le système."
         elif cpu_percent > 40:
             if culprit:
                 severity = "info"
                 icon = "⚡"
-                headline = f"Charge modérée · {culprit.label}"
-                actual = f" ({culprit_pct:.0f}%)" if culprit_pct else ""
-                detail = f"Processus {culprit.container_name or culprit.service_name} actif ({cpu_percent:.0f}%){actual}"
+                raw_name = culprit.container_name or culprit.service_name or culprit.label or "inconnu"
+                culprit_display_name = raw_name[0].upper() + raw_name[1:] if raw_name else "Inconnu"
+                cpu_val = culprit_pct if culprit_pct is not None else cpu_percent
+                ram_val = culprit_ram_pct if culprit_ram_pct is not None else 0.0
+
+                resource_parts = []
+                if cpu_val >= 5.0:
+                    resource_parts.append(f"{cpu_val:.0f}% CPU" if locale == "en" else f"{cpu_val:.0f}% du processeur")
+                if ram_val >= 5.0:
+                    resource_parts.append(f"{ram_val:.0f}% RAM" if locale == "en" else f"{ram_val:.0f}% de la RAM")
+                
+                resource_str = (" and " if locale == "en" else " et ").join(resource_parts)
+                headline = f"Moderate load · {culprit_display_name}" if locale == "en" else f"Charge modérée · {culprit_display_name}"
+                if resource_str:
+                    detail = f"Service '{raw_name}' uses {resource_str}." if locale == "en" else f"Le service '{raw_name}' utilise {resource_str}."
+                else:
+                    detail = f"Service '{raw_name}' is active." if locale == "en" else f"Le service '{raw_name}' est actif."
             elif top_procs and top_procs[0].get("cpu_percent", 0) > 5:
                 severity = "info"
                 icon = "🏃"
                 top = top_procs[0]
-                headline = f"Activité modérée"
-                detail = f"Processus {top['name']} actif ({top['cpu_percent']:.0f}%)"
+                headline = "Moderate activity" if locale == "en" else "Activité modérée"
+                detail = f"Active process {top['name']} ({top['cpu_percent']:.0f}%)" if locale == "en" else f"Processus {top['name']} actif ({top['cpu_percent']:.0f}%)"
             else:
                 severity = "info"
                 icon = "🏃"
-                headline = "Activité modérée"
-                detail = f"Charge générale du serveur à {cpu_percent:.0f}%"
+                headline = "Moderate activity" if locale == "en" else "Activité modérée"
+                detail = f"General server load at {cpu_percent:.0f}%" if locale == "en" else f"Charge générale du serveur à {cpu_percent:.0f}%"
         else:
             severity = "ok"
             icon = "✅"
-            headline = "CPU stable"
-            detail = "Serveur calme et stable"
+            headline = "Stable CPU" if locale == "en" else "CPU stable"
+            detail = "Server calm and stable" if locale == "en" else "Serveur calme et stable"
 
         return {
             "type": "cpu",
@@ -751,7 +895,10 @@ class InsightsManager:
         }
 
     def _calculate_ram_insight(
-        self, latest_snap: dict[str, Any], profile: NodeProfile
+        self,
+        latest_snap: dict[str, Any],
+        profile: NodeProfile,
+        locale: str = "fr",
     ) -> dict[str, Any]:
         """Assess RAM and swap usage against profile baseline."""
         mem_percent = latest_snap.get("mem_percent", 0.0)
@@ -768,22 +915,25 @@ class InsightsManager:
         if mem_percent > 90:
             severity = "warning"
             icon = "⚠️"
-            headline = "RAM presque saturée"
-            detail = "Risque potentiel de ralentissement (OOM)"
+            headline = "RAM nearly full" if locale == "en" else "RAM presque saturée"
+            detail = "Potential slow down risk (OOM)" if locale == "en" else "Risque potentiel de ralentissement (OOM)"
         elif mem_percent > baseline:
             severity = "info"
             icon = "🐏"
-            headline = "RAM active"
-            detail = f"Utilisation supérieure à la ligne de base habituelle ({baseline:.0f}%)"
+            headline = "Active RAM" if locale == "en" else "RAM active"
+            detail = (
+                f"Usage higher than the usual baseline ({baseline:.0f}%)"
+                if locale == "en"
+                else f"Utilisation supérieure à la ligne de base habituelle ({baseline:.0f}%)"
+            )
         else:
             severity = "ok"
             icon = "✅"
-            headline = "Mémoire stable"
-            detail = (
-                "Aucune pression d'échange (swap)"
-                if swap_mb < 50
-                else f"Swap utilisé : {swap_mb:.0f} Mo"
-            )
+            headline = "Stable memory" if locale == "en" else "Mémoire stable"
+            if swap_mb < 50:
+                detail = "No swap pressure" if locale == "en" else "Aucune pression d'échange (swap)"
+            else:
+                detail = f"Swap used: {swap_mb:.0f} MB" if locale == "en" else f"Swap utilisé : {swap_mb:.0f} Mo"
 
         return {
             "type": "ram",
@@ -839,6 +989,39 @@ class InsightsManager:
 
         snap_str = json.dumps(latest_snap) if latest_snap else "Metrics unavailable"
 
+        # Fetch recent audit log entries for this node (last 6 hours)
+        recent_audit = []
+        try:
+            async with db.execute(
+                """SELECT action, details_json, created_at
+                   FROM audit_log WHERE node_id = ? AND created_at > ?
+                   ORDER BY created_at DESC LIMIT 10""",
+                (node_id, time.time() - 21600),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                recent_audit = [dict(r) for r in rows]
+        except Exception:
+            pass
+        audit_str = json.dumps(recent_audit, indent=2) if recent_audit else "No recent audit events"
+
+        # Fetch recent automation log entries for this node (last 6 hours)
+        recent_automations = []
+        try:
+            async with db.execute(
+                """SELECT rule_id, status, trigger_data_json, triggered_at
+                   FROM automation_logs WHERE node_id = ? AND triggered_at > ?
+                   ORDER BY triggered_at DESC LIMIT 10""",
+                (node_id, time.time() - 21600),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                recent_automations = [dict(r) for r in rows]
+        except Exception:
+            pass
+        auto_str = (
+            json.dumps(recent_automations, indent=2)
+            if recent_automations else "No recent automation events"
+        )
+
         lang_instruction = (
             "You must write the explanation, headline, and suggested_action in English."
             if locale == "en"
@@ -851,8 +1034,12 @@ class InsightsManager:
                     f"Analyze this server anomaly for node '{node.get('name')}':\n"
                     f"- Active Services: {cached_services}\n"
                     f"- Active Containers: {cached_containers}\n"
-                    f"- Current Metrics: {snap_str}\n\n"
+                    f"- Current Metrics: {snap_str}\n"
+                    f"- Recent Audit Events (last 6h): {audit_str}\n"
+                    f"- Recent Automation Events (last 6h): {auto_str}\n\n"
                     f"Diagnose what is causing the anomaly and suggest remediation actions. "
+                    f"When evaluating the situation, consider recent audit/automation events "
+                    f"that may have triggered state changes. "
                     f"{lang_instruction}"
                 ),
             }

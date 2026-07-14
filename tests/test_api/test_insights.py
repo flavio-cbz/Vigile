@@ -178,3 +178,66 @@ async def test_analyze_anomaly_real(client: AsyncClient, db, auth_headers):
     assert "headline" in data
     assert "explanation" in data
     assert "suggested_action" in data
+
+
+@pytest.mark.asyncio
+async def test_cpu_insights_resource_filtering_and_locale(client: AsyncClient, db, auth_headers):
+    node_id = "test-node-filtering"
+    now = time.time()
+    # Insert node with Plex as a known heavy process
+    await db.execute(
+        """
+        INSERT INTO nodes (id, name, hostname, state, insight_profile, insight_profile_generated_at, cached_containers_json, created_at, updated_at)
+        VALUES (?, 'Test Node Filtering', 'test-host-filtering', 'CONNECTED', ?, ?, ?, ?, ?)
+        """,
+        (
+            node_id,
+            '{"node_id": "test-node-filtering", "known_heavy_processes": [{"container_name": "plex", "cpu_threshold_percent": 30.0, "label": "Plex Media Server"}], "baseline_ram_percent": 70.0, "context_label": "Serveur test"}',
+            now,
+            '[{"name": "plex", "state": "running", "status": "up"}]',
+            now,
+            now,
+        ),
+    )
+    # Insert a metrics snapshot where plex is active and has significant CPU (40%) and RAM (50% RSS)
+    # total RAM: 8GB. Plex RAM: 4GB (4194304 KB).
+    await db.execute(
+        """
+        INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds, top_processes_json)
+        VALUES ('snap-filtering-1', ?, ?, ?, 65.0, 8589934592, 4294967296, 50.0, 0, 0, 107374182400, 21474836480, 20.0, 1000, ?)
+        """,
+        (node_id, now, now, '[{"name": "plex", "cpu_percent": 40.0, "mem_rss_kb": 4194304}]'),
+    )
+    await db.commit()
+
+    # Get insights in French
+    response = await client.get(f"/api/nodes/{node_id}/insights?locale=fr", headers=auth_headers("operator"))
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    cpu_insight = next(i for i in data["insights"] if i["type"] == "cpu")
+    assert "Charge modérée · Plex" in cpu_insight["headline"]
+    assert "Le service 'plex' utilise 40% du processeur et 50% de la RAM." in cpu_insight["detail"]
+
+    # Get insights in English
+    response = await client.get(f"/api/nodes/{node_id}/insights?locale=en", headers=auth_headers("operator"))
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    cpu_insight = next(i for i in data["insights"] if i["type"] == "cpu")
+    assert "Moderate load · Plex" in cpu_insight["headline"]
+    assert "Service 'plex' uses 40% CPU and 50% RAM." in cpu_insight["detail"]
+
+    # Now insert a metrics snapshot where Plex has CPU usage but very low RAM (10MB RSS -> ~0.1% RAM)
+    await db.execute(
+        """
+        INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds, top_processes_json)
+        VALUES ('snap-filtering-2', ?, ?, ?, 65.0, 8589934592, 4294967296, 50.0, 0, 0, 107374182400, 21474836480, 20.0, 1000, ?)
+        """,
+        (node_id, now + 10, now + 10, '[{"name": "plex", "cpu_percent": 40.0, "mem_rss_kb": 10240}]'),
+    )
+    await db.commit()
+
+    response = await client.get(f"/api/nodes/{node_id}/insights?locale=fr", headers=auth_headers("operator"))
+    data = response.json()
+    cpu_insight = next(i for i in data["insights"] if i["type"] == "cpu")
+    assert "Le service 'plex' utilise 40% du processeur." in cpu_insight["detail"]  # No RAM mentioned!
+
