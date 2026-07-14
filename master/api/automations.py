@@ -64,6 +64,7 @@ async def _row_to_response(row: dict) -> AutomationRuleResponse:
         target_node_id=row["target_node_id"],
         target_group=row["target_group"],
         cooldown_seconds=row["cooldown_seconds"],
+        trust_level=row["trust_level"],
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -145,8 +146,8 @@ async def create_rule(
         """INSERT INTO automation_rules
            (id, name, description, enabled, trigger_type, trigger_config_json,
             conditions_json, actions_json, target_node_id, target_group,
-            cooldown_seconds, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            cooldown_seconds, trust_level, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             rule_id,
             body.name,
@@ -158,6 +159,7 @@ async def create_rule(
             body.target_node_id,
             body.target_group,
             body.cooldown_seconds,
+            body.trust_level,
             claims["sub"],
             now,
             now,
@@ -233,6 +235,8 @@ async def update_rule(
         updates["target_group"] = body.target_group
     if body.cooldown_seconds is not None:
         updates["cooldown_seconds"] = body.cooldown_seconds
+    if body.trust_level is not None:
+        updates["trust_level"] = body.trust_level
 
     if not updates:
         return await _row_to_response(row)
@@ -246,6 +250,7 @@ async def update_rule(
         "target_node_id",
         "target_group",
         "cooldown_seconds",
+        "trust_level",
         "updated_at",
     }
     for k in updates:

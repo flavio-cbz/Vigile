@@ -130,6 +130,10 @@ class AutomationRuleCreate(BaseModel):
         le=86400,
         description="Minimum seconds between rule executions per node.",
     )
+    trust_level: Literal["auto", "always_approve", "manual"] = Field(
+        default="auto",
+        description="auto: execute immediately (default). always_approve: require operator approval. manual: same as always_approve with higher visibility.",
+    )
 
 
 class AutomationRuleUpdate(BaseModel):
@@ -141,6 +145,7 @@ class AutomationRuleUpdate(BaseModel):
     target_node_id: str | None = None
     target_group: str | None = None
     cooldown_seconds: int | None = Field(default=None, ge=0, le=86400)
+    trust_level: Literal["auto", "always_approve", "manual"] | None = None
 
 
 class AutomationRuleResponse(BaseModel):
@@ -155,6 +160,7 @@ class AutomationRuleResponse(BaseModel):
     target_node_id: str | None
     target_group: str | None
     cooldown_seconds: int
+    trust_level: Literal["auto", "always_approve", "manual"]
     created_by: str
     created_at: float
     updated_at: float

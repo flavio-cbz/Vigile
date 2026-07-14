@@ -33,16 +33,52 @@ logger = logging.getLogger(__name__)
 
 # Supported metric field names for metric_threshold trigger
 METRIC_FIELDS = {
+    # CPU
     "cpu_percent",
     "cpu_load_1m",
     "cpu_load_5m",
     "cpu_load_15m",
+    "cpu_cores",
+    "cpu_throttled_count",
+    # Memory
     "mem_percent",
+    "mem_used_bytes",
+    "mem_total_bytes",
+    # Swap
+    "swap_used_bytes",
+    "swap_total_bytes",
+    # Disk
     "disk_percent",
+    "disk_used_bytes",
+    "disk_total_bytes",
+    "disk_reads",
+    "disk_writes",
+    "disk_read_bytes",
+    "disk_write_bytes",
+    # System
     "uptime_seconds",
     "processes",
-    "mem_used_bytes",
-    "disk_used_bytes",
+    "context_switches",
+    # Network I/O
+    "net_bytes_recv",
+    "net_bytes_sent",
+    "net_packets_recv",
+    "net_packets_sent",
+    "net_errors_in",
+    "net_errors_out",
+    "net_drops_in",
+    "net_drops_out",
+    # Temperature
+    "temp_celsius",
+    # PSI
+    "psi_cpu_avg10",
+    "psi_mem_avg10",
+    "psi_io_avg10",
+    # File handles
+    "file_handles_used",
+    "file_handles_max",
+    # Entropy
+    "entropy_avail",
 }
 
 COMPARISON_OPERATORS = {"gt", "lt", "gte", "lte", "eq"}
@@ -283,11 +319,14 @@ class AutomationEngine:
         )
 
         # --- Execute actions ---
+        trust_level = rule.get("trust_level", "auto")
         results: list[dict] = []
         overall_status = "SUCCESS"
         for action in rule.get("actions", []):
             try:
-                result = await self._execute_action(action, node_id, trigger_data, db)
+                result = await self._execute_action(
+                    action, node_id, trigger_data, db, trust_level=trust_level
+                )
                 results.append({"action": action.get("type"), "result": result, "status": "ok"})
             except Exception as exc:
                 logger.exception("Action %s in rule %s failed.", action.get("type"), rule_id)
@@ -318,12 +357,13 @@ class AutomationEngine:
         )
 
     async def _execute_action(
-        self, action: dict, node_id: str, trigger_data: dict, db: aiosqlite.Connection
+        self, action: dict, node_id: str, trigger_data: dict, db: aiosqlite.Connection,
+        trust_level: str = "auto",
     ) -> dict:
         """Dispatch to the appropriate action executor."""
         atype = action.get("type")
         if atype == "send_intent":
-            return await self._execute_send_intent(action, node_id, db)
+            return await self._execute_send_intent(action, node_id, db, trust_level=trust_level)
         elif atype == "call_webhook":
             return await self._execute_call_webhook(action, node_id, trigger_data)
         elif atype == "log_message":
@@ -332,10 +372,18 @@ class AutomationEngine:
             raise ValueError(f"Unknown action type: {atype!r}")
 
     async def _execute_send_intent(
-        self, action: dict, node_id: str, db: aiosqlite.Connection
+        self, action: dict, node_id: str, db: aiosqlite.Connection,
+        trust_level: str = "auto",
     ) -> dict:
-        """Send a worker intent via node_manager."""
+        """Send a worker intent via node_manager or create a pending proposal.
+
+        Trust levels:
+          - auto: auto-approve the ActionProposal and execute immediately.
+          - always_approve / manual: create a PENDING ActionProposal for operator review.
+        """
         from master.core.node_manager import node_manager
+        from master.core.action_proposal import ActionProposal
+        from master.core.audit import AuditAction, log_action
 
         intent_action = action.get("action")
         params = action.get("params", {})
@@ -346,12 +394,139 @@ class AutomationEngine:
         if not is_connected:
             return {"status": "skipped", "reason": "node_offline"}
 
-        result = await node_manager.send_intent(
-            node_id,
-            {"action": intent_action, "params": params},
-            timeout=15.0,
+        if trust_level in ("always_approve", "manual"):
+            risk = "HIGH" if trust_level == "manual" else "MEDIUM"
+            proposal = ActionProposal(
+                node_id=node_id,
+                action=intent_action,
+                params=params,
+                reasoning=f"Automation rule triggered this action (trust_level={trust_level}).",
+                risk_level=risk,
+                created_by="automation",
+            )
+
+            data = proposal.to_db_dict()
+            await db.execute(
+                """INSERT INTO action_proposals
+                   (id, node_id, action, params_json, reasoning, risk_level,
+                    status, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["id"], data["node_id"], data["action"], data["params_json"],
+                    data["reasoning"], data["risk_level"],
+                    data["status"], data["created_by"],
+                    data["created_at"], data["updated_at"],
+                ),
+            )
+            await db.commit()
+
+            await log_action(
+                db,
+                user_id="system",
+                action=AuditAction.AUTOMATION_TRIGGERED,
+                node_id=node_id,
+                details={
+                    "proposal_id": proposal.id,
+                    "action": intent_action,
+                    "trust_level": trust_level,
+                    "status": "PENDING_APPROVAL",
+                },
+            )
+
+            return {"status": "pending_approval", "proposal_id": proposal.id}
+
+        proposal = ActionProposal(
+            node_id=node_id,
+            action=intent_action,
+            params=params,
+            reasoning=f"Automation rule triggered this action (trust_level=auto).",
+            risk_level="LOW",
+            created_by="automation",
+            status="APPROVED",
+            approved_by="system",
         )
-        return result
+
+        data = proposal.to_db_dict()
+        await db.execute(
+            """INSERT INTO action_proposals
+               (id, node_id, action, params_json, reasoning, risk_level,
+                status, created_by, approved_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["id"], data["node_id"], data["action"], data["params_json"],
+                data["reasoning"], data["risk_level"],
+                data["status"], data["created_by"], data["approved_by"],
+                data["created_at"], data["updated_at"],
+            ),
+        )
+        await db.commit()
+
+        try:
+            result = await node_manager.send_intent(
+                node_id,
+                {"action": intent_action, "params": params},
+                timeout=15.0,
+            )
+            success = result.get("success", False)
+            proposal.complete(success=success, result_data=result)
+
+            db_data = proposal.to_db_dict()
+            await db.execute(
+                """UPDATE action_proposals SET
+                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
+                   WHERE id = ?""",
+                (
+                    db_data["status"], db_data["updated_at"],
+                    db_data["executed_at"], db_data["result_json"],
+                    proposal.id,
+                ),
+            )
+            await db.commit()
+
+            await log_action(
+                db,
+                user_id="system",
+                action=AuditAction.AUTOMATION_TRIGGERED,
+                node_id=node_id,
+                details={
+                    "proposal_id": proposal.id,
+                    "action": intent_action,
+                    "trust_level": "auto",
+                    "status": proposal.status,
+                },
+            )
+
+            return result
+        except RuntimeError as exc:
+            proposal.complete(success=False, result_data={"error": str(exc)})
+            db_data = proposal.to_db_dict()
+            await db.execute(
+                """UPDATE action_proposals SET
+                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
+                   WHERE id = ?""",
+                (
+                    db_data["status"], db_data["updated_at"],
+                    db_data["executed_at"], db_data["result_json"],
+                    proposal.id,
+                ),
+            )
+            await db.commit()
+            return {"success": False, "error": str(exc)}
+        except TimeoutError:
+            proposal.complete(success=False, result_data={"error": "worker_timeout"})
+            db_data = proposal.to_db_dict()
+            await db.execute(
+                """UPDATE action_proposals SET
+                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
+                   WHERE id = ?""",
+                (
+                    db_data["status"], db_data["updated_at"],
+                    db_data["executed_at"], db_data["result_json"],
+                    proposal.id,
+                ),
+            )
+            await db.commit()
+            return {"success": False, "error": "Worker did not respond in time"}
 
     async def _execute_call_webhook(self, action: dict, node_id: str, trigger_data: dict) -> dict:
         """HTTP POST to an external webhook URL."""
