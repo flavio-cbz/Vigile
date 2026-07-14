@@ -3,7 +3,9 @@ import { useAuthStore } from './authStore';
 import { useToastStore } from './useToastStore';
 import { useLocaleStore } from './localeStore';
 import { api } from '../hooks/useApi';
+import { t } from '../i18n';
 import type { ProposalActionResponse } from '../types';
+import type { ActionProposal } from './uiStore';
 
 export interface Message {
   role: 'system' | 'user' | 'assistant';
@@ -132,7 +134,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return newSession;
       }
     } catch {
-      useToastStore.getState().addToast('error', 'Erreur', 'Impossible de créer la session de chat.');
+      useToastStore.getState().addToast('error', t('chat.toast.ai_error'), t('chat.toast.create_error'));
     }
     return null;
   },
@@ -153,10 +155,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             activeSession: nextActive
           };
         });
-        useToastStore.getState().addToast('success', 'Succès', 'Conversation supprimée.');
+        useToastStore.getState().addToast('success', t('chat.toast.success'), t('chat.toast.session_deleted'));
       }
     } catch {
-      useToastStore.getState().addToast('error', 'Erreur', 'Impossible de supprimer la conversation.');
+      useToastStore.getState().addToast('error', t('chat.toast.error'), t('chat.toast.session_delete_error'));
     }
   },
 
@@ -196,6 +198,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const abortController = new AbortController();
     set({ _abortController: abortController });
     const fetchTimeout = window.setTimeout(() => abortController.abort(), 30000);
+    let wasRateLimited = false;
 
     try {
       const response = await fetch('/api/chat', {
@@ -210,6 +213,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       if (!response.ok) {
+        if (response.status === 429) wasRateLimited = true;
         throw new Error(`HTTP ${response.status}`);
       }
 
@@ -218,16 +222,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         throw new Error('ReadableStream non disponible');
       }
 
-      // Add empty placeholder assistant message (mutable ref for SSE updates)
       const assistantMessage: Message = { role: 'assistant', content: '' };
       const sessionId = currentSession.id;
 
       const updateAssistantMessage = () => {
         const state = get();
         if (!state.activeSession || state.activeSession.id !== sessionId) return;
-        // Build history from scratch using the latest state to avoid stale closures
         const currentHistory = state.activeSession.history;
-        // Replace the last message (assistant placeholder) with current content
         const updatedHistory = currentHistory.length > 0
           ? [...currentHistory.slice(0, -1), { ...assistantMessage }]
           : [{ ...assistantMessage }];
@@ -257,8 +258,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-
-        // Save the last incomplete line back to the buffer
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -285,7 +284,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               };
               updateAssistantMessage();
             } else if (data.type === 'error') {
-              useToastStore.getState().addToast('error', 'Erreur IA', data.detail || 'Erreur inconnue');
+              useToastStore.getState().addToast('error', t('chat.toast.ai_error'), data.detail || t('chat.toast.ai_error_unknown'));
             }
           } catch {
             // Ignore parse errors on incomplete lines
@@ -294,14 +293,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (err) {
       console.error('SSE Error:', err);
-      useToastStore.getState().addToast('error', 'Erreur Réseau', 'La connexion IA a été interrompue.');
+      wasRateLimited = wasRateLimited || (err instanceof Error && err.message === 'HTTP 429');
+      // Don't toast on rate-limit — the api() helper already shows a deduped toast for 429s
+      if (!wasRateLimited) {
+        useToastStore.getState().addToast('error', t('chat.toast.network_error'), t('chat.toast.network_error_disconnected'));
+      }
     } finally {
       window.clearTimeout(fetchTimeout);
       set({ isStreaming: false, _abortController: undefined });
-      // Fetch latest sessions to sync titles and history
+      // Skip fetchSessions on rate-limit to prevent a 429 cascade
       const state = get();
-      const nodeIdForFetch = state.activeSession?.node_id || null;
-      get().fetchSessions(nodeIdForFetch);
+      if (!wasRateLimited) {
+        const nodeIdForFetch = state.activeSession?.node_id || null;
+        get().fetchSessions(nodeIdForFetch);
+      }
     }
   },
 
@@ -333,22 +338,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     } catch {
-      useToastStore.getState().addToast('error', 'Erreur', 'Impossible de mettre à jour la conversation.');
+      useToastStore.getState().addToast('error', t('chat.toast.error'), t('chat.toast.update_error'));
     }
   },
 
   approveProposal: async (proposalId) => {
     try {
-      const res = await api<ProposalActionResponse>(`/api/chat/proposals/${proposalId}/approve`, {
+      const res = await api<ActionProposal>(`/api/chat/proposals/${proposalId}/approve`, {
         method: 'POST'
       });
       if (res) {
-        useToastStore.getState().addToast('success', 'Succès', 'Proposition approuvée et exécutée avec succès.');
+        if (res.status === 'FAILED') {
+          const errorMsg = res.result?.error || t('chat.toast.proposal_execute_error');
+          useToastStore.getState().addToast('error', t('chat.toast.failure'), String(errorMsg));
+          return false;
+        }
+        useToastStore.getState().addToast('success', t('chat.toast.success'), t('chat.toast.proposal_approved'));
         return true;
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Impossible d\'approuver la proposition.';
-      useToastStore.getState().addToast('error', 'Échec', message);
+      const message = err instanceof Error ? err.message : t('chat.toast.proposal_execute_error');
+      useToastStore.getState().addToast('error', t('chat.toast.failure'), message);
     }
     return false;
   },
@@ -360,12 +370,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         body: JSON.stringify({ reason: reason || '' })
       });
       if (res) {
-        useToastStore.getState().addToast('info', 'Refusé', 'Proposition rejetée.');
+        useToastStore.getState().addToast('info', t('chat.toast.rejected'), t('chat.toast.proposal_rejected'));
         return true;
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Impossible de rejeter la proposition.';
-      useToastStore.getState().addToast('error', 'Échec', message);
+      const message = err instanceof Error ? err.message : t('chat.toast.proposal_reject_error');
+      useToastStore.getState().addToast('error', t('chat.toast.failure'), message);
     }
     return false;
   }
