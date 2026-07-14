@@ -35,12 +35,15 @@ from master.api.auth import router as auth_router
 from master.api.automations import router as automations_router
 from master.api.chat import router as chat_router
 from master.api.demo import router as demo_router
+from master.api.investigations import router as investigations_router
 from master.api.metrics import render_prometheus
 from master.api.nodes import router as nodes_router
 from master.api.nodes_events import router as nodes_events_router
 from master.api.services import router as services_router
 from master.api.worker_binary import router as worker_binary_router
 from master.config import settings
+from master.core.alert_engine import alert_engine
+from master.core.investigation_manager import investigation_manager
 from master.core.automation_engine import automation_engine
 from master.core.enums import NodeState
 from master.core.node_manager import node_manager
@@ -48,6 +51,7 @@ from master.core.plugin_manager import plugin_manager, plugin_engine as _plugin_
 from master.core.plugin_engine import PluginEngine
 from master.core.hook_bus import HookBus
 from master.core.scheduler import Scheduler
+from master.core.proposal_autoexpire import auto_expire_proposals
 from master.core.route_registrar import RouteRegistrar
 from master.core.db_auto import DBAuto
 from master.core.scanner import Scanner
@@ -167,6 +171,27 @@ async def auto_update_workers_task(db, nm, settings_obj) -> None:
 
         # Check every 1 hour (3600 seconds)
         await asyncio.sleep(3600.0)
+
+
+async def proposal_expiry_task(db, nm, settings_obj) -> None:
+    """
+    Background loop that cancels stale PENDING proposals by TTL or
+    resolved metric conditions.
+    """
+    logger.info("Proposal auto-expiry task started.")
+    # Wait a bit on startup to let things settle and first metrics arrive
+    await asyncio.sleep(60.0)
+
+    while True:
+        try:
+            canceled = await auto_expire_proposals(db, nm)
+            if canceled:
+                logger.info("Proposal auto-expiry: canceled %d proposals.", canceled)
+        except Exception as exc:
+            logger.exception("Error in proposal expiry task: %s", exc)
+
+        # Check every 60 seconds
+        await asyncio.sleep(60.0)
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +342,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("Automation Engine initialized and state-change callback registered.")
 
+    # 7b. Alert Engine (évaluation des seuils intégrés)
+    await alert_engine.initialize(db)
+    node_manager.register_state_change_callback(alert_engine.evaluate_node_state)
+    plugin_manager.register(
+        "on_status_report",
+        alert_engine.evaluate_metrics,
+        plugin_name="alert_engine",
+    )
+    logger.info("Alert Engine initialized and registered.")
+
+    # 7c. Investigation Manager (alerte → Phase 3 automatique)
+    alert_engine.on_alert_fired_callback = investigation_manager.on_alert_fired
+    logger.info("Investigation Manager initialized and wired to AlertEngine.")
+
     app.state.startup_time = time.time()
     app.state.master_url = settings.master_url
     app.state.trusted_proxies = settings.trusted_proxies
@@ -328,6 +367,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 8. Start Worker Auto-Update Task
     auto_update_task = asyncio.create_task(auto_update_workers_task(db, node_manager, settings))
 
+    # 9. Start Proposal Auto-Expiry Task
+    proposal_expiry = asyncio.create_task(proposal_expiry_task(db, node_manager, settings))
+
+    # 10. Start Alert Cleanup Task (toutes les heures)
+    async def alert_cleanup_loop() -> None:
+        while True:
+            await asyncio.sleep(3600)
+            try:
+                await alert_engine.cleanup_old_alerts(db)
+            except Exception:
+                logger.exception("Alert cleanup task failed.")
+
+    cleanup_alerts = asyncio.create_task(alert_cleanup_loop())
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
@@ -336,8 +388,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Master Node shutting down...")
     cleanup_task.cancel()
     auto_update_task.cancel()
+    proposal_expiry.cancel()
+    cleanup_alerts.cancel()
     try:
-        await asyncio.gather(cleanup_task, auto_update_task, return_exceptions=True)
+        await asyncio.gather(cleanup_task, auto_update_task, proposal_expiry, cleanup_alerts, return_exceptions=True)
     except Exception:
         pass
     await node_manager.stop()
@@ -452,6 +506,7 @@ app.include_router(admin_router)
 app.include_router(demo_router)
 app.include_router(worker_binary_router)
 app.include_router(automations_router)
+app.include_router(investigations_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes

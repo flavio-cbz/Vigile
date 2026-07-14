@@ -229,13 +229,14 @@ def get_insights_manager() -> Any:
     with _init_lock:
         if _insights_manager is None:
             from master.core.insights import InsightsManager
+            from master.core.plugin_manager import plugin_manager
 
             llm_client = None
             try:
                 llm_client = get_llm_client()
             except RuntimeError:
                 pass
-            _insights_manager = InsightsManager(llm_client=llm_client)
+            _insights_manager = InsightsManager(llm_client=llm_client, plugin_manager=plugin_manager)
         return _insights_manager
 
 

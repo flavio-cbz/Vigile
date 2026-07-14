@@ -190,7 +190,8 @@ async def chat(
             proposal = None
             if node_id and node_id != "all":
                 proposal = await _try_extract_proposal(
-                    sllm, node_id, message, token_buffer, claims["sub"]
+                    sllm, node_id, message, token_buffer, claims["sub"],
+                    locale=locale,
                 )
                 if proposal:
                     await _normalize_action_proposal(db, nm, proposal)
@@ -967,12 +968,24 @@ async def _try_extract_proposal(
     user_message: str,
     ai_response: str,
     user_id: str,
+    locale: str = "fr",
 ) -> ActionProposal | None:
     """
     After the AI responds, try to extract an action proposal
     from the conversation context.
     """
     try:
+        if locale == "en":
+            reasoning_instruction = (
+                "The 'reasoning' field MUST be written in English "
+                "(all explanations, risks, and details must be in English)."
+            )
+        else:
+            reasoning_instruction = (
+                "Le champ 'reasoning' DOIT être rédigé en français "
+                "(toutes les explications, risques et détails doivent être en français)."
+            )
+
         req = await sllm.create(
             _ProposalRequest,
             [
@@ -982,7 +995,7 @@ async def _try_extract_proposal(
                         "Based on the conversation, determine if a server action is needed. "
                         "If yes, output action, params, reasoning, and risk_level as JSON. "
                         "Set action to 'NONE' if no action is needed. "
-                        "Crucial: The 'reasoning' field MUST be written in French (ensure all explanations, risks, and details are translated into French)."
+                        f"{reasoning_instruction}"
                     ),
                 },
                 {"role": "user", "content": user_message},

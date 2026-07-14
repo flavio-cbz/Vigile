@@ -722,6 +722,12 @@ async def _run_operational(
                     "error": msg.get("error"),
                 },
             )
+            # Suivi du taux d'échec des intents pour l'alert engine
+            from master.core.alert_engine import alert_engine
+            asyncio.create_task(
+                alert_engine.track_intent_result(node_id, success, db),
+                name=f"alert:intent:{node_id[:12]}",
+            )
 
         elif msg_type == "STATUS_REPORT":
             # Normalize and store metrics snapshot via plugin system
