@@ -263,19 +263,51 @@ def test_plugin_edge_cases():
     assert none_labels["cpu_load_1m"] == 0.0
 
     all_keys = {
+        # CPU
         "cpu_percent",
         "cpu_load_1m",
         "cpu_load_5m",
         "cpu_load_15m",
         "cpu_cores",
+        "cpu_throttled_count",
+        # Memory
         "mem_total_bytes",
         "mem_used_bytes",
         "mem_percent",
+        # Swap
         "swap_total_bytes",
         "swap_used_bytes",
+        # Disk (usage)
         "disk_total_bytes",
         "disk_used_bytes",
         "disk_percent",
+        # Disk I/O
+        "disk_reads",
+        "disk_writes",
+        "disk_read_bytes",
+        "disk_write_bytes",
+        # Network I/O
+        "net_bytes_recv",
+        "net_bytes_sent",
+        "net_packets_recv",
+        "net_packets_sent",
+        "net_errors_in",
+        "net_errors_out",
+        "net_drops_in",
+        "net_drops_out",
+        # Temperature
+        "temp_celsius",
+        # PSI
+        "psi_cpu_avg10",
+        "psi_mem_avg10",
+        "psi_io_avg10",
+        # File handles
+        "file_handles_used",
+        "file_handles_max",
+        # Entropy / Context switches
+        "entropy_avail",
+        "context_switches",
+        # Legacy
         "uptime_seconds",
         "processes",
         "top_processes",

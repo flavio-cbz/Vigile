@@ -272,6 +272,7 @@ class PluginManager:
         self._active_calls: dict[str, int] = {}
         self._draining_plugins: set[str] = set()
         self._enabled_plugins: set[str] | None = None
+        self._disabled_plugins: set[str] | None = None
         self._sandbox: bool = False
         self._wrappers: dict[str, PluginProcessWrapper] = {}
         self._engine: Any = engine
@@ -282,26 +283,26 @@ class PluginManager:
     async def initialize(self, db: Any, sandbox: bool = True) -> None:
         """
         Initialize the plugin manager with a database connection,
-        load enabled plugin IDs, and set sandbox mode.
+        load disabled plugin IDs, and set sandbox mode.
         """
         self._db = db
         self._sandbox = sandbox
         try:
             async with db.execute(
-                "SELECT id FROM plugins WHERE enabled = 1"
+                "SELECT id FROM plugins WHERE enabled = 0"
             ) as cursor:
                 rows = await cursor.fetchall()
-                self._enabled_plugins = {row[0] for row in rows}
+                self._disabled_plugins = {row[0] for row in rows}
             logger.info(
-                "PluginManager initialized. Enabled plugins: %s (Sandbox=%s)",
-                self._enabled_plugins,
+                "PluginManager initialized. Disabled plugins: %s (Sandbox=%s)",
+                self._disabled_plugins,
                 self._sandbox,
             )
         except Exception as e:
             logger.error(
-                "Failed to query enabled plugins during PluginManager initialization: %s", e
+                "Failed to query disabled plugins during PluginManager initialization: %s", e
             )
-            self._enabled_plugins = None
+            self._disabled_plugins = set()
 
     async def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
         """
@@ -361,7 +362,7 @@ class PluginManager:
                 )
                 continue
 
-            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
                 continue
 
             self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
@@ -384,7 +385,7 @@ class PluginManager:
             if inspect.iscoroutinefunction(fn):
                 continue
 
-            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
                 continue
 
             self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
@@ -423,7 +424,7 @@ class PluginManager:
         tasks: list[asyncio.Future] = []
 
         for plugin_name, fn in self._hooks.get(hook_name, []):
-            if self._enabled_plugins is not None and plugin_name not in self._enabled_plugins:
+            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
                 continue
 
             fut = asyncio.create_task(
@@ -472,7 +473,7 @@ class PluginManager:
             plugin_name = fname[:-3]
             plugin_id = canonical_plugin_id(plugin_name)
 
-            if self._enabled_plugins is not None and plugin_id not in self._enabled_plugins:
+            if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
                 logger.info("Plugin '%s' is disabled in database — skipping load.", plugin_id)
                 continue
 
@@ -510,8 +511,11 @@ class PluginManager:
                     )
 
                 self._loaded_plugins.append(plugin_id)
-                if self._enabled_plugins is not None:
-                    self._enabled_plugins.add(plugin_id)
+                if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
+                    self._disabled_plugins.remove(plugin_id)
+                if self._engine is not None:
+                    from master.core.plugin_engine import STATE_ACTIVE
+                    self._engine.lifecycle._states[plugin_id] = STATE_ACTIVE
                 logger.info("Plugin loaded in isolated subprocess: %s", plugin_id)
                 return True
             except Exception:
@@ -539,8 +543,11 @@ class PluginManager:
 
                 module.register(self)
                 self._loaded_plugins.append(plugin_id)
-                if self._enabled_plugins is not None:
-                    self._enabled_plugins.add(plugin_id)
+                if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
+                    self._disabled_plugins.remove(plugin_id)
+                if self._engine is not None:
+                    from master.core.plugin_engine import STATE_ACTIVE
+                    self._engine.lifecycle._states[plugin_id] = STATE_ACTIVE
                 logger.info("Plugin loaded in-process: %s", plugin_id)
                 return True
             except Exception:
@@ -568,13 +575,30 @@ class PluginManager:
         logger.info("Unloading plugin '%s'...", plugin_id)
         self._draining_plugins.add(plugin_id)
 
+        # Deactivate via engine if available to clean up hooks, scheduler, routes
+        if self._engine is not None:
+            try:
+                if self._engine.lifecycle.get_state(plugin_id) == "ACTIVE":
+                    await self._engine.deactivate(plugin_id)
+            except Exception as e:
+                logger.error("Failed to deactivate plugin '%s' via engine: %s", plugin_id, e)
+
         # Stop wrapper subprocess if running in sandbox mode
         wrapper = self._wrappers.pop(plugin_id, None)
         if wrapper:
             await wrapper.stop()
 
+        # Unmount all routes
+        if self._engine is not None and self._engine.route_registrar is not None:
+            self._engine.route_registrar.unmount(plugin_id)
+
         # Unregister all hooks
-        for hook_name in list(self._hooks.keys()):
+        hooks_to_check = (
+            list(self._engine.hook_bus.get_hooks().keys())
+            if (self._engine is not None and self._engine.hook_bus is not None)
+            else list(self._hooks.keys())
+        )
+        for hook_name in hooks_to_check:
             self.unregister(hook_name, plugin_id)
 
         # Drain active running tasks
@@ -586,8 +610,10 @@ class PluginManager:
 
         if plugin_id in self._loaded_plugins:
             self._loaded_plugins.remove(plugin_id)
-        if self._enabled_plugins is not None and plugin_id in self._enabled_plugins:
-            self._enabled_plugins.remove(plugin_id)
+        if self._disabled_plugins is not None:
+            self._disabled_plugins.add(plugin_id)
+        if self._engine is not None:
+            self._engine.lifecycle._states.pop(plugin_id, None)
 
         module_name = f"vigile.plugins.{module_stem}"
         import sys
