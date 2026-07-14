@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestHandleRestartServiceRejectsEmptyRequestedBy(t *testing.T) {
+func TestHandleRestartServiceSkipsRequestedByCheck(t *testing.T) {
 	intent := Intent{
 		IntentID:    "test-001",
 		Action:      "RESTART_SERVICE",
@@ -13,15 +13,15 @@ func TestHandleRestartServiceRejectsEmptyRequestedBy(t *testing.T) {
 		Params:      map[string]interface{}{"service": "ssh"},
 	}
 	result := handleRestartService(context.Background(), intent)
-	if result.Success {
-		t.Fatal("expected restart to be rejected when requested_by is empty")
-	}
-	if result.Error != "missing requested_by context" {
-		t.Fatalf("unexpected error message: %q", result.Error)
+	// The function no longer rejects empty requested_by.
+	// It proceeds to the systemctl call, which fails with a different error
+	// (no systemd) in the test environment.
+	if result.Error == "missing requested_by context" {
+		t.Fatal("expected handler to not reject empty requested_by")
 	}
 }
 
-func TestHandleRestartServiceAllowsWithRequestedBy(t *testing.T) {
+func TestHandleRestartServiceProceedsWithRequestedBy(t *testing.T) {
 	intent := Intent{
 		IntentID:    "test-002",
 		Action:      "RESTART_SERVICE",

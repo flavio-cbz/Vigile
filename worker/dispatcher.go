@@ -190,11 +190,14 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 		return IntentResult{Success: false, Error: fmt.Sprintf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)}
 	}
 
-	// 6. Back up the current binary
+	// 6. Back up the current binary (best-effort — read-only fs like Docker
+	//    containers skip gracefully and fall through to the replacement step).
 	backupPath := execPath + ".old"
 	_ = os.Remove(backupPath)
+	backupOK := true
 	if err := os.Rename(execPath, backupPath); err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to backup current executable: %v", err)}
+		log.Printf("WARNING: backup rename failed (proceeding without backup): %v", err)
+		backupOK = false
 	}
 
 	// 7. Swap — try atomic rename first, fall back to copy+remove
@@ -209,7 +212,9 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 			copyErr = os.WriteFile(execPath, data, 0755)
 		}
 		if copyErr != nil {
-			_ = os.Rename(backupPath, execPath) // rollback
+			if backupOK {
+				_ = os.Rename(backupPath, execPath) // rollback only when we have a backup
+			}
 			return IntentResult{Success: false, Error: fmt.Sprintf("failed to replace executable: %v", copyErr)}
 		}
 		_ = os.Remove(tmpPath)

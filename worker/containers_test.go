@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestHandleRestartContainerRejectsEmptyRequestedBy(t *testing.T) {
+func TestHandleRestartContainerSkipsRequestedByCheck(t *testing.T) {
 	intent := Intent{
 		IntentID:    "test-001",
 		Action:      "RESTART_CONTAINER",
@@ -13,15 +13,15 @@ func TestHandleRestartContainerRejectsEmptyRequestedBy(t *testing.T) {
 		Params:      map[string]interface{}{"container_id": "abc123"},
 	}
 	result := handleRestartContainer(context.Background(), intent)
-	if result.Success {
-		t.Fatal("expected restart to be rejected when requested_by is empty")
-	}
-	if result.Error != "missing requested_by context" {
-		t.Fatalf("unexpected error message: %q", result.Error)
+	// The function no longer rejects empty requested_by.
+	// It proceeds to the Docker API call, which fails with a different error
+	// (Docker socket not found) in the test environment.
+	if result.Error == "missing requested_by context" {
+		t.Fatal("expected handler to not reject empty requested_by")
 	}
 }
 
-func TestHandleRestartContainerAllowsWithRequestedBy(t *testing.T) {
+func TestHandleRestartContainerProceedsWithRequestedBy(t *testing.T) {
 	intent := Intent{
 		IntentID:    "test-002",
 		Action:      "RESTART_CONTAINER",

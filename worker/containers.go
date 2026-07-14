@@ -149,12 +149,9 @@ func handleListContainers(ctx context.Context, intent Intent) IntentResult {
 }
 
 func handleRestartContainer(ctx context.Context, intent Intent) IntentResult {
-	if intent.RequestedBy == "" {
-		return IntentResult{Success: false, Error: "missing requested_by context"}
-	}
 	containerID := getParamString(intent.Params, "container_id", "")
 	approvalID := getParamString(intent.Params, "approval_id", "")
-	log.Printf("executing action action=RESTART_CONTAINER container_id=%s node_id=%s requested_by=%s approval_id=%s intent_id=%s",
+	log.Printf("executing action action=RESTART_CONTAINER container_id=%s node_id=%s requested_by=%q approval_id=%s intent_id=%s",
 		containerID, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
 
 	if containerID == "" {

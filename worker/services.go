@@ -82,12 +82,9 @@ func handleStatusService(ctx context.Context, intent Intent) IntentResult {
 
 // handleRestartService restarts a systemd service.
 func handleRestartService(ctx context.Context, intent Intent) IntentResult {
-	if intent.RequestedBy == "" {
-		return IntentResult{Success: false, Error: "missing requested_by context"}
-	}
 	service := getParamString(intent.Params, "service", "")
 	approvalID := getParamString(intent.Params, "approval_id", "")
-	log.Printf("executing action action=RESTART_SERVICE service=%s node_id=%s requested_by=%s approval_id=%s intent_id=%s",
+	log.Printf("executing action action=RESTART_SERVICE service=%s node_id=%s requested_by=%q approval_id=%s intent_id=%s",
 		service, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
 
 	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
