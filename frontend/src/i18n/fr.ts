@@ -4,6 +4,8 @@ export const fr = {
   "nav.chat": "Chat IA",
   "nav.proposals": "Propositions",
   "nav.servers": "Serveurs",
+  "nav.services": "Services",
+  "nav.docker": "Docker",
   "nav.admin": "ADMINISTRATION",
   "nav.automations": "Automatisations",
   "nav.plugins": "Plugins",
@@ -725,6 +727,7 @@ export const fr = {
   "common.id_prefix": "ID : {id}",
   "common.system": "Système",
   "common.unknown": "inconnu",
+  "common.error_unknown": "Erreur inconnue",
   "common.never": "jamais",
   "common.just_now": "à l'instant",
   "common.ago_seconds": "il y a {n}s",
@@ -841,5 +844,68 @@ export const fr = {
   "automations.test.select_node": "Sélectionnez un nœud cible pour le test",
   "automations.test.btn": "Lancer le test",
   "automations.test.success": "Règle déclenchée sur {node} — vérifiez l'historique.",
+
+  // Chat toasts
+  "chat.toast.session_create_error": "Impossible de créer la session de chat.",
+  "chat.toast.session_deleted": "Conversation supprimée.",
+  "chat.toast.session_delete_error": "Impossible de supprimer la conversation.",
+  "chat.toast.ai_error": "Erreur IA",
+  "chat.toast.ai_error_unknown": "Erreur inconnue",
+  "chat.toast.network_error": "Erreur Réseau",
+  "chat.toast.network_error_disconnected": "La connexion IA a été interrompue.",
+  "chat.toast.update_error": "Impossible de mettre à jour la conversation.",
+  "chat.toast.proposal_approved": "Proposition approuvée et exécutée avec succès.",
+  "chat.toast.proposal_execute_error": "Échec",
+  "chat.toast.proposal_rejected": "Proposition rejetée.",
+  "chat.toast.proposal_reject_error": "Échec",
+
+  // Generic toast titles
+  "chat.toast.success": "Succès",
+  "chat.toast.error": "Erreur",
+  "chat.toast.failure": "Échec",
+  "chat.toast.rejected": "Refusé",
+
+  // API toasts
+  "api.toast.session_expired": "Session expirée",
+  "api.toast.session_expired_msg": "Veuillez vous reconnecter.",
+  "api.toast.rate_limit_title": "Limite de débit atteinte",
+  "api.toast.rate_limit_msg": "Trop de requêtes. Veuillez patienter quelques secondes.",
+  "api.toast.server_error": "Erreur serveur",
+
+  // Automations toasts
+  "automations.toast.load_error": "Erreur de chargement des règles.",
+  "automations.toast.toggle_success": "Règle \"{name}\" {action}.",
+  "automations.toast.toggle_error": "Échec du changement de statut.",
+  "automations.toast.delete_success": "Règle \"{name}\" supprimée.",
+  "automations.toast.delete_error": "Échec de la suppression.",
+  "automations.toast.test_success": "Règle déclenchée sur {nodeName} — vérifiez l'historique.",
+  "automations.toast.test_error": "Échec du test.",
+  "automations.toast.delete_confirm": "Supprimer la règle \"{name}\" ? Cette action est irréversible.",
+
+  // Generic toast titles
+  "automations.toast.load_error_title": "Erreur",
+  "automations.toast.success": "Succès",
+  "automations.toast.error": "Erreur",
+
+  // Action labels for toggle
+  "automations.action.deactivate": "désactivée",
+  "automations.action.activate": "activée",
+
+  // RuleFormModal toasts
+  "automations.form.name_required": "Le nom de la règle est requis.",
+  "automations.form.action_required": "Ajoutez au moins une action.",
+  "automations.form.updated": "Règle mise à jour.",
+  "automations.form.created": "Règle créée avec succès.",
+  "automations.form.error": "Erreur : {message}",
+
+  // Container toasts
+  "container.toast.restarting": "Redémarrage en cours",
+  "container.toast.error": "Erreur",
+
+  // Node Detail Restarts
+  "node_detail.toast.service_restarted": "Le service {name} a été redémarré avec succès.",
+  "node_detail.toast.container_restarted": "Le conteneur {name} a été redémarré avec succès.",
+  "node_detail.toast.service_restart_failed": "Échec du redémarrage du service {name} : {error}",
+  "node_detail.toast.container_restart_failed": "Échec du redémarrage du conteneur {name} : {error}",
 };
 

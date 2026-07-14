@@ -4,6 +4,8 @@ export const en = {
   "nav.chat": "AI Chat",
   "nav.proposals": "Proposals",
   "nav.servers": "Servers",
+  "nav.services": "Services",
+  "nav.docker": "Docker",
   "nav.admin": "ADMINISTRATION",
   "nav.automations": "Automations",
   "nav.plugins": "Plugins",
@@ -725,6 +727,7 @@ export const en = {
   "common.id_prefix": "ID: {id}",
   "common.system": "System",
   "common.unknown": "unknown",
+  "common.error_unknown": "Unknown error",
   "common.never": "never",
   "common.just_now": "just now",
   "common.ago_seconds": "{n}s ago",
@@ -841,5 +844,73 @@ export const en = {
   "automations.test.select_node": "Select a target node for the test",
   "automations.test.btn": "Run Test",
   "automations.test.success": "Rule triggered on {node} — check history.",
+
+  // Chat toasts
+  "chat.toast.create_error": "Failed to create chat session.",
+  "chat.toast.delete_success": "Conversation deleted.",
+  "chat.toast.delete_error": "Failed to delete conversation.",
+  "chat.toast.ai_error": "AI Error",
+  "chat.toast.ai_error_unknown": "Unknown error",
+  "chat.toast.network_error": "Network Error",
+  "chat.toast.network_error_detail": "AI connection interrupted.",
+  "chat.toast.update_error": "Failed to update conversation.",
+  "chat.toast.approve_success": "Proposal approved and executed successfully.",
+  "chat.toast.approve_error": "Failed",
+  "chat.toast.reject_info": "Proposal rejected.",
+  "chat.toast.reject_error": "Failed",
+
+  // Generic toast titles
+  "chat.toast.success": "Success",
+  "chat.toast.error": "Error",
+  "chat.toast.failure": "Failed",
+  "chat.toast.rejected": "Rejected",
+
+  // Session create error (alias for create_error)
+  "chat.toast.session_create_error": "Failed to create chat session.",
+  "chat.toast.session_deleted": "Conversation deleted.",
+  "chat.toast.session_delete_error": "Failed to delete conversation.",
+
+  // API toasts
+  "api.toast.session_expired": "Session expired",
+  "api.toast.session_expired_detail": "Please sign in again.",
+  "api.toast.rate_limit": "Too many requests. Please wait a few seconds.",
+  "api.toast.rate_limit_title": "Rate limit reached",
+  "api.toast.server_error": "Server error",
+
+  // Automations toasts
+  "automations.toast.load_error": "Failed to load rules.",
+  "automations.toast.toggle_success": "Rule \"{name}\" {action}.",
+  "automations.toast.toggle_error": "Failed to change status.",
+  "automations.toast.delete_confirm": "Delete rule \"{name}\"? This action is irreversible.",
+  "automations.toast.delete_success": "Rule \"{name}\" deleted.",
+  "automations.toast.delete_error": "Deletion failed.",
+  "automations.toast.test_success": "Rule triggered on {nodeName} — check history.",
+  "automations.toast.test_error": "Test failed.",
+
+  // Generic toast titles
+  "automations.toast.load_error_title": "Error",
+  "automations.toast.success": "Success",
+  "automations.toast.error": "Error",
+
+  // Action labels for toggle
+  "automations.action.deactivate": "disabled",
+  "automations.action.activate": "enabled",
+
+  // RuleFormModal toasts
+  "automations.form.name_required": "Rule name is required.",
+  "automations.form.action_required": "Add at least one action.",
+  "automations.form.updated": "Rule updated.",
+  "automations.form.created": "Rule created successfully.",
+  "automations.form.error": "Error: {message}",
+
+  // Container toasts
+  "container.toast.restarting": "Restarting",
+  "container.toast.error": "Error",
+
+  // Node Detail Restarts
+  "node_detail.toast.service_restarted": "Service {name} restarted successfully.",
+  "node_detail.toast.container_restarted": "Container {name} restarted successfully.",
+  "node_detail.toast.service_restart_failed": "Failed to restart service {name}: {error}",
+  "node_detail.toast.container_restart_failed": "Failed to restart container {name}: {error}",
 };
 

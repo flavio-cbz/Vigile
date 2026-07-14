@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation, Link } from 'react-router';
+import { api } from '../../hooks/useApi';
 import { useAuthStore } from '../../store/authStore';
 import { usePermission } from '../../hooks/usePermission';
 import { useLayoutStore } from '../../store/layoutStore';
@@ -20,6 +21,7 @@ import {
   Zap,
   Container,
   Activity,
+  Play,
 } from 'lucide-react';
 import { VigileLogo } from '../ui/VigileLogo';
 import { useLocale } from '../../i18n';
@@ -41,6 +43,24 @@ export const Sidebar: React.FC = () => {
 
   const [isMobile, setIsMobile] = useState(false);
   const pendingCount = useLayoutStore((s) => s.pendingCount);
+
+  const [isPlexActive, setIsPlexActive] = useState(false);
+
+  useEffect(() => {
+    const checkPlex = async () => {
+      try {
+        const data = await api<{ loaded_plugins: string[] }>('/api/admin/plugins');
+        if (data && data.loaded_plugins.includes('plex')) {
+          setIsPlexActive(true);
+        } else {
+          setIsPlexActive(false);
+        }
+      } catch (err) {
+        console.error('Failed to check Plex active status:', err);
+      }
+    };
+    checkPlex();
+  }, [location.pathname]);
 
   const isSingleServer = nodes.length === 1;
 
@@ -99,16 +119,21 @@ export const Sidebar: React.FC = () => {
   };
 
   const renderNav = () => {
+    const nodeMatch = location.pathname.match(/\/nodes\/([^/]+)/);
+    const activeNodeId = nodeMatch ? nodeMatch[1] : (nodes[0]?.id || '');
+    const queryParams = new URLSearchParams(location.search);
+    const currentTab = queryParams.get('tab');
+
     const primaryItems = [
       { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true },
       { to: '/servers', label: t('nav.servers'), icon: Server },
       {
-        to: '/services',
+        to: activeNodeId ? `/nodes/${activeNodeId}?tab=services` : '#',
         label: t('nav.services'),
         icon: Activity,
       },
       {
-        to: '/docker',
+        to: activeNodeId ? `/nodes/${activeNodeId}?tab=containers` : '#',
         label: t('nav.docker'),
         icon: Container,
       },
@@ -126,6 +151,14 @@ export const Sidebar: React.FC = () => {
       },
     ];
 
+    if (isPlexActive) {
+      primaryItems.push({
+        to: '/plugins?open=plex',
+        label: 'Plex',
+        icon: Play,
+      });
+    }
+
     const adminItems = [
       { to: '/automations', label: t('nav.automations'), icon: Zap },
       { to: '/plugins', label: t('nav.plugins'), icon: Grid },
@@ -134,11 +167,18 @@ export const Sidebar: React.FC = () => {
 
     const renderLink = (item: NavItem) => {
       const Icon = item.icon;
-      const isActive = item.to === '/chat/new'
-        ? copilotOpen
-        : (item.exact
-            ? location.pathname === item.to
-            : location.pathname.startsWith(item.to));
+      let isActive = false;
+      if (item.to === '/chat/new') {
+        isActive = copilotOpen;
+      } else if (item.to.includes('tab=services')) {
+        isActive = location.pathname.includes('/nodes/') && currentTab === 'services';
+      } else if (item.to.includes('tab=containers')) {
+        isActive = location.pathname.includes('/nodes/') && currentTab === 'containers';
+      } else {
+        isActive = item.exact
+          ? location.pathname === item.to
+          : location.pathname.startsWith(item.to);
+      }
 
       return (
         <NavLink
