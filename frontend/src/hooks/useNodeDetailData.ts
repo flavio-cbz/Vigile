@@ -12,7 +12,7 @@ import type {
 } from '../components/node-detail/types';
 
 interface StatsSnapshot {
-  collected_at: string;
+  collected_at: number;
   cpu_percent: number;
   mem_percent: number;
   disk_percent: number;
@@ -91,7 +91,7 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
       const data = await api<{ snapshots: StatsSnapshot[] }>(`/api/nodes/${nodeId}/stats?limit=60`, { skipToast });
       if (data && data.snapshots) {
         const ordered = [...data.snapshots].reverse().map((snap) => ({
-          time: new Date(snap.collected_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          time: new Date(snap.collected_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           cpu: snap.cpu_percent,
           ram: snap.mem_percent,
           disk: snap.disk_percent,

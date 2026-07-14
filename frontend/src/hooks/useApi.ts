@@ -1,8 +1,13 @@
 import { useToastStore } from '../store/useToastStore';
 import { useAuthStore } from '../store/authStore';
 import { useLocaleStore } from '../store/localeStore';
+import { t } from '../i18n';
 
 const toastedErrors = new WeakSet<object>();
+
+/** Cooldown to prevent toast floods when the rate-limiter rejects many requests in a row. */
+let lastRateLimitToastTime = 0;
+const RATE_LIMIT_TOAST_COOLDOWN_MS = 6000;
 
 export interface ApiOptions extends RequestInit {
   skipToast?: boolean;
@@ -116,24 +121,29 @@ export async function api<T = unknown>(
         }
         useToastStore
           .getState()
-          .addToast('error', 'Session expirée', 'Veuillez vous reconnecter.');
+          .addToast('error', t('api.toast.session_expired'), t('api.toast.session_expired_msg'));
         return null;
       }
 
       if (!response.ok) {
         if (response.status === 429) {
-          const errorText = await response.text().catch(() => 'Erreur inconnue');
-          let displayMessage = 'Trop de requêtes. Veuillez patienter quelques secondes.';
+          // Rate-limited request — deduplicate toasts with a cooldown to prevent notification floods
+          const errorText = await response.text().catch(() => t('common.error_unknown'));
+          let displayMessage = t('api.toast.rate_limit');
           try {
             const parsed = JSON.parse(errorText);
             if (parsed && typeof parsed === 'object') {
               displayMessage = parsed.detail || parsed.error || displayMessage;
             }
           } catch {
-            // ignore parse error, use default message
+            // empty
           }
           if (!skipToast) {
-            useToastStore.getState().addToast('warning', 'Limite de débit atteinte', displayMessage);
+            const now = Date.now();
+            if (now - lastRateLimitToastTime > RATE_LIMIT_TOAST_COOLDOWN_MS) {
+              lastRateLimitToastTime = now;
+              useToastStore.getState().addToast('warning', t('api.toast.rate_limit_title'), displayMessage);
+            }
           }
           const error = new Error(displayMessage);
           toastedErrors.add(error);
@@ -142,7 +152,7 @@ export async function api<T = unknown>(
         if (response.status >= 500 && attempt < maxAttempts) {
           continue;
         }
-        const errorText = await response.text().catch(() => 'Erreur inconnue');
+        const errorText = await response.text().catch(() => t('common.error_unknown'));
         let displayMessage = errorText;
         try {
           const parsed = JSON.parse(errorText);
@@ -154,7 +164,7 @@ export async function api<T = unknown>(
         }
         const error = new Error(displayMessage || `HTTP ${response.status}`);
         if (response.status >= 500 && !skipToast) {
-          useToastStore.getState().addToast('error', 'Erreur serveur', displayMessage || `HTTP ${response.status}`);
+          useToastStore.getState().addToast('error', t('api.toast.server_error'), displayMessage || `HTTP ${response.status}`);
           toastedErrors.add(error);
         }
         throw error;

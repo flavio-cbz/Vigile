@@ -9,6 +9,7 @@ export function usePermission() {
   const isOperator = user?.role === 'operator' && !isGuest;
 
   const isDemoAdmin = isGuest && (user?.role === 'admin' || user?.role === 'operator');
+  const canRestartDirectly = user?.role === 'admin';
 
   const can = (action: PermissionAction): boolean => {
     switch (action) {
@@ -27,5 +28,5 @@ export function usePermission() {
     }
   };
 
-  return { isAdmin, isOperator, isGuest, isDemoAdmin, can };
+  return { isAdmin, isOperator, isGuest, isDemoAdmin, canRestartDirectly, can };
 }
