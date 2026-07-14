@@ -14,6 +14,7 @@ Pattern:
 
 import json
 import logging
+import re
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -102,7 +103,10 @@ class StructuredLLM:
                 continue
 
             try:
-                return response_model.model_validate_json(raw)
+                # Strip <think> reasoning blocks (Nemotron, DeepSeek, etc.)
+                # before JSON validation to avoid parse failures
+                cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                return response_model.model_validate_json(cleaned)
             except Exception as exc:
                 logger.warning(
                     "StructuredLLM attempt %d/%d failed: %s",

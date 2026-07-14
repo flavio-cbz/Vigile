@@ -93,25 +93,42 @@ class Scanner:
 
             for entry in sorted(os.listdir(directory)):
                 full_path = os.path.join(directory, entry)
-                if not os.path.isdir(full_path):
-                    continue
-
-                manifest_path = os.path.join(full_path, "manifest.json")
-                if not os.path.isfile(manifest_path):
-                    continue
-
-                try:
-                    manifest = self._load_manifest(manifest_path)
-                    if manifest is None:
+                if os.path.isdir(full_path):
+                    manifest_path = os.path.join(full_path, "manifest.json")
+                    if not os.path.isfile(manifest_path):
                         continue
-                    discovered[manifest.id] = manifest
-                except Exception as exc:
-                    result.errors.append((entry, str(exc)))
-                    logger.error(
-                        "Scanner: error loading manifest from '%s': %s",
-                        manifest_path,
-                        exc,
-                    )
+
+                    try:
+                        manifest = self._load_manifest(manifest_path)
+                        if manifest is None:
+                            continue
+                        discovered[manifest.id] = manifest
+                    except Exception as exc:
+                        result.errors.append((entry, str(exc)))
+                        logger.error(
+                            "Scanner: error loading manifest from '%s': %s",
+                            manifest_path,
+                            exc,
+                        )
+                elif entry.endswith(".py") and not entry.startswith("_"):
+                    try:
+                        from master.core.plugin_manager import canonical_plugin_id
+                        plugin_id = canonical_plugin_id(entry[:-3])
+                        # Create a virtual manifest for legacy flat .py files
+                        manifest = PluginManifest(
+                            id=plugin_id,
+                            name=plugin_id.replace("_", " ").title(),
+                            version="1.0.0",
+                            description="Legacy Python plugin.",
+                        )
+                        discovered[manifest.id] = manifest
+                    except Exception as exc:
+                        result.errors.append((entry, str(exc)))
+                        logger.error(
+                            "Scanner: error wrapping legacy plugin '%s': %s",
+                            entry,
+                            exc,
+                        )
 
             self._discovered_manifests.update(discovered)
 
@@ -165,15 +182,23 @@ class Scanner:
         # Orphan detection: plugins in INSTALLED or ACTIVE but not discovered
         current_states = lifecycle.get_all_states()
         for plugin_id, state in current_states.items():
-            if state in ("INSTALLED", "ACTIVE") and plugin_id not in discovered:
-                result.orphans.append(plugin_id)
-                logger.warning(
-                    "Scanner: orphan plugin '%s' (state=%s) — deactivating",
-                    plugin_id,
-                    state,
-                )
-                if state == "ACTIVE":
-                    await lifecycle.transition(plugin_id, "DEACTIVATED")
+            if state not in ("INSTALLED", "ACTIVE") or plugin_id in discovered:
+                continue
+
+            # Skip legacy .py plugins (loaded via sandbox subprocess) —
+            # they don't have manifest.json directories so the scanner
+            # would incorrectly flag them as orphans.
+            if self._is_legacy_py_plugin(plugin_id):
+                continue
+
+            result.orphans.append(plugin_id)
+            logger.warning(
+                "Scanner: orphan plugin '%s' (state=%s) — deactivating",
+                plugin_id,
+                state,
+            )
+            if state == "ACTIVE":
+                await lifecycle.transition(plugin_id, "DEACTIVATED")
 
     # ------------------------------------------------------------------
     # Manifest retrieval
@@ -186,6 +211,16 @@ class Scanner:
     def get_all_manifests(self) -> dict[str, PluginManifest]:
         """Return all discovered manifests."""
         return dict(self._discovered_manifests)
+
+    def _is_legacy_py_plugin(self, plugin_id: str) -> bool:
+        """Check if *plugin_id* corresponds to a legacy ``.py`` plugin file."""
+        # Reverse the canonical mapping: metrics -> metrics_plugin, etc.
+        # _BUILTIN_PLUGIN_ID_TO_FILE lives in plugin_manager
+        from master.core.plugin_manager import plugin_file_stem
+
+        stem = plugin_file_stem(plugin_id)
+        plugin_path = os.path.join(self._plugins_dir, f"{stem}.py")
+        return os.path.isfile(plugin_path)
 
     def get_plugins_dir(self) -> str:
         return self._plugins_dir
