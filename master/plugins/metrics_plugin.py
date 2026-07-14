@@ -147,6 +147,106 @@ class MetricsSnapshot(BaseModel):
         description="Top CPU-consuming processes: pid, name, cpu_percent, mem_rss_kb, state",
     )
 
+    # Network I/O (cumulative since boot, aggregate across non-loopback interfaces)
+    net_bytes_recv: int | None = Field(
+        default=None, ge=0,
+        description="Total bytes received across all non-loopback interfaces since boot",
+    )
+    net_bytes_sent: int | None = Field(
+        default=None, ge=0,
+        description="Total bytes transmitted across all non-loopback interfaces since boot",
+    )
+    net_packets_recv: int | None = Field(
+        default=None, ge=0,
+        description="Total packets received since boot",
+    )
+    net_packets_sent: int | None = Field(
+        default=None, ge=0,
+        description="Total packets transmitted since boot",
+    )
+    net_errors_in: int | None = Field(
+        default=None, ge=0,
+        description="Total receive errors since boot",
+    )
+    net_errors_out: int | None = Field(
+        default=None, ge=0,
+        description="Total transmit errors since boot",
+    )
+    net_drops_in: int | None = Field(
+        default=None, ge=0,
+        description="Total receive drops since boot",
+    )
+    net_drops_out: int | None = Field(
+        default=None, ge=0,
+        description="Total transmit drops since boot",
+    )
+
+    # Disk I/O (cumulative since boot, aggregate across physical devices)
+    disk_reads: int | None = Field(
+        default=None, ge=0,
+        description="Total disk reads completed since boot (aggregate across physical devices)",
+    )
+    disk_writes: int | None = Field(
+        default=None, ge=0,
+        description="Total disk writes completed since boot",
+    )
+    disk_read_bytes: int | None = Field(
+        default=None, ge=0,
+        description="Total bytes read from disk since boot",
+    )
+    disk_write_bytes: int | None = Field(
+        default=None, ge=0,
+        description="Total bytes written to disk since boot",
+    )
+
+    # Temperature (max across thermal zones, Celsius)
+    temp_celsius: float | None = Field(
+        default=None, ge=0.0,
+        description="Maximum temperature across all thermal zones (Celsius)",
+    )
+
+    # PSI — Pressure Stall Information (avg10)
+    psi_cpu_avg10: float | None = Field(
+        default=None, ge=0.0,
+        description="CPU pressure stall information — avg10",
+    )
+    psi_mem_avg10: float | None = Field(
+        default=None, ge=0.0,
+        description="Memory pressure stall information — avg10",
+    )
+    psi_io_avg10: float | None = Field(
+        default=None, ge=0.0,
+        description="I/O pressure stall information — avg10",
+    )
+
+    # File handles / inodes
+    file_handles_used: int | None = Field(
+        default=None, ge=0,
+        description="Number of file handles currently in use",
+    )
+    file_handles_max: int | None = Field(
+        default=None, ge=0,
+        description="Maximum file handles allowed (kernel limit)",
+    )
+
+    # Entropy available
+    entropy_avail: int | None = Field(
+        default=None, ge=0,
+        description="Available entropy in bits (for /dev/random)",
+    )
+
+    # Context switches since boot
+    context_switches: int | None = Field(
+        default=None, ge=0,
+        description="Total context switches since boot",
+    )
+
+    # CPU throttling (aggregate core throttle count)
+    cpu_throttled_count: int | None = Field(
+        default=None, ge=0,
+        description="Aggregate number of CPU core throttle events since boot",
+    )
+
     @property
     def mem_free_bytes(self) -> int:
         """Derived: free memory = total - used."""
@@ -306,8 +406,15 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             mem_total_bytes, mem_used_bytes, mem_percent,
             swap_total_bytes, swap_used_bytes,
             disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes, disks_json, top_processes_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            uptime_seconds, processes, disks_json, top_processes_json,
+            net_bytes_recv, net_bytes_sent, net_packets_recv, net_packets_sent,
+            net_errors_in, net_errors_out, net_drops_in, net_drops_out,
+            disk_reads, disk_writes, disk_read_bytes, disk_write_bytes,
+            temp_celsius,
+            psi_cpu_avg10, psi_mem_avg10, psi_io_avg10,
+            file_handles_used, file_handles_max,
+            entropy_avail, context_switches, cpu_throttled_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_id,
@@ -331,6 +438,33 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             snapshot.get("processes"),
             json.dumps(snapshot["disks"]) if snapshot.get("disks") else None,
             json.dumps(snapshot["top_processes"]) if snapshot.get("top_processes") else None,
+            # Network I/O
+            snapshot.get("net_bytes_recv"),
+            snapshot.get("net_bytes_sent"),
+            snapshot.get("net_packets_recv"),
+            snapshot.get("net_packets_sent"),
+            snapshot.get("net_errors_in"),
+            snapshot.get("net_errors_out"),
+            snapshot.get("net_drops_in"),
+            snapshot.get("net_drops_out"),
+            # Disk I/O
+            snapshot.get("disk_reads"),
+            snapshot.get("disk_writes"),
+            snapshot.get("disk_read_bytes"),
+            snapshot.get("disk_write_bytes"),
+            # Temperature
+            snapshot.get("temp_celsius"),
+            # PSI
+            snapshot.get("psi_cpu_avg10"),
+            snapshot.get("psi_mem_avg10"),
+            snapshot.get("psi_io_avg10"),
+            # File handles
+            snapshot.get("file_handles_used"),
+            snapshot.get("file_handles_max"),
+            # Entropy / context switches / CPU throttling
+            snapshot.get("entropy_avail"),
+            snapshot.get("context_switches"),
+            snapshot.get("cpu_throttled_count"),
         ),
     )
     await db.commit()
