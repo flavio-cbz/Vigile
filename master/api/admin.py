@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -792,6 +793,7 @@ async def toggle_plugin(
         {
             "status": "success",
             "message": f"Plugin '{plugin_id}' est maintenant {'activé' if new_state else 'désactivé'}.",
+            "loaded": new_state,
         }
     )
 
@@ -822,8 +824,16 @@ async def delete_plugin(
     if not os.path.isfile(plugin_path):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
-    # 1. Unload hooks dynamically
-    await plugin_manager.unload_plugin(plugin_stem)
+    # 1. Uninstall via engine if available, otherwise unload legacy
+    from master.core.plugin_manager import plugin_engine
+    if plugin_engine is not None:
+        try:
+            await plugin_engine.uninstall(plugin_id)
+        except Exception as e:
+            logger.error("Failed to uninstall plugin '%s' via engine: %s", plugin_id, e)
+            await plugin_manager.unload_plugin(plugin_stem)
+    else:
+        await plugin_manager.unload_plugin(plugin_stem)
 
     # 2. Remove file from disk
     try:
@@ -856,3 +866,118 @@ async def admin_refresh_binary_cache(
 ) -> JSONResponse:
     result = await refresh_binary_cache()
     return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/alerts", summary="List all alerts with optional filters")
+async def list_alerts(
+    node_id: str | None = None,
+    status: str | None = None,  # firing | resolved
+    severity: str | None = None,  # info | warning | critical
+    limit: int = 100,
+    offset: int = 0,
+    db=Depends(get_db),
+    claims=Depends(require_role("operator")),
+) -> JSONResponse:
+    """
+    Liste paginée des alertes. Filtrable par nœud, statut, sévérité.
+    Accessible aux rôles operator et admin.
+    """
+    conditions = ["1=1"]
+    params: list = []
+
+    if node_id:
+        conditions.append("alerts.node_id = ?")
+        params.append(node_id)
+    if status:
+        conditions.append("alerts.status = ?")
+        params.append(status)
+    if severity:
+        conditions.append("alerts.severity = ?")
+        params.append(severity)
+
+    where = " AND ".join(conditions)
+
+    # Total count
+    async with db.execute(
+        f"SELECT COUNT(*) as cnt FROM alerts WHERE {where}", params
+    ) as cursor:
+        row = await cursor.fetchone()
+        total = row["cnt"] if row else 0
+
+    # Rows
+    async with db.execute(
+        f"SELECT alerts.*, nodes.name as node_name, nodes.hostname as node_hostname "
+        f"FROM alerts LEFT JOIN nodes ON alerts.node_id = nodes.id "
+        f"WHERE {where} ORDER BY alerts.created_at DESC LIMIT ? OFFSET ?",
+        [*params, limit, offset],
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+    alerts_list = [dict(r) for r in rows]
+
+    return JSONResponse({
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "alerts": alerts_list,
+    })
+
+
+@router.get("/alerts/summary", summary="Alert summary with counts by severity")
+async def alert_summary(
+    db=Depends(get_db),
+    claims=Depends(require_role("operator")),
+) -> JSONResponse:
+    """Retourne le résumé des alertes actives et les compteurs par sévérité."""
+    # Compteurs par sévérité depuis la base
+    async with db.execute(
+        "SELECT severity, COUNT(*) as cnt FROM alerts WHERE status = 'firing' GROUP BY severity"
+    ) as cursor:
+        rows = await cursor.fetchall()
+    by_severity: dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
+    for row in rows:
+        by_severity[row["severity"]] = row["cnt"]
+
+    # Top alertes récentes (10 dernières)
+    async with db.execute(
+        "SELECT alerts.*, nodes.name as node_name "
+        "FROM alerts LEFT JOIN nodes ON alerts.node_id = nodes.id "
+        "WHERE alerts.status = 'firing' "
+        "ORDER BY alerts.created_at DESC LIMIT 10"
+    ) as cursor:
+        recent = [dict(r) for r in await cursor.fetchall()]
+
+    # Total
+    async with db.execute(
+        "SELECT COUNT(*) as cnt FROM alerts WHERE status = 'firing'"
+    ) as cursor:
+        row = await cursor.fetchone()
+        total = row["cnt"] if row else 0
+
+    return JSONResponse({
+        "total_active": total,
+        "by_severity": by_severity,
+        "recent": recent,
+    })
+
+
+@router.post("/alerts/{alert_id}/acknowledge", summary="Acknowledge an alert")
+async def acknowledge_alert(
+    alert_id: str,
+    db=Depends(get_db),
+    claims=Depends(require_role("operator")),
+) -> JSONResponse:
+    """Marque une alerte comme acquittée (la supprime de la vue active)."""
+    async with db.execute(
+        "UPDATE alerts SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ? AND status = 'firing'",
+        (time.time(), time.time(), alert_id),
+    ) as cursor:
+        await db.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+    return JSONResponse({"status": "success", "message": "Alert acknowledged."})
