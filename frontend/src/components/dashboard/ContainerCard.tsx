@@ -54,13 +54,13 @@ export const ContainerCard: React.FC<ContainerCardProps> = ({
       );
       useToastStore.getState().addToast(
         'success',
-        'Succès',
-        t('card.restarting') + ' ' + container.name
+        t('container.toast.success'),
+        t('container.toast.restarting') + ' ' + container.name
       );
       if (onRefresh) onRefresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('settings.error');
-      useToastStore.getState().addToast('error', 'Erreur', message);
+      useToastStore.getState().addToast('error', t('container.toast.error'), message);
     } finally {
       setIsRestarting(false);
     }

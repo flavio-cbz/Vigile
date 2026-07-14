@@ -73,6 +73,7 @@ export const Dashboard: React.FC = () => {
   const [rejectingProposalId, setRejectingProposalId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
+  const [removingProposalId, setRemovingProposalId] = useState<string | null>(null);
 
   // Combine all insights into a flat list (includes real + synthetic offline insights)
   const allInsightsList: Array<{ insight: InsightItem; nodeName: string; nodeId: string }> = [];
@@ -82,10 +83,9 @@ export const Dashboard: React.FC = () => {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return;
     list.forEach((insight) => {
+      allInsightsList.push({ insight, nodeName: node.name, nodeId });
       if (insight.severity === 'ok') {
         stableMetricsCount++;
-      } else {
-        allInsightsList.push({ insight, nodeName: node.name, nodeId });
       }
     });
   });
@@ -153,6 +153,7 @@ export const Dashboard: React.FC = () => {
         loadingProposalId={loadingProposalId}
         rejectingProposalId={rejectingProposalId}
         rejectReason={rejectReason}
+        removingProposalId={removingProposalId}
         onApprove={async (id) => {
           setLoadingProposalId(id);
           try {
@@ -174,10 +175,14 @@ export const Dashboard: React.FC = () => {
           setRejectingProposalId(null);
           setRejectReason('');
           setLoadingProposalId(id);
+          // Start exit animation before removing
+          setRemovingProposalId(id);
+          await new Promise(resolve => setTimeout(resolve, 600));
           try {
             await handleRejectProposal(id, reason);
           } finally {
             setLoadingProposalId(null);
+            setRemovingProposalId(null);
           }
         }}
       />

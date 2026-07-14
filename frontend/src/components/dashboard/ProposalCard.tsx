@@ -12,6 +12,7 @@ interface ProposalCardProps {
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string) => Promise<void>;
   loading?: boolean;
+  removing?: boolean;
 }
 
 export const ProposalCard: React.FC<ProposalCardProps> = ({
@@ -20,6 +21,7 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
   onApprove,
   onReject,
   loading = false,
+  removing = false,
 }) => {
   const { t } = useLocale();
   const { can } = usePermission();
@@ -77,7 +79,7 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
 
   return (
     <div
-      className={`card card-proposal flex flex-col justify-between group relative ${cardStatusClass} ${isExpanded ? '!h-auto' : ''}`}
+      className={`card card-proposal flex flex-col justify-between group relative ${cardStatusClass} ${isExpanded ? '!h-auto' : ''} ${removing ? 'opacity-0 scale-95 -translate-x-4 transition-all duration-500 ease-in-out pointer-events-none' : 'transition-all duration-300'}`}
     >
       <div className="flex items-start justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 flex-wrap shrink-0">

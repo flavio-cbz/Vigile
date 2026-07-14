@@ -13,6 +13,7 @@ interface ProposalsSectionProps {
   loadingProposalId: string | null;
   rejectingProposalId: string | null;
   rejectReason: string;
+  removingProposalId: string | null;
   onApprove: (id: string) => Promise<void>;
   onRejectInit: (id: string) => void;
   onRejectCancel: () => void;
@@ -26,6 +27,7 @@ export const ProposalsSection: React.FC<ProposalsSectionProps> = ({
   loadingProposalId,
   rejectingProposalId,
   rejectReason,
+  removingProposalId,
   onApprove,
   onRejectInit,
   onRejectCancel,
@@ -56,6 +58,7 @@ export const ProposalsSection: React.FC<ProposalsSectionProps> = ({
                 onRejectInit(id);
               }}
               loading={loadingProposalId === prop.id}
+              removing={removingProposalId === prop.id}
             />
           );
         })}
