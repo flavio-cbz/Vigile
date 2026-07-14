@@ -139,7 +139,7 @@ export const AutomationsPage: React.FC = () => {
       const data = await api<AutomationRule[]>('/api/admin/automations');
       if (data) setRules(data);
     } catch {
-      addToast('error', 'Erreur', 'Erreur de chargement des règles.');
+      addToast('error', t('automations.toast.load_error_title'), t('automations.toast.load_error'));
     } finally {
       setLoading(false);
     }
@@ -151,7 +151,7 @@ export const AutomationsPage: React.FC = () => {
         const data = await api<AutomationRule[]>('/api/admin/automations');
         if (data) setRules(data);
       } catch {
-        addToast('error', 'Erreur', 'Erreur de chargement des règles.');
+        addToast('error', t('automations.toast.load_error_title'), t('automations.toast.load_error'));
       } finally {
         setLoading(false);
       }
@@ -166,24 +166,24 @@ export const AutomationsPage: React.FC = () => {
     setTogglingId(rule.id);
     try {
       await api(`/api/admin/automations/${rule.id}/toggle`, { method: 'POST' });
-      addToast('success', 'Succès', `Règle "${rule.name}" ${rule.enabled ? 'désactivée' : 'activée'}.`);
+      addToast('success', t('automations.toast.success'), t('automations.toast.toggle_success', { name: rule.name, action: rule.enabled ? t('automations.action.deactivate') : t('automations.action.activate') }));
       fetchRules();
     } catch {
-      addToast('error', 'Erreur', 'Échec du changement de statut.');
+      addToast('error', t('automations.toast.error'), t('automations.toast.toggle_error'));
     } finally {
       setTogglingId(null);
     }
   };
 
   const handleDelete = async (rule: AutomationRule) => {
-    if (!window.confirm(`Supprimer la règle "${rule.name}" ? Cette action est irréversible.`)) return;
+    if (!window.confirm(t('automations.toast.delete_confirm', { name: rule.name }))) return;
     setDeletingId(rule.id);
     try {
       await api(`/api/admin/automations/${rule.id}`, { method: 'DELETE' });
-      addToast('success', 'Succès', `Règle "${rule.name}" supprimée.`);
+      addToast('success', t('automations.toast.success'), t('automations.toast.delete_success', { name: rule.name }));
       fetchRules();
     } catch {
-      addToast('error', 'Erreur', 'Échec de la suppression.');
+      addToast('error', t('automations.toast.error'), t('automations.toast.delete_error'));
     } finally {
       setDeletingId(null);
     }
@@ -198,12 +198,12 @@ export const AutomationsPage: React.FC = () => {
         body: JSON.stringify({ node_id: testNodeId }),
       });
       const nodeName = nodes.find(n => n.id === testNodeId)?.name ?? testNodeId;
-      addToast('success', 'Succès', `Règle déclenchée sur ${nodeName} — vérifiez l'historique.`);
+      addToast('success', t('automations.toast.success'), t('automations.toast.test_success', { nodeName }));
       setTestingRule(null);
       setTestNodeId('');
       fetchRules();
     } catch {
-      addToast('error', 'Erreur', 'Échec du test.');
+      addToast('error', t('automations.toast.error'), t('automations.toast.test_error'));
     } finally {
       setTestLoading(false);
     }

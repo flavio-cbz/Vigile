@@ -3,6 +3,7 @@ import { X, Zap, Server, Plus, Trash2, Clock, Gauge } from 'lucide-react';
 import { api } from '../../hooks/useApi';
 import { useToastStore } from '../../store/useToastStore';
 import { Spinner } from '../primitives/Spinner';
+import { t } from '../../i18n';
 import type { AutomationRule } from '../../pages/AutomationsPage';
 
 interface Props {
@@ -148,11 +149,11 @@ export const RuleFormModal: React.FC<Props> = ({ rule, onClose, onSaved }) => {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      addToast('error', 'Erreur', 'Le nom de la règle est requis.');
+      addToast('error', t('automations.toast.error'), t('automations.form.name_required'));
       return;
     }
     if (actions.length === 0) {
-      addToast('error', 'Erreur', 'Ajoutez au moins une action.');
+      addToast('error', t('automations.toast.error'), t('automations.form.action_required'));
       return;
     }
     setSaving(true);
@@ -162,17 +163,18 @@ export const RuleFormModal: React.FC<Props> = ({ rule, onClose, onSaved }) => {
           method: 'PATCH',
           body: JSON.stringify(buildPayload()),
         });
-        addToast('success', 'Succès', 'Règle mise à jour.');
+        addToast('success', t('automations.toast.success'), t('automations.form.updated'));
       } else {
         await api('/api/admin/automations', {
           method: 'POST',
           body: JSON.stringify(buildPayload()),
         });
-        addToast('success', 'Succès', 'Règle créée avec succès.');
+        addToast('success', t('automations.toast.success'), t('automations.form.created'));
       }
       onSaved();
     } catch (err: unknown) {
-      addToast('error', 'Erreur', `Erreur : ${err instanceof Error ? err.message : 'inconnue'}`);
+      const message = err instanceof Error ? err.message : t('common.error_unknown');
+      addToast('error', t('automations.toast.error'), t('automations.form.error', { message }));
     } finally {
       setSaving(false);
     }
