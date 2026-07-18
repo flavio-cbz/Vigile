@@ -780,8 +780,8 @@ class InsightsManager:
                 p_name = (p.container_name or p.service_name or "").lower()
                 for tp in top_procs:
                     tp_name = tp.get("name", "").lower()
-                    if p_name in tp_name or tp_name in p_name:
-                        tp_cpu = tp.get("cpu_percent", 0.0)
+                    tp_cpu = tp.get("cpu_percent", 0.0)
+                    if (p_name in tp_name or tp_name in p_name) and tp_cpu >= p.cpu_threshold_percent:
                         if tp_cpu > best_actual_cpu:
                             best_actual_cpu = tp_cpu
                             culprit = p

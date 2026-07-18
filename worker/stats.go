@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -187,6 +188,16 @@ func collectMetrics(ctx context.Context) MetricsSnapshot {
 
 var prevIdle, prevTotal atomic.Uint64
 
+// prevProcSamples caches the previous (utime+stime, timestamp) reading per PID
+// so that getTopProcesses can compute a delta-based (recent-window) CPU% across
+// consecutive worker collection cycles, instead of a misleading lifetime average.
+var prevProcSamples sync.Map // key: int (pid) -> procStatSample
+
+type procStatSample struct {
+	totalJiffies uint64
+	t0           float64
+}
+
 func getCPUPercent() float64 {
 	data, err := os.ReadFile(procPrefix + "/proc/stat")
 	if err != nil {
@@ -204,7 +215,10 @@ func getCPUPercent() float64 {
 		}
 		var idle, total uint64
 		for i, f := range fields[1:] {
-			v, _ := strconv.ParseUint(f, 10, 64)
+			v, err := strconv.ParseUint(f, 10, 64)
+			if err != nil {
+				logger.Printf("stats: parse cpu field %q: %v", f, err)
+			}
 			total += v
 			if i == 3 || i == 4 { // idle + iowait (fields 4 and 5 in /proc/stat)
 				idle += v
@@ -239,7 +253,10 @@ func getLoadAvg(index int) float64 {
 	if len(fields) < 3 {
 		return 0
 	}
-	v, _ := strconv.ParseFloat(fields[index], 64)
+	v, err := strconv.ParseFloat(fields[index], 64)
+	if err != nil {
+		logger.Printf("stats: parse loadavg: %v", err)
+	}
 	return v
 }
 
@@ -258,7 +275,10 @@ func getMemField(field string) int64 {
 		if strings.HasPrefix(line, field+":") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
-				v, _ := strconv.ParseInt(parts[1], 10, 64)
+				v, err := strconv.ParseInt(parts[1], 10, 64)
+				if err != nil {
+					logger.Printf("stats: parse meminfo %q: %v", field, err)
+				}
 				return v * 1024 // kB → bytes
 			}
 		}
@@ -349,8 +369,14 @@ func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
 		}
 		seenDevices[device] = struct{}{}
 
-		totalKB, _ := strconv.ParseInt(fields[1], 10, 64)
-		usedKB, _ := strconv.ParseInt(fields[2], 10, 64)
+		totalKB, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			logger.Printf("stats: parse disk total: %v", err)
+		}
+		usedKB, err := strconv.ParseInt(fields[2], 10, 64)
+		if err != nil {
+			logger.Printf("stats: parse disk used: %v", err)
+		}
 
 		mountTotal := totalKB * 1024
 		mountUsed := usedKB * 1024
@@ -473,7 +499,10 @@ func getUptime() float64 {
 	if len(fields) == 0 {
 		return 0
 	}
-	v, _ := strconv.ParseFloat(fields[0], 64)
+	v, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		logger.Printf("stats: parse uptime: %v", err)
+	}
 	return v
 }
 
@@ -545,7 +574,10 @@ func getNetworkStats() (bytesRecv, bytesSent, pktsRecv, pktsSent, errIn, errOut,
 }
 
 func parseInt64(s string) int64 {
-	v, _ := strconv.ParseInt(s, 10, 64)
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse int64 %q: %v", s, err)
+	}
 	return v
 }
 
@@ -709,7 +741,10 @@ func getEntropy() int64 {
 	if err != nil {
 		return 0
 	}
-	v, _ := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse entropy: %v", err)
+	}
 	return v
 }
 
@@ -767,10 +802,23 @@ func parseProcStat(data []byte) (name, state string, utime, stime, starttime uin
 		return name, "", 0, 0, 0, 0
 	}
 	state = fields[0]
-	utime, _ = strconv.ParseUint(fields[11], 10, 64)
-	stime, _ = strconv.ParseUint(fields[12], 10, 64)
-	starttime, _ = strconv.ParseUint(fields[19], 10, 64)
-	rssPages, _ = strconv.ParseInt(fields[22], 10, 64)
+	var err error
+	utime, err = strconv.ParseUint(fields[11], 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse utime: %v", err)
+	}
+	stime, err = strconv.ParseUint(fields[12], 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse stime: %v", err)
+	}
+	starttime, err = strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse starttime: %v", err)
+	}
+	rssPages, err = strconv.ParseInt(fields[22], 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse rss: %v", err)
+	}
 	return
 }
 
@@ -787,11 +835,8 @@ func getTopProcesses(limit int) []ProcessInfo {
 	if err != nil {
 		return nil
 	}
-	uptime := getUptime()
-	if uptime <= 0 {
-		return nil
-	}
 	hz := 100.0
+	now := float64(time.Now().UnixMicro()) / 1_000_000
 	procs := make([]ProcessInfo, 0, len(entries))
 	for _, pidStr := range entries {
 		if !isNumeric(pidStr) {
@@ -805,13 +850,42 @@ func getTopProcesses(limit int) []ProcessInfo {
 		if pName == "" {
 			continue
 		}
-		totalJiffies := float64(utime + stime)
-		elapsedJiffies := uptime*hz - float64(starttime)
-		var cpuPct float64
-		if elapsedJiffies > 0 {
-			cpuPct = math.Round(totalJiffies/elapsedJiffies*1000) / 10
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			logger.Printf("stats: parse pid %q: %v", pidStr, err)
+			continue
 		}
-		pid, _ := strconv.Atoi(pidStr)
+
+		totalJiffies := utime + stime
+
+		// Delta-based (recent-window) CPU% using the previous sample for this PID,
+		// so the value reflects current usage rather than a lifetime average.
+		// First sighting has no previous sample, so fall back to lifetime average.
+		var cpuPct float64
+		if prevSample, ok := prevProcSamples.Load(pid); ok {
+			prev := prevSample.(procStatSample)
+			deltaJiffies := int64(totalJiffies) - int64(prev.totalJiffies)
+			deltaSec := now - prev.t0
+			if deltaSec > 0 && deltaJiffies > 0 {
+				cpuPct = float64(deltaJiffies) / hz / deltaSec * 100
+				if cpuPct < 0 {
+					cpuPct = 0
+				}
+				cpuPct = math.Round(cpuPct*10) / 10
+			}
+		} else {
+			// Fallback: lifetime average since process start.
+			uptime := getUptime()
+			if uptime > 0 {
+				elapsedJiffies := uptime*hz - float64(starttime)
+				if elapsedJiffies > 0 {
+					cpuPct = math.Round(float64(totalJiffies)/elapsedJiffies*1000) / 10
+				}
+			}
+		}
+
+		prevProcSamples.Store(pid, procStatSample{totalJiffies: totalJiffies, t0: now})
+
 		procs = append(procs, ProcessInfo{
 			PID:        pid,
 			Name:       pName,
@@ -969,9 +1043,18 @@ func getDarwinLoadAvg(ctx context.Context) (float64, float64, float64) {
 	if len(fields) < 3 {
 		return 0, 0, 0
 	}
-	l1, _ := strconv.ParseFloat(fields[0], 64)
-	l5, _ := strconv.ParseFloat(fields[1], 64)
-	l15, _ := strconv.ParseFloat(fields[2], 64)
+	l1, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		logger.Printf("stats: parse load1: %v", err)
+	}
+	l5, err := strconv.ParseFloat(fields[1], 64)
+	if err != nil {
+		logger.Printf("stats: parse load5: %v", err)
+	}
+	l15, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		logger.Printf("stats: parse load15: %v", err)
+	}
 	return l1, l5, l15
 }
 
@@ -1032,7 +1115,10 @@ func extractVmStatValue(line string) int64 {
 		return 0
 	}
 	valStr := strings.TrimSuffix(parts[len(parts)-1], ".")
-	val, _ := strconv.ParseInt(valStr, 10, 64)
+	val, err := strconv.ParseInt(valStr, 10, 64)
+	if err != nil {
+		logger.Printf("stats: parse vm_stat value: %v", err)
+	}
 	return val
 }
 
