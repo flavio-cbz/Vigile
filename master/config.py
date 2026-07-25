@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Configuration
 Loads all settings from environment variables with sensible defaults.
@@ -5,21 +7,31 @@ Loads all settings from environment variables with sensible defaults.
 
 import os
 import secrets
-from pathlib import Path
-from pydantic import BaseModel, field_validator
+
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from master.core.secret_loader import load_secret
 
 
 class Settings(BaseModel):
     """Application settings loaded from environment variables."""
+
+    model_config = ConfigDict(frozen=False)
 
     # --- Server ---
     master_url: str = os.getenv("MASTER_URL", "http://localhost:8000")
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    testing: bool = os.getenv("TESTING", "false").lower() == "true"
 
     # --- Database ---
     database_path: str = os.getenv("DATABASE_PATH", "./data/vigile.db")
+    db_timeout: int = int(os.getenv("DB_TIMEOUT", "30"))
+    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
+
+    # --- Default Timeout ---
+    DEFAULT_TIMEOUT: float = 30.0
 
     # --- Security: Server Secret (HMAC signing for JOIN_TOKENs) ---
     server_secret_key: str = os.getenv("SERVER_SECRET_KEY", "")
@@ -40,25 +52,100 @@ class Settings(BaseModel):
     heartbeat_lost_threshold: int = int(os.getenv("HEARTBEAT_LOST_THRESHOLD", "300"))
     heartbeat_stale_threshold: int = int(os.getenv("HEARTBEAT_STALE_THRESHOLD", "86400"))
 
+    # --- Rate Limiting ---
+    rate_limit_max_requests: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "300"))
+    rate_limit_window_seconds: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+
     # --- Master Ed25519 Keypair ---
     master_key_path: str = os.getenv("MASTER_KEY_PATH", "./data/master_ed25519.key")
 
     # --- CORS ---
-    cors_origins: list[str] = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+    cors_origins: list[str] = (
+        os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+    )
 
     # --- Security: Trusted proxies for X-Forwarded-For ---
-    trusted_proxies: list[str] = os.getenv("TRUSTED_PROXIES", "").split(",") if os.getenv("TRUSTED_PROXIES") else []
+    trusted_proxies: list[str] = (
+        os.getenv("TRUSTED_PROXIES", "").split(",") if os.getenv("TRUSTED_PROXIES") else []
+    )
 
     # --- Security: HTTPS enforcement ---
-    enforce_https: bool = os.getenv("ENFORCE_HTTPS", "false").lower() == "true"
+    allow_insecure: bool = os.getenv("ALLOW_INSECURE", "false").lower() == "true"
+    enforce_https: bool = os.getenv("ENFORCE_HTTPS", "true").lower() == "true"
+    cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").lower() == "true"
+    cookie_samesite: str = os.getenv("COOKIE_SAMESITE", "lax")
+    cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
 
     # --- LLM Provider ---
     llm_base_url: str = os.getenv("LLM_BASE_URL", "")
-    llm_api_key: str = os.getenv("LLM_API_KEY", "")
-    llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    llm_api_key: str = load_secret("LLM_API_KEY")
+    llm_model: str = os.getenv("LLM_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+    llm_chat_temperature: float = float(os.getenv("LLM_CHAT_TEMPERATURE", "0.3"))
+    llm_structured_temperature: float = float(os.getenv("LLM_STRUCTURED_TEMPERATURE", "0.1"))
+    llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+    llm_timeout: int = int(os.getenv("LLM_TIMEOUT", "30"))
+    llm_stream_read_timeout: int = int(os.getenv("LLM_STREAM_READ_TIMEOUT", "120"))
+
+    # --- Intent GC ---
+    default_intent_max_age: int = int(os.getenv("INTENT_DEFAULT_MAX_AGE", "300"))
+    intent_timeout: float = float(os.getenv("INTENT_TIMEOUT", "10.0"))
+
+    # --- Cache ---
+    cache_update_interval: int = int(os.getenv("CACHE_UPDATE_INTERVAL", "300"))
 
     # --- Plugins ---
     plugins_dir: str = os.getenv("PLUGINS_DIR", "./master/plugins")
+    plugin_registry_url: str = os.getenv(
+        "PLUGIN_REGISTRY_URL",
+        "https://raw.githubusercontent.com/flavio-cbz/Vigile-Plugins/main/registry.json",
+    )
+    plugin_sandbox: bool = os.getenv("PLUGIN_SANDBOX", "true").lower() == "true"
+
+    # --- Allowed dependencies (X-06) ---
+    allowed_dependencies: list[str] = (
+        os.getenv(
+            "ALLOWED_DEPENDENCIES",
+            "aiosqlite,httpx,pydantic,passlib,bcrypt,fastapi,uvicorn,starlette,python-multipart,anyio,pydantic-settings",
+        ).split(",")
+        if os.getenv("ALLOWED_DEPENDENCIES")
+        else [
+            "aiosqlite",
+            "httpx",
+            "pydantic",
+            "passlib",
+            "bcrypt",
+            "fastapi",
+            "uvicorn",
+            "starlette",
+            "python-multipart",
+            "anyio",
+            "pydantic-settings",
+        ]
+    )
+
+    # --- Worker Binary Distribution ---
+    # Public minisign key used to verify Worker binary signatures.
+    # In production, set WORKER_BINARY_PUBLIC_KEY to the base64 key (e.g. "RWQ...ultQ").
+    # Empty default is acceptable for dev: signature verification becomes a no-op.
+    worker_binary_public_key: str = os.getenv("WORKER_BINARY_PUBLIC_KEY", "")
+    worker_binary_manifest_url: str = os.getenv(
+        "WORKER_BINARY_MANIFEST_URL",
+        "https://github.com/flavio-cbz/Vigile/releases/latest/download/manifest.json",
+    )
+    worker_binary_cache_dir: str = os.getenv("WORKER_BINARY_CACHE_DIR", "/var/cache/vigile/worker")
+    worker_binary_cache_ttl_seconds: int = int(os.getenv("WORKER_BINARY_CACHE_TTL_SECONDS", "3600"))
+    worker_binary_revocation_url: str = os.getenv(
+        "WORKER_BINARY_REVOCATION_URL",
+        "https://github.com/flavio-cbz/Vigile/releases/latest/download/revoked-versions.json",
+    )
+    worker_binary_revocation_ttl_seconds: int = int(
+        os.getenv("WORKER_BINARY_REVOCATION_TTL_SECONDS", "300")
+    )
+    worker_binary_github_token: str = os.getenv("WORKER_BINARY_GITHUB_TOKEN", "")
+    auto_update_workers: bool = os.getenv("AUTO_UPDATE_WORKERS", "false").lower() in ("true", "1")
+    offline_mode: bool = os.getenv("OFFLINE_MODE", "false").lower() == "true"
+    worker_binary_local_dir: str = os.getenv("WORKER_BINARY_LOCAL_DIR", "/var/cache/vigile/worker")
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -66,6 +153,21 @@ class Settings(BaseModel):
         if isinstance(v, list):
             return v
         return [o.strip() for o in v.split(",") if o.strip()]
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _reject_wildcard_with_credentials(cls, v: list[str]) -> list[str]:
+        if "*" in v:
+            import logging
+
+            _log = logging.getLogger(__name__)
+            _log.warning(
+                "CORS_ORIGINS contains '*' — this is incompatible with "
+                "allow_credentials=True (hardcoded in main.py). "
+                "Browsers will reject credentialed requests. "
+                "Set specific origins instead."
+            )
+        return v
 
     @field_validator("trusted_proxies", mode="before")
     @classmethod
@@ -77,13 +179,30 @@ class Settings(BaseModel):
     def model_post_init(self, __context) -> None:
         """Generate secrets if not provided (dev convenience, NOT for production)."""
         import logging
+
         _log = logging.getLogger(__name__)
+        if not self.allow_insecure:
+            self.enforce_https = True
+            self.cookie_secure = True
         if not self.server_secret_key:
-            self.server_secret_key = secrets.token_hex(32)
-            _log.warning("SERVER_SECRET_KEY auto-generated (dev mode). Set it in production.")
+            if self.allow_insecure:
+                self.server_secret_key = "dev_secret_key_only"
+                _log.warning("SERVER_SECRET_KEY auto-generated (allow_insecure). Set it in production.")
+            else:
+                raise ValueError("SERVER_SECRET_KEY must be set in production")
         if not self.jwt_secret_key:
-            self.jwt_secret_key = secrets.token_hex(32)
-            _log.warning("JWT_SECRET_KEY auto-generated (dev mode). Set it in production.")
+            if self.allow_insecure:
+                self.jwt_secret_key = "dev_jwt_key_only"
+                _log.warning("JWT_SECRET_KEY auto-generated (allow_insecure). Set it in production.")
+            else:
+                raise ValueError("JWT_SECRET_KEY must be set in production")
+
+    def apply_overrides(self, base_url: str, api_key: str, model: str) -> None:
+        """Mutate LLM configuration in memory (Zero filesystem I/O per DI rule)."""
+        self.llm_base_url = base_url
+        if api_key != "••••••••":
+            self.llm_api_key = api_key
+        self.llm_model = model
 
 
 # Singleton

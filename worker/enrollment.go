@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -15,13 +17,34 @@ import (
 var b64enc = base64.URLEncoding
 
 // KeyPaths for the Ed25519 keypair.
-const (
-	keyDir         = "/etc/vigile"
-	privateKeyPath = keyDir + "/worker.key"
-	publicKeyPath  = keyDir + "/worker.key.pub"
-	tokenPath      = keyDir + "/enrollment.token"
-	masterURLPath  = keyDir + "/master_url"
+var (
+	keyDir          = defaultKeyDir()
+	privateKeyPath  = filepath.Join(keyDir, "worker.key")
+	publicKeyPath   = filepath.Join(keyDir, "worker.key.pub")
+	tokenPath       = filepath.Join(keyDir, "enrollment.token")
+	masterURLPath   = filepath.Join(keyDir, "master_url")
+	workerTokenPath = filepath.Join(keyDir, "worker_token")
 )
+
+func defaultKeyDir() string {
+	if runtime.GOOS == "windows" {
+		programData := os.Getenv("ProgramData")
+		if programData == "" {
+			programData = `C:\ProgramData`
+		}
+		return filepath.Join(programData, "vigile")
+	}
+	return "/etc/vigile"
+}
+
+func setKeyDir(dir string) {
+	keyDir = dir
+	privateKeyPath = filepath.Join(keyDir, "worker.key")
+	publicKeyPath = filepath.Join(keyDir, "worker.key.pub")
+	tokenPath = filepath.Join(keyDir, "enrollment.token")
+	masterURLPath = filepath.Join(keyDir, "master_url")
+	workerTokenPath = filepath.Join(keyDir, "worker_token")
+}
 
 // loadOrGenerateKeypair loads the Ed25519 keypair from disk, or generates a new one.
 func loadOrGenerateKeypair() (ed25519.PrivateKey, ed25519.PublicKey, error) {
@@ -48,7 +71,11 @@ func loadOrGenerateKeypair() (ed25519.PrivateKey, ed25519.PublicKey, error) {
 	if err := os.WriteFile(privateKeyPath, priv, 0400); err != nil {
 		return nil, nil, fmt.Errorf("writing private key: %w", err)
 	}
-	pubData, _ := json.Marshal(pub)
+	pubData, err := json.Marshal(pub)
+	if err != nil {
+		logger.Printf("enrollment: marshal public key: %v", err)
+		pubData = []byte("{}")
+	}
 	if err := os.WriteFile(publicKeyPath, pubData, 0444); err != nil {
 		return nil, nil, fmt.Errorf("writing public key: %w", err)
 	}
@@ -58,8 +85,10 @@ func loadOrGenerateKeypair() (ed25519.PrivateKey, ed25519.PublicKey, error) {
 }
 
 // buildEnrollmentRequest builds the ENROLLMENT_REQUEST message.
-func buildEnrollmentRequest(joinToken string, pub ed25519.PublicKey, fp Fingerprint) map[string]interface{} {
-	return map[string]interface{}{
+// When workerToken is provided (reconnect mode), it is sent instead of join_token
+// and reconnect:true is set to signal the master to skip the Ed25519 challenge.
+func buildEnrollmentRequest(joinToken, workerToken string, pub ed25519.PublicKey, fp Fingerprint) map[string]interface{} {
+	req := map[string]interface{}{
 		"type":       "ENROLLMENT_REQUEST",
 		"join_token": joinToken,
 		"public_key": b64enc.EncodeToString(pub),
@@ -70,6 +99,12 @@ func buildEnrollmentRequest(joinToken string, pub ed25519.PublicKey, fp Fingerpr
 			"os":         fp.OS,
 		},
 	}
+	if workerToken != "" {
+		req["join_token"] = ""
+		req["worker_token"] = workerToken
+		req["reconnect"] = true
+	}
+	return req
 }
 
 // signChallenge signs a challenge string with the Ed25519 private key.
@@ -94,6 +129,34 @@ func readJoinToken(tokenOverride string) (string, error) {
 	data, err := os.ReadFile(tokenPath)
 	if err != nil {
 		return "", fmt.Errorf("reading token file: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// persistWorkerToken writes the worker_token to disk with secure permissions (mode 0600).
+func persistWorkerToken(token string) error {
+	if token == "" {
+		return fmt.Errorf("cannot persist empty worker token")
+	}
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		return fmt.Errorf("creating key dir for worker token: %w", err)
+	}
+	if err := os.WriteFile(workerTokenPath, []byte(token), 0600); err != nil {
+		return fmt.Errorf("persisting worker token: %w", err)
+	}
+	logger.Printf("Worker token persisted to %s", workerTokenPath)
+	return nil
+}
+
+// readWorkerToken reads the worker_token from disk.
+// Returns empty string if file does not exist (non-fatal).
+func readWorkerToken() (string, error) {
+	data, err := os.ReadFile(workerTokenPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading worker token: %w", err)
 	}
 	return strings.TrimSpace(string(data)), nil
 }

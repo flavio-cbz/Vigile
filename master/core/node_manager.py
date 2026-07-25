@@ -1,23 +1,33 @@
+from __future__ import annotations
+
 """
 Vigile — Node Manager
 
 Manages the lifecycle of all Worker Nodes:
-  - State machine (PENDING → ENROLLING → CONNECTED → LOST → STALE → REVOKED)
+  - State machine (PENDING → ENROLLING → UNCONFIGURED → CONNECTED → LOST → STALE → DISABLED)
   - In-memory registry of active WebSocket connections
   - Background heartbeat monitor task
   - Intent routing to connected Workers
+  - Hard-delete on revoke (cascades to join_tokens, worker_tokens, metrics_snapshots, etc.)
 
 State transitions (allowed):
   PENDING      → ENROLLING   (token validated, handshake started)
   ENROLLING    → CONNECTED   (Ed25519 handshake complete)
   ENROLLING    → PENDING     (handshake failed/timeout)
   CONNECTED    → LOST        (heartbeat missed > threshold)
-  CONNECTED    → REVOKED     (manual revocation)
   LOST         → CONNECTED   (Worker reconnected)
   LOST         → STALE       (lost for > 24h)
   STALE        → CONNECTED   (Worker reconnected)
-  STALE        → REVOKED     (manual revocation)
-  REVOKED      → (terminal)  (no transitions out)
+
+Deletion:
+  Any state → (row removed) via `delete_node()`. The FK ON DELETE CASCADE clauses
+  on join_tokens, worker_tokens, metrics_snapshots, action_proposals, and
+  chat_sessions clean up child rows automatically. The audit_log keeps the
+  NODE_DELETED entry forever (it stores `node_id` as plain TEXT, no FK).
+
+Note: `NodeState.REVOKED` is kept as an enum value for backward compatibility
+with legacy rows, but the application no longer transitions to it — a revoked
+node is hard-deleted from the nodes table.
 """
 
 import asyncio
@@ -25,47 +35,45 @@ import json
 import logging
 import time
 import uuid
-from enum import Enum
 from typing import Any
 
 import aiosqlite
 from fastapi import WebSocket
 
+DEFAULT_TIMEOUT: float = 30.0
+
+from master.core.audit import AuditAction, log_action
+from master.core.enums import NodeState
+from master.core.lock import LoopBoundLock
 from master.db.database import get_db_conn
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Node state enum
-# ---------------------------------------------------------------------------
+# NodeState is imported from master.core.enums for canonical definition
 
 
-class NodeState(str, Enum):
-    PENDING = "PENDING"           # Token generated, Worker not yet connected
-    ENROLLING = "ENROLLING"       # Handshake in progress
-    CONNECTED = "CONNECTED"       # Fully enrolled, WSS active, heartbeat OK
-    RECONNECTING = "RECONNECTING" # Connection dropped, Worker attempting reconnect
-    LOST = "LOST"                 # No heartbeat for > heartbeat_lost_threshold
-    STALE = "STALE"               # LOST for > heartbeat_stale_threshold
-    REVOKED = "REVOKED"           # Manually revoked, all connections refused
-
-
-# Allowed transitions: (from_state, to_state)
 VALID_TRANSITIONS: set[tuple[NodeState, NodeState]] = {
     (NodeState.PENDING, NodeState.ENROLLING),
-    (NodeState.ENROLLING, NodeState.CONNECTED),
-    (NodeState.ENROLLING, NodeState.PENDING),       # handshake failed
+    (NodeState.ENROLLING, NodeState.UNCONFIGURED),  # Ed25519 handshake done
+    (NodeState.ENROLLING, NodeState.CONNECTED),  # legacy direct path
+    (NodeState.ENROLLING, NodeState.PENDING),  # handshake failed
+    (NodeState.UNCONFIGURED, NodeState.CONNECTED),  # operator confirmed
+    (NodeState.UNCONFIGURED, NodeState.DISABLED),
     (NodeState.CONNECTED, NodeState.LOST),
-    (NodeState.CONNECTED, NodeState.REVOKED),
     (NodeState.CONNECTED, NodeState.RECONNECTING),
+    (NodeState.CONNECTED, NodeState.DISABLED),
     (NodeState.RECONNECTING, NodeState.CONNECTED),
     (NodeState.RECONNECTING, NodeState.LOST),
-    (NodeState.LOST, NodeState.CONNECTED),          # Worker came back
+    (NodeState.LOST, NodeState.CONNECTED),  # Worker came back
     (NodeState.LOST, NodeState.STALE),
-    (NodeState.LOST, NodeState.REVOKED),
-    (NodeState.STALE, NodeState.CONNECTED),         # Worker came back
-    (NodeState.STALE, NodeState.REVOKED),
+    (NodeState.LOST, NodeState.ENROLLING),  # Re-enrollment allowed
+    (NodeState.STALE, NodeState.CONNECTED),  # Worker came back
+    (NodeState.STALE, NodeState.ENROLLING),  # Re-enrollment allowed
+    (NodeState.RECONNECTING, NodeState.ENROLLING),  # Re-enrollment allowed
+    (NodeState.DISABLED, NodeState.CONNECTED),
+    (NodeState.DISABLED, NodeState.LOST),
+    (NodeState.DISABLED, NodeState.ENROLLING),
 }
 
 
@@ -85,11 +93,9 @@ class ActiveConnection:
         self.remote_address: str = ""
 
     def touch(self) -> None:
-        """Update the heartbeat timestamp."""
         self.last_heartbeat = time.time()
 
     def heartbeat_age(self) -> float:
-        """Seconds since last heartbeat."""
         return time.time() - self.last_heartbeat
 
 
@@ -100,9 +106,18 @@ class ActiveConnection:
 
 # Valid column names for safe SQL updates in transition_state
 _VALID_NODE_FIELDS: set[str] = {
-    "state", "hostname", "machine_id", "arch", "os",
-    "public_key", "ip_prefix", "last_heartbeat",
-    "enrolled_at", "name",
+    "state",
+    "hostname",
+    "machine_id",
+    "arch",
+    "os",
+    "public_key",
+    "ip_prefix",
+    "last_heartbeat",
+    "enrolled_at",
+    "name",
+    "node_group",
+    "disabled",
 }
 
 
@@ -112,15 +127,22 @@ class NodeManager:
     Single-process async FastAPI app — asyncio lock protects shared state.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, timeout: float | None = None) -> None:
         # node_id → ActiveConnection (only for CONNECTED nodes)
         self._connections: dict[str, ActiveConnection] = {}
-        self._lock: asyncio.Lock = asyncio.Lock()
+        self._lock: Any = LoopBoundLock()
+        self._default_timeout: float = timeout if timeout is not None else DEFAULT_TIMEOUT
         # Pending intent futures: intent_id → asyncio.Future
         self._pending_intents: dict[str, asyncio.Future] = {}
+        self._intent_created_at: dict[str, float] = {}
         # Track which node owns each pending intent (for cleanup on disconnect)
         self._intent_nodes: dict[str, str] = {}
+        self._intent_max_age: dict[str, float] = {}
+        self._default_intent_max_age: float = 300.0
         self._monitor_task: asyncio.Task | None = None
+        self._cache_task: asyncio.Task | None = None
+        # Callbacks invoked after every successful state transition (e.g. automation engine)
+        self._state_change_callbacks: list = []
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -131,21 +153,39 @@ class NodeManager:
         heartbeat_interval: int = 30,
         lost_threshold: int = 300,
         stale_threshold: int = 86400,
+        default_intent_max_age: float = 300.0,
+        cache_update_interval: int = 300,
     ) -> None:
-        """Start the background heartbeat monitor. Called at app startup.
+        """Start the background heartbeat monitor and cache updater. Called at app startup.
         Thresholds are injected here — no config coupling inside the loop."""
+        self.heartbeat_interval = heartbeat_interval
+        self._default_intent_max_age = default_intent_max_age
         self._monitor_task = asyncio.create_task(
             self._heartbeat_monitor(heartbeat_interval, lost_threshold, stale_threshold),
             name="heartbeat_monitor",
         )
-        logger.info("NodeManager started. Heartbeat monitor running.")
+        self._cache_task = asyncio.create_task(
+            self._cache_updater(cache_update_interval),
+            name="cache_updater",
+        )
+        logger.info("NodeManager started. Heartbeat monitor and cache updater running.")
+
+    def register_state_change_callback(self, callback) -> None:
+        """Register an async callback(node_id, new_state, db) invoked after every state transition."""
+        self._state_change_callbacks.append(callback)
 
     async def stop(self) -> None:
-        """Stop the heartbeat monitor. Called at app shutdown."""
+        """Stop the heartbeat monitor and cache updater. Called at app shutdown."""
         if self._monitor_task:
             self._monitor_task.cancel()
             try:
                 await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+        if self._cache_task:
+            self._cache_task.cancel()
+            try:
+                await self._cache_task
             except asyncio.CancelledError:
                 pass
         async with self._lock:
@@ -157,9 +197,174 @@ class NodeManager:
             self._connections.clear()
         logger.info("NodeManager stopped.")
 
+    async def _cache_updater(self, interval: int) -> None:
+        logger.info("Cache updater task started. Interval: %ds", interval)
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self.update_all_nodes_cache()
+            except asyncio.CancelledError:
+                break
+            except aiosqlite.OperationalError as e:
+                logger.warning("DB unavailable, reconnecting: %s", e)
+                await asyncio.sleep(5)
+                continue
+            except Exception:
+                logger.exception("Cache updater error (will retry)")
+                await asyncio.sleep(30)
+
+    async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
+        """Query and cache active services and Docker containers for online node(s)."""
+        from master.core.plugin_helpers import parse_container_list, parse_service_list
+
+        db = get_db_conn()
+        connected = [node_id] if node_id else self.connected_node_ids()
+        if not connected:
+            return
+
+        logger.debug("Cache updater: starting update for nodes: %s", connected)
+        node_updates = []
+        for nid in connected:
+            try:
+                # 1. Get services
+                services_json = None
+                try:
+                    result = await self.send_intent(nid, {"action": "LIST_SERVICES"}, timeout=10.0)
+                    if result.get("success"):
+                        parsed = parse_service_list(result.get("output", ""))
+                        if parsed is not None:
+                            services_json = json.dumps(parsed)
+                except Exception as ex:
+                    logger.warning("Cache updater: failed to get services for node %s: %s", nid, ex)
+
+                # 2. Get containers
+                containers_json = None
+                try:
+                    result = await self.send_intent(
+                        nid, {"action": "LIST_CONTAINERS"}, timeout=10.0
+                    )
+                    if result.get("success"):
+                        parsed = parse_container_list(result.get("output", ""))
+                        if parsed is not None:
+                            containers_json = json.dumps(parsed)
+                except Exception as ex:
+                    logger.warning(
+                        "Cache updater: failed to get containers for node %s: %s", nid, ex
+                    )
+
+                if services_json is not None or containers_json is not None:
+                    node_updates.append((nid, services_json, containers_json))
+            except Exception as ex:
+                logger.warning(
+                    "Cache updater: failed to process cache gathering for node %s: %s", nid, ex
+                )
+
+        # 3. Save cache to DB in a single transaction
+        if node_updates:
+            from master.db.database import transaction
+
+            try:
+                async with transaction(db) as tx_db:
+                    for nid, services_json, containers_json in node_updates:
+                        fields = []
+                        params = []
+                        if services_json is not None:
+                            fields.append("cached_services_json = ?")
+                            params.append(services_json)
+                        if containers_json is not None:
+                            fields.append("cached_containers_json = ?")
+                            params.append(containers_json)
+
+                        params.append(nid)
+                        query = "UPDATE nodes SET " + ", ".join(fields) + " WHERE id = ?"
+                        await tx_db.execute(query, params)
+                        logger.debug("Cache updater: successfully updated cache for node %s", nid)
+                        try:
+                            await log_action(
+                                tx_db,
+                                user_id="system",
+                                action=AuditAction.CACHE_REFRESH,
+                                node_id=nid,
+                                details={
+                                    "services_updated": services_json is not None,
+                                    "containers_updated": containers_json is not None,
+                                },
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Cache updater: failed to log audit trail for node %s", nid
+                            )
+            except Exception as ex:
+                logger.error("Cache updater: transaction failed: %s", ex)
+
+        # 4. Check profile expiration and new container detection for auto-regeneration
+        containers_by_node = {nid: containers_json for nid, _, containers_json in node_updates}
+        for nid in connected:
+            try:
+                async with db.execute(
+                    "SELECT insight_profile, insight_profile_generated_at FROM nodes WHERE id = ?",
+                    (nid,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+
+                if row and row["insight_profile"]:
+                    profile_dict = json.loads(row["insight_profile"])
+                    generated_at = row["insight_profile_generated_at"] or 0.0
+                    now = time.time()
+
+                    # 7-day expiration check
+                    expired_time = (now - generated_at) > 7 * 86400
+
+                    # New containers check (with 24h cooldown to avoid LLM spam)
+                    new_apps_detected = False
+                    cooldown_ok = (now - generated_at) > 86400
+
+                    node_containers_json = containers_by_node.get(nid)
+                    if cooldown_ok and not expired_time and node_containers_json:
+                        fresh_conts = parse_container_list(json.loads(node_containers_json))
+                        fresh_running = [
+                            c.get("name")
+                            for c in fresh_conts or []
+                            if c.get("state") == "running" or "up" in c.get("status", "").lower()
+                        ]
+                        known_conts = [
+                            p.get("container_name")
+                            for p in profile_dict.get("known_heavy_processes", [])
+                            if p.get("container_name")
+                        ]
+                        new_apps_detected = any(fc not in known_conts for fc in fresh_running)
+
+                    if expired_time or new_apps_detected:
+                        logger.info(
+                            "Profile expiration / new apps detected for node %s (expired=%s, new_apps=%s). Regenerating profile...",
+                            nid,
+                            expired_time,
+                            new_apps_detected,
+                        )
+                        from master.api.deps import get_insights_manager
+
+                        im = get_insights_manager()
+                        asyncio.create_task(im.generate_profile(nid, db, self, force=True))
+            except Exception as ex:
+                logger.warning(
+                    "Cache updater: failed to check profile expiration for node %s: %s", nid, ex
+                )
+            except Exception as ex:
+                logger.exception("Cache updater: error updating node %s: %s", nid, ex)
+
     # -----------------------------------------------------------------------
     # Node creation (called when Admin generates a join token)
     # -----------------------------------------------------------------------
+
+    def generate_node_id(self) -> str:
+        """
+        Generate a new node_id (UUID) without persisting anything.
+
+        The corresponding `nodes` row is only created when the Worker
+        completes the enrollment handshake. Until then, only the
+        `join_tokens` row references this id.
+        """
+        return str(uuid.uuid4())
 
     async def create_node(
         self,
@@ -167,10 +372,16 @@ class NodeManager:
         *,
         name: str,
         ip_prefix: str = "",
+        group: str = "",
     ) -> str:
         """
         Pre-create a node entry in PENDING state.
         Returns the node_id (UUID).
+
+        NOTE: Prefer `generate_node_id()` in production flows. This method
+        remains for tests and explicit pre-creation use cases. A node
+        created here is a 'phantom' until the Worker enrolls — the row
+        sits in PENDING state in the DB.
         """
         node_id = str(uuid.uuid4())
         now = time.time()
@@ -178,13 +389,13 @@ class NodeManager:
         await db.execute(
             """
             INSERT INTO nodes
-                (id, name, ip_prefix, state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (id, name, ip_prefix, node_group, state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (node_id, name, ip_prefix, NodeState.PENDING.value, now, now),
+            (node_id, name, ip_prefix, group, NodeState.PENDING.value, now, now),
         )
         await db.commit()
-        logger.info("Node pre-created: id=%s name=%s", node_id, name)
+        logger.info("Node pre-created: id=%s name=%s group=%s", node_id, name, group)
         return node_id
 
     # -----------------------------------------------------------------------
@@ -211,9 +422,7 @@ class NodeManager:
         Raises:
             ValueError  : if the transition is not allowed or node doesn't exist
         """
-        async with db.execute(
-            "SELECT state FROM nodes WHERE id = ?", (node_id,)
-        ) as cursor:
+        async with db.execute("SELECT state FROM nodes WHERE id = ?", (node_id,)) as cursor:
             row = await cursor.fetchone()
 
         if row is None:
@@ -221,9 +430,7 @@ class NodeManager:
 
         current_state = NodeState(row["state"])
         if (current_state, new_state) not in VALID_TRANSITIONS:
-            raise ValueError(
-                f"Invalid transition {current_state} → {new_state} for node {node_id}"
-            )
+            raise ValueError(f"Invalid transition {current_state} → {new_state} for node {node_id}")
 
         now = time.time()
         fields: dict[str, Any] = {"state": new_state.value, "updated_at": now}
@@ -238,42 +445,289 @@ class NodeManager:
         values = list(updates.values()) + [node_id]
 
         await db.execute(
-            f"UPDATE nodes SET {set_clause} WHERE id = ?",
+            "UPDATE nodes SET " + set_clause + " WHERE id = ?",
             values,
         )
         await db.commit()
         logger.info("Node %s: %s → %s", node_id, current_state.value, new_state.value)
 
-    async def revoke_node(
+        try:
+            from master.core.event_bus import get_event_bus
+
+            await get_event_bus().publish(
+                "node.state",
+                {
+                    "node_id": node_id,
+                    "from_state": current_state.value,
+                    "new_state": new_state.value,
+                    "ts": now,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish node.state event")
+
+        # Notify registered callbacks (e.g. automation engine) without blocking
+        for cb in self._state_change_callbacks:
+            asyncio.create_task(cb(node_id, new_state, db))
+
+    async def delete_node(
         self,
         db: aiosqlite.Connection,
         node_id: str,
-        revoked_by: str,
-    ) -> None:
+        deleted_by: str,
+    ) -> dict[str, Any] | None:
         """
-        Revoke a node: update state, disconnect active WebSocket, revoke all tokens.
+        Hard-delete a node and all its dependent rows.
+
+        Cascades (via FK ON DELETE CASCADE) clean up:
+          - join_tokens
+          - worker_tokens
+          - metrics_snapshots
+          - action_proposals
+          - chat_sessions (node_id set to NULL via ON DELETE SET NULL)
+
+        The audit_log keeps a NODE_DELETED entry forever (no FK on node_id).
+
+        Returns the deleted node's last known state and name (for audit details),
+        or None if the node was not found.
         """
+        async with db.execute(
+            "SELECT state, name, hostname FROM nodes WHERE id = ?", (node_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+
+        previous_state = row["state"]
+        previous_name = row["name"]
+        previous_hostname = row["hostname"]
         now = time.time()
 
-        await db.execute(
-            "UPDATE nodes SET state = ?, updated_at = ? WHERE id = ?",
-            (NodeState.REVOKED.value, now, node_id),
+        await log_action(
+            db,
+            user_id=deleted_by,
+            action=AuditAction.NODE_DELETED,
+            node_id=node_id,
+            details={
+                "previous_state": previous_state,
+                "previous_name": previous_name,
+                "previous_hostname": previous_hostname,
+            },
         )
-        await db.execute(
-            "UPDATE worker_tokens SET revoked = 1, revoked_at = ?, revoked_by = ? WHERE node_id = ?",
-            (now, revoked_by, node_id),
-        )
+
+        await db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         await db.commit()
 
         async with self._lock:
             conn = self._connections.pop(node_id, None)
         if conn is not None:
             try:
-                await conn.websocket.close(code=4403, reason="Node revoked")
+                await conn.websocket.close(code=4403, reason="Node deleted by operator")
             except Exception:
                 pass
 
-        logger.warning("Node REVOKED: id=%s by=%s", node_id, revoked_by)
+        logger.warning("Node DELETED: id=%s by=%s", node_id, deleted_by)
+
+        try:
+            from master.core.event_bus import get_event_bus
+
+            bus = get_event_bus()
+            await bus.publish(
+                "node.deleted",
+                {
+                    "node_id": node_id,
+                    "previous_state": previous_state,
+                    "ts": now,
+                },
+            )
+            await bus.publish(
+                "node.state",
+                {
+                    "node_id": node_id,
+                    "from_state": previous_state,
+                    "new_state": NodeState.REVOKED.value,
+                    "ts": now,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish delete events")
+
+        return {
+            "id": node_id,
+            "state": previous_state,
+            "name": previous_name,
+            "hostname": previous_hostname,
+        }
+
+    async def configure_node(
+        self,
+        db: aiosqlite.Connection,
+        node_id: str,
+        *,
+        name: str,
+        group: str | None,
+    ) -> None:
+        """
+        Operator confirmed name+group: transition UNCONFIGURED -> CONNECTED.
+        """
+        await self.transition_state(
+            db,
+            node_id,
+            NodeState.CONNECTED,
+            extra_fields={"name": name, "node_group": group or ""},
+        )
+        await log_action(
+            db,
+            user_id="system",
+            action=AuditAction.CONFIGURE_NODE,
+            node_id=node_id,
+            details={"name": name, "group": group or ""},
+        )
+
+    async def set_disabled(
+        self,
+        db: aiosqlite.Connection,
+        node_id: str,
+        disabled: bool,
+        by_user: str,
+    ) -> None:
+        """
+        Toggle the `disabled` flag and transition to/from DISABLED accordingly.
+        Closing the active WebSocket with code 4429 if disabling an active node.
+        """
+        async with db.execute(
+            "SELECT state, disabled FROM nodes WHERE id = ?", (node_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            raise ValueError(f"Node not found: {node_id}")
+        current_state = NodeState(row["state"])
+        currently_disabled = bool(row["disabled"])
+
+        if disabled == currently_disabled:
+            return
+
+        now = time.time()
+        await db.execute(
+            "UPDATE nodes SET disabled = ?, updated_at = ? WHERE id = ?",
+            (1 if disabled else 0, now, node_id),
+        )
+        await db.commit()
+
+        target_state: NodeState | None = None
+        if disabled and current_state != NodeState.DISABLED:
+            target_state = NodeState.DISABLED
+        elif not disabled and current_state == NodeState.DISABLED:
+            async with self._lock:
+                is_alive = node_id in self._connections
+            target_state = NodeState.CONNECTED if is_alive else NodeState.LOST
+
+        if target_state is not None and target_state != current_state:
+            await self.transition_state(db, node_id, target_state)
+
+        if disabled:
+            async with self._lock:
+                conn = self._connections.pop(node_id, None)
+            if conn is not None:
+                try:
+                    await conn.websocket.close(code=4429, reason="Node disabled by operator")
+                except Exception:
+                    pass
+
+        await log_action(
+            db,
+            user_id=by_user,
+            action=AuditAction.DISABLE_NODE if disabled else AuditAction.ENABLE_NODE,
+            node_id=node_id,
+            details={
+                "from_state": current_state.value,
+                "new_state": target_state.value if target_state else current_state.value,
+            },
+        )
+        logger.info("Node %s: disabled=%s by=%s", node_id, disabled, by_user)
+
+    async def patch_metadata(
+        self,
+        db: aiosqlite.Connection,
+        node_id: str,
+        *,
+        name: str | None = None,
+        group: str | None = None,
+        by_user: str = "system",
+    ) -> None:
+        """
+        Update name and/or group on an existing node. Does NOT change state.
+        """
+        fields: dict[str, Any] = {"updated_at": time.time()}
+        details: dict[str, Any] = {}
+        if name is not None:
+            fields["name"] = name
+            details["name"] = name
+        if group is not None:
+            fields["node_group"] = group
+            details["group"] = group
+        if len(fields) == 1:
+            return
+        _ALLOWED_UPDATE_FIELDS = {"updated_at", "name", "node_group"}
+        for k in fields:
+            if k not in _ALLOWED_UPDATE_FIELDS:
+                raise ValueError(f"Invalid update field: {k}")
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [node_id]
+        await log_action(
+            db,
+            user_id=by_user,
+            action=AuditAction.UPDATE_NODE,
+            node_id=node_id,
+            details=details,
+        )
+        await db.execute("UPDATE nodes SET " + set_clause + " WHERE id = ?", values)
+        await db.commit()
+
+    async def invalidate_join_tokens(self, db: aiosqlite.Connection, node_id: str) -> int:
+        """
+        Mark all existing join tokens for this node as consumed+expired.
+        Returns the number of tokens invalidated.
+        """
+        now = time.time()
+        async with db.execute(
+            "SELECT id FROM join_tokens WHERE node_id = ? AND consumed = 0",
+            (node_id,),
+        ) as cursor:
+            ids = [row["id"] for row in await cursor.fetchall()]
+        if not ids:
+            return 0
+        placeholders = ", ".join("?" * len(ids))
+        await db.execute(
+            "UPDATE join_tokens SET consumed = 1, expires_at = ? WHERE id IN ("
+            + placeholders
+            + ")",
+            [now, *ids],
+        )
+        await db.commit()
+        return len(ids)
+
+    async def is_disabled(self, db: aiosqlite.Connection, node_id: str) -> bool:
+        async with db.execute("SELECT disabled FROM nodes WHERE id = ?", (node_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return False
+        return bool(row["disabled"])
+
+    async def lockdown(self) -> None:
+        """
+        Close all active WebSocket connections due to security compromise.
+        """
+        async with self._lock:
+            conns = list(self._connections.values())
+            self._connections.clear()
+
+        for conn in conns:
+            try:
+                await conn.websocket.close(code=4433, reason="Security compromise detected")
+            except Exception:
+                pass
+        logger.warning("NodeManager locked down: all active connections closed.")
 
     # -----------------------------------------------------------------------
     # Connection management (called from WebSocket handler)
@@ -308,24 +762,22 @@ class NodeManager:
         for intent_id, nid in list(self._intent_nodes.items()):
             if nid == node_id:
                 self._intent_nodes.pop(intent_id, None)
+                self._intent_created_at.pop(intent_id, None)
                 future = self._pending_intents.pop(intent_id, None)
                 if future is not None and not future.done():
                     future.cancel()
         logger.info("Node %s WebSocket unregistered.", node_id)
 
     async def get_connection(self, node_id: str) -> ActiveConnection | None:
-        """Return the active connection for a node, or None if not connected."""
         async with self._lock:
             return self._connections.get(node_id)
 
     async def touch_heartbeat(self, node_id: str) -> None:
-        """Update the heartbeat timestamp for a connected node."""
         async with self._lock:
             if conn := self._connections.get(node_id):
                 conn.touch()
 
     async def is_connected(self, node_id: str) -> bool:
-        """Return True if the node has an active WebSocket."""
         async with self._lock:
             return node_id in self._connections
 
@@ -337,6 +789,7 @@ class NodeManager:
     async def resolve_intent(self, intent_id: str, result: dict[str, Any]) -> None:
         """Resolve a pending intent with the Worker's response."""
         self._intent_nodes.pop(intent_id, None)
+        self._intent_created_at.pop(intent_id, None)
         future = self._pending_intents.pop(intent_id, None)
         if future is not None and not future.done():
             future.set_result(result)
@@ -350,7 +803,8 @@ class NodeManager:
         node_id: str,
         intent: dict[str, Any],
         *,
-        timeout: float = 30.0,
+         timeout: float | None = None,
+        intent_max_age: float | None = None,
     ) -> dict[str, Any]:
         """
         Send an approved Intent to a connected Worker and wait for the result.
@@ -363,6 +817,7 @@ class NodeManager:
             node_id : target node
             intent  : dict with keys: {intent_id, action, params}
             timeout : seconds to wait for response
+            intent_max_age : optional per-intent max age before cleanup falls stale
 
         Returns:
             The result dict from the Worker.
@@ -371,6 +826,8 @@ class NodeManager:
             RuntimeError: if the node is not connected
             TimeoutError: if the Worker doesn't respond in time
         """
+        if timeout is None:
+            timeout = self._default_timeout
         async with self._lock:
             conn = self._connections.get(node_id)
             if conn is None:
@@ -381,22 +838,29 @@ class NodeManager:
 
             future: asyncio.Future = asyncio.get_running_loop().create_future()
             self._pending_intents[intent_id] = future
+            self._intent_created_at[intent_id] = time.time()
             self._intent_nodes[intent_id] = node_id
+            if intent_max_age is not None:
+                self._intent_max_age[intent_id] = intent_max_age
 
             # Send type last to prevent intent dict from overwriting the message type
             await conn.websocket.send_json({**intent, "type": "INTENT"})
-            logger.info("Intent sent to node %s: action=%s id=%s",
-                        node_id, intent.get("action"), intent_id)
+            logger.info(
+                "Intent sent to node %s: action=%s id=%s", node_id, intent.get("action"), intent_id
+            )
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
             return result
         except asyncio.TimeoutError:
-            self._intent_nodes.pop(intent_id, None)
-            self._pending_intents.pop(intent_id, None)
             raise TimeoutError(
                 f"Node {node_id} did not respond to intent {intent_id} within {timeout}s"
             )
+        finally:
+            self._intent_max_age.pop(intent_id, None)
+            self._intent_nodes.pop(intent_id, None)
+            self._intent_created_at.pop(intent_id, None)
+            self._pending_intents.pop(intent_id, None)
 
     # -----------------------------------------------------------------------
     # Background heartbeat monitor
@@ -412,21 +876,54 @@ class NodeManager:
 
         logger.info(
             "Heartbeat monitor: interval=%ds lost=%ds stale=%ds",
-            interval, lost_threshold, stale_threshold,
+            interval,
+            lost_threshold,
+            stale_threshold,
         )
+        intent_cleanup_counter = 0
 
         while True:
             try:
                 await asyncio.sleep(interval)
                 await self._check_heartbeats(lost_threshold, stale_threshold)
+                # Clean up stale pending intents every ~10 cycles
+                intent_cleanup_counter += 1
+                if intent_cleanup_counter >= 10:
+                    intent_cleanup_counter = 0
+                    self._cleanup_stale_intents()
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("Heartbeat monitor error (will retry)")
 
-    async def _check_heartbeats(
-        self, lost_threshold: float, stale_threshold: float
-    ) -> None:
+    def _cleanup_stale_intents(self) -> int:
+        """Remove pending intents that are done or have been waiting longer than their max_age."""
+        now = time.time()
+        stale_ids: list[str] = []
+        for intent_id, future in list(self._pending_intents.items()):
+            created = self._intent_created_at.get(intent_id, now)
+            max_age = self._intent_max_age.get(intent_id, self._default_intent_max_age)
+            if future.done() or (now - created) > max_age:
+                stale_ids.append(intent_id)
+        for intent_id in stale_ids:
+            self._intent_nodes.pop(intent_id, None)
+            self._intent_created_at.pop(intent_id, None)
+            self._intent_max_age.pop(intent_id, None)
+            if intent_id in self._pending_intents:
+                future = self._pending_intents.pop(intent_id)
+                if not future.done():
+                    future.cancel()
+        count = len(stale_ids)
+        if count:
+            logger.warning("Cleaned up %d stale pending intents.", count)
+        return count
+
+    def set_default_intent_max_age(self, value: float) -> None:
+        """Update the default intent max age at runtime (e.g. via admin endpoint)."""
+        self._default_intent_max_age = value
+        logger.info("Default intent max age updated to %.1fs", value)
+
+    async def _check_heartbeats(self, lost_threshold: float, stale_threshold: float) -> None:
         """Check all nodes in the DB and update states based on heartbeat age."""
         db = get_db_conn()
         now = time.time()
@@ -437,12 +934,17 @@ class NodeManager:
         for node_id, conn in connected:
             age = conn.heartbeat_age()
             if age > lost_threshold:
-                logger.warning(
-                    "Node %s: no heartbeat for %.0fs — marking LOST", node_id, age
-                )
+                logger.warning("Node %s: no heartbeat for %.0fs — marking LOST", node_id, age)
                 await self.unregister_connection(node_id)
                 try:
                     await self.transition_state(db, node_id, NodeState.LOST)
+                    await log_action(
+                        db,
+                        user_id="system",
+                        action=AuditAction.NODE_LOST,
+                        node_id=node_id,
+                        details={"heartbeat_age": age, "lost_threshold": lost_threshold},
+                    )
                 except Exception:
                     logger.exception("Failed to transition node %s to LOST", node_id)
 
@@ -456,6 +958,13 @@ class NodeManager:
                 if age > stale_threshold:
                     try:
                         await self.transition_state(db, node_id, NodeState.STALE)
+                        await log_action(
+                            db,
+                            user_id="system",
+                            action=AuditAction.NODE_STALE,
+                            node_id=node_id,
+                            details={"heartbeat_age": age, "stale_threshold": stale_threshold},
+                        )
                         logger.warning("Node %s marked STALE (offline %.0fh)", node_id, age / 3600)
                     except Exception:
                         logger.exception("Failed to transition node %s to STALE", node_id)
@@ -464,13 +973,8 @@ class NodeManager:
     # Query helpers
     # -----------------------------------------------------------------------
 
-    async def get_node(
-        self, db: aiosqlite.Connection, node_id: str
-    ) -> dict[str, Any] | None:
-        """Fetch a single node by ID. Returns None if not found."""
-        async with db.execute(
-            "SELECT * FROM nodes WHERE id = ?", (node_id,)
-        ) as cursor:
+    async def get_node(self, db: aiosqlite.Connection, node_id: str) -> dict[str, Any] | None:
+        async with db.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)) as cursor:
             row = await cursor.fetchone()
         if row is None:
             return None
@@ -479,15 +983,37 @@ class NodeManager:
         return d
 
     async def list_nodes(
-        self, db: aiosqlite.Connection, *, state: str | None = None
+        self,
+        db: aiosqlite.Connection,
+        *,
+        state: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        include_revoked: bool = False,
     ) -> list[dict[str, Any]]:
-        """List all nodes, optionally filtered by state."""
+        """List nodes, optionally filtered by state, with pagination.
+
+        By default, REVOKED rows are excluded (legacy state from before the
+        hard-delete migration — they should not exist in fresh DBs). Pass
+        `include_revoked=True` to include them (admin/debug only).
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
         if state:
-            sql = "SELECT * FROM nodes WHERE state = ? ORDER BY created_at DESC"
-            params = (state,)
-        else:
-            sql = "SELECT * FROM nodes ORDER BY created_at DESC"
-            params = ()
+            clauses.append("state = ?")
+            params.append(state)
+        if not include_revoked:
+            clauses.append("state != ?")
+            params.append(NodeState.REVOKED.value)
+        where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = "SELECT * FROM nodes" + where_sql + " ORDER BY created_at DESC"
+
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        if offset is not None:
+            sql += " OFFSET ?"
+            params.append(offset)
 
         rows = []
         async with db.execute(sql, params) as cursor:

@@ -1,0 +1,26 @@
+{
+    "id": "systemd",
+    "name": "Systemd Service Manager",
+    "version": "1.0.0",
+    "author": "Vigile",
+    "description": "Declare, inspect and restart systemd services across worker nodes. Category: system. Copilot actions: LIST_SERVICES, STATUS_SERVICE, RESTART_SERVICE (all LOW risk).",
+    "hooks": ["get_supported_actions"],
+    "pages": [
+        {
+            "id": "services",
+            "title": "Services",
+            "icon": "activity",
+            "sidebar": false,
+            "component": "SystemdServices",
+            "roles": ["admin", "operator"]
+        }
+    ],
+    "routes": [
+        {
+            "path": "/services",
+            "method": "GET",
+            "handler": "list_services_route",
+            "roles": ["admin", "operator"]
+        }
+    ]
+}

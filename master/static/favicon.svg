@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="luxGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#94a3b8" />
+    </linearGradient>
+  </defs>
+  <path d="M 45,45
+           C 45,110 75,155 100,155
+           C 125,155 155,110 155,45
+           C 140,55 125,82 100,90
+           C 75,98 85,115 100,115
+           C 115,115 125,98 100,90"
+        fill="none"
+        stroke="url(#luxGrad)"
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-linejoin="round" />
+  <circle cx="100" cy="102" r="3.5" fill="#f8fafc" />
+  <path d="M 75,70 C 85,55 115,55 125,70" fill="none" stroke="#94a3b8" stroke-width="0.75" stroke-linecap="round" opacity="0.6" />
+</svg>

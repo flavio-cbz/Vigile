@@ -4,12 +4,13 @@ Vigile — Comprehensive simulation test suite.
 Tests ALL endpoints against the realistic simulation worker.
 """
 import json
-import urllib.request
 import time
+import urllib.request
 
-BASE = "http://localhost:8002"
+BASE = "http://localhost:8000"
 PASS = 0
 FAIL = 0
+
 
 def check(name, condition, detail=""):
     global PASS, FAIL
@@ -20,27 +21,45 @@ def check(name, condition, detail=""):
         FAIL += 1
         print(f"  \033[91m\u2717\033[0m {name}" + (f" ({detail})" if detail else ""))
 
+
 def login():
-    r = json.loads(urllib.request.urlopen(urllib.request.Request(
-        BASE + "/api/auth/login",
-        data=json.dumps({"username":"admin","password":"admin"}).encode(),
-        headers={"Content-Type":"application/json"})).read())
+    r = json.loads(
+        urllib.request.urlopen(
+            urllib.request.Request(
+                BASE + "/api/auth/login",
+                data=json.dumps({"username": "admin", "password": "admin"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+        ).read()
+    )
     return r["access_token"]
 
+
 def g(url, token):
-    return json.loads(urllib.request.urlopen(urllib.request.Request(url,
-        headers={"Authorization":"Bearer " + token})).read())
+    return json.loads(
+        urllib.request.urlopen(
+            urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+        ).read()
+    )
+
 
 def post(url, token, data=b"{}"):
-    return json.loads(urllib.request.urlopen(urllib.request.Request(url,
-        data=data,
-        headers={"Authorization":"Bearer " + token, "Content-Type":"application/json"})).read())
+    return json.loads(
+        urllib.request.urlopen(
+            urllib.request.Request(
+                url,
+                data=data,
+                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            )
+        ).read()
+    )
+
 
 TOKEN = login()
 check("Login OK", bool(TOKEN), f"token={TOKEN[:20]}...")
 
 nodes = g(BASE + "/api/nodes", TOKEN)
-NID = [n["id"] for n in nodes if n["state"]=="CONNECTED"][0]
+NID = [n["id"] for n in nodes if n["state"] == "CONNECTED"][0]
 check("Node connected", bool(NID), f"{NID[:8]}...")
 
 # ─── 1. METRICS ───────────────────────────────────────────────────
@@ -118,7 +137,11 @@ r = g(BASE + f"/api/nodes/{NID}/logs?lines=30", TOKEN)
 check("Syslog returned", r["output"] != "", f"{len(r['output'])} chars")
 check("Syslog path is /var/log/syslog", r["path"] == "/var/log/syslog")
 check("Syslog error is None", r["error"] is None)
-syslog_errors = [l for l in r["output"].split(chr(10)) if any(k in l.lower() for k in ["oom", "error", "fail", "kill"])]
+syslog_errors = [
+    l
+    for l in r["output"].split(chr(10))
+    if any(k in l.lower() for k in ["oom", "error", "fail", "kill"])
+]
 check("Syslog contains OOM event", any("oom" in l.lower() for l in r["output"].split(chr(10))))
 
 # SSH logs (using .service suffix for journalctl)
@@ -134,16 +157,19 @@ check("SSH has accepted logins", len(ssh_accepted) >= 1, f"{len(ssh_accepted)} a
 r = g(BASE + f"/api/nodes/{NID}/logs?lines=15&service=nginx.service", TOKEN)
 check("Nginx logs returned", r["output"] != "")
 check("Nginx service param set", r["service"] == "nginx.service")
-nginx_404 = [l for l in r["output"].split(chr(10)) if ' 404 ' in l]
-nginx_403 = [l for l in r["output"].split(chr(10)) if ' 403 ' in l]
+nginx_404 = [l for l in r["output"].split(chr(10)) if " 404 " in l]
+nginx_403 = [l for l in r["output"].split(chr(10)) if " 403 " in l]
 check("Nginx has 404 responses", len(nginx_404) >= 1, f"{len(nginx_404)} 404s")
 check("Nginx has 403 responses (blocked)", len(nginx_403) >= 1, f"{len(nginx_403)} 403s")
 
 # MySQL crash logs
 r = g(BASE + f"/api/nodes/{NID}/logs?lines=10&service=mysql.service", TOKEN)
 check("MySQL logs returned", r["output"] != "")
-check("MySQL crash mentions OOM", "OOM" in r["output"] or "Cannot allocate memory" in r["output"],
-      "OOM detected in MySQL logs")
+check(
+    "MySQL crash mentions OOM",
+    "OOM" in r["output"] or "Cannot allocate memory" in r["output"],
+    "OOM detected in MySQL logs",
+)
 
 # ─── 6. RESTART FAILED SERVICE ────────────────────────────────────
 print("\n\U0001f504 RESTART FAILED SERVICE")
@@ -159,6 +185,7 @@ if "restarted" in r.get("output", ""):
 # ─── 7. INTENT TIMEOUT ────────────────────────────────────────────
 print("\n\u23f3 ERROR HANDLING")
 import urllib.error
+
 try:
     r = g(BASE + "/api/nodes/nonexistent/services", TOKEN)
     check("Nonexistent node returns 404", False)
@@ -184,6 +211,36 @@ try:
     check("Auth works for chat proposals", True)
 except Exception:
     check("Auth works for chat proposals", False)
+
+# ─── 9. DISK_SCAN ────────────────────────────────────────────────
+print("\n\U0001f4c1 DISK_SCAN")
+
+try:
+    r = g(BASE + f"/api/nodes/{NID}/disk-scan?path=/etc&max_depth=1", TOKEN)
+    check("DISK_SCAN ok", r.get("root") is not None, f"root name={r['root']['name']}")
+    check("DISK_SCAN walked_count > 0", r.get("walked_count", 0) > 0)
+    check("DISK_SCAN has truncated field", "truncated" in r)
+except urllib.error.HTTPError as e:
+    check("DISK_SCAN ok", False, f"HTTP {e.code}")
+
+# Reject path: path not in mounts (best-effort — depends on Worker's actual mounts).
+# In standard Docker where / is a mount, all absolute paths are allowed.
+try:
+    r = g(BASE + f"/api/nodes/{NID}/disk-scan?path=/proc/1/fd/0", TOKEN)
+    check("DISK_SCAN reject path", True, "path allowed (/ is a mount)")
+except urllib.error.HTTPError as e:
+    if e.code == 502:
+        check("DISK_SCAN reject path", True, "path rejected as expected")
+    else:
+        check("DISK_SCAN reject path", False, f"HTTP {e.code}")
+
+# Truncate large: scan / with small min_size_bytes to potentially trigger truncation
+try:
+    r = g(BASE + f"/api/nodes/{NID}/disk-scan?path=/&min_size_bytes=1&max_depth=4", TOKEN)
+    check("DISK_SCAN truncate large", r.get("root") is not None)
+    check("DISK_SCAN truncated field exists", "truncated" in r)
+except urllib.error.HTTPError as e:
+    check("DISK_SCAN truncate large", False, f"HTTP {e.code}")
 
 # ─── RESULTS ──────────────────────────────────────────────────────
 print(f"\n{'='*60}")

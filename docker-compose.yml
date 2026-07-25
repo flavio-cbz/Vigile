@@ -1,16 +1,19 @@
 # Vigile — Docker Compose Test Environment
 #
-# Fully isolated test stack. Run on any Docker host.
+# HTTPS termination via Caddy — Master listens HTTP only on internal network.
+# Caddy terminates TLS with self-signed certs (dev) or Let's Encrypt (prod).
 #
 # Quick start:
 #   docker compose build
-#   docker compose up -d master
+#   docker compose up -d caddy master
 #   ./scripts/setup_test.sh --workers 2
 #
 # Cleanup:
 #   docker compose down -v
 
 services:
+
+
 
   # ── Master Node ──────────────────────────────────────────────────────
   master:
@@ -19,18 +22,23 @@ services:
       dockerfile: Dockerfile.master
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8003:8000"
     volumes:
       - vigile_data:/app/data
+      - ./data/worker-dist:/var/cache/vigile/worker
     environment:
-      - MASTER_URL=http://localhost:8000
+      - MASTER_URL=https://vigile.youcloud.ovh
       - DATABASE_PATH=/app/data/vigile.db
       - MASTER_KEY_PATH=/app/data/master_ed25519.key
       - PYTHONPATH=/app
       - DEBUG=true
-      - LLM_BASE_URL=https://chat.youcloud.ovh
+      - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_API_KEY=${LLM_API_KEY}
-      - LLM_MODEL=deepseek/deepseek-v4-flash
+      - LLM_MODEL=${LLM_MODEL}
+      - WORKER_BINARY_MANIFEST_URL=file:///var/cache/vigile/worker/manifest.json
+      - WORKER_BINARY_CACHE_DIR=/var/cache/vigile/worker
+      - SERVER_SECRET_KEY=${SERVER_SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       # Secrets auto-generated on first start (dev mode)
     healthcheck:
       test: ["CMD", "curl", "-s", "http://localhost:8000/health"]
@@ -38,26 +46,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
-
-  # ── Worker (base service, supports multiple instances) ───────────────
-  worker:
-    build: ./worker
-    restart: unless-stopped
-    depends_on:
-      master:
-        condition: service_healthy
-    volumes:
-      - /proc:/host/proc:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - MASTER_URL=http://master:8000
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep vigile-worker || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    # Use: docker compose run --rm -e JOIN_TOKEN=xxx worker
 
 volumes:
   vigile_data:

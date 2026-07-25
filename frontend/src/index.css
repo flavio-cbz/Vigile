@@ -1,0 +1,474 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+@import "./styles/components.css";
+@import "./styles/animations.css";
+
+:root {
+  --bg:           #0e0d0c;
+  --surface:      #161514;
+  --surface-2:    #1e1d1b;
+  --surface-3:    #282624;
+  --border:       rgba(245, 241, 235, 0.03);
+  --border-strong:rgba(245, 241, 235, 0.07);
+  --accent:       #F59E0B;
+  --accent-hover: #D97706;
+  --accent-muted: rgba(245, 158, 11, 0.15);
+  --destructive:  #E8650A;
+  --text-1:       #f5f1eb;
+  --text-2:       #b0a898;
+  --text-3:       #6b6358;
+
+  /* Severities - independent of the active theme */
+  --severity-critical: #EF4444;
+  --severity-warning:  #F59E0B;
+  --severity-info:     #60A5FA;
+  --severity-ok:       #22C55E;
+
+  /* Map old token variables to new theme variables so that old CSS files work seamlessly! */
+  --color-background: var(--bg);
+  --color-surface-0: var(--surface);
+  --color-surface-1: var(--surface-2);
+  --color-surface-2: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-strong);
+
+  --color-ink-primary: var(--text-1);
+  --color-ink-secondary: var(--text-2);
+  --color-ink-muted: var(--text-3);
+
+  --color-accent-primary: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-muted);
+
+  --color-success: var(--severity-ok);
+  --color-success-subtle: rgba(34, 197, 94, 0.12);
+  --color-warning: var(--severity-warning);
+  --color-warning-subtle: rgba(245, 158, 11, 0.12);
+  --color-danger: var(--severity-critical);
+  --color-danger-subtle: rgba(239, 68, 68, 0.12);
+
+  /* Severity border colors */
+  --color-border-critical: color-mix(in srgb, var(--severity-critical) 15%, transparent);
+  --color-border-critical-hover: color-mix(in srgb, var(--severity-critical) 35%, transparent);
+  --color-border-warning: color-mix(in srgb, var(--severity-warning) 15%, transparent);
+  --color-border-warning-hover: color-mix(in srgb, var(--severity-warning) 35%, transparent);
+  --color-border-success: color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  --color-border-success-hover: color-mix(in srgb, var(--severity-ok) 35%, transparent);
+  --color-border-offline: color-mix(in srgb, var(--text-3) 15%, transparent);
+  --color-border-offline-hover: color-mix(in srgb, var(--text-3) 35%, transparent);
+
+  /* Accent border and soft backgrounds */
+  --color-accent-border: color-mix(in srgb, var(--accent) 30%, transparent);
+  --color-accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  /* Surface hover and alt */
+  --bg-surface-hover: color-mix(in srgb, var(--text-1) 5%, transparent);
+  --color-surface-alt: color-mix(in srgb, var(--text-1) 3%, transparent);
+
+  /* Shadow glows */
+  --shadow-glow-accent: 0 0 15px color-mix(in srgb, var(--accent) 15%, transparent);
+  --shadow-glow-success: 0 0 15px color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  --shadow-glow-danger: 0 0 15px color-mix(in srgb, var(--severity-critical) 15%, transparent);
+
+  /* Green and accent glow colors */
+  --color-green-glow: color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  --color-accent-glow: color-mix(in srgb, var(--accent) 15%, transparent);
+
+  /* Shadow colors for layout components */
+  --shadow-dropdown: color-mix(in srgb, var(--text-1) 50%, transparent);
+  --shadow-sidebar: rgba(0, 0, 0, 0.15);
+  --shadow-topbar: color-mix(in srgb, var(--text-1) 8%, transparent);
+  --shadow-toggle: color-mix(in srgb, var(--text-1) 30%, transparent);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --transition-fast: 120ms ease;
+  --transition-base: 220ms ease;
+  --transition-slow: 380ms ease;
+
+  --topbar-height: 56px;
+  --sidebar-width: 260px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --topbar-height: 64px;
+    --sidebar-width: 260px;
+  }
+  .sidebar-collapsed {
+    --sidebar-width: 70px !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --sidebar-width: 280px;
+  }
+  .sidebar-collapsed {
+    --sidebar-width: 76px !important;
+  }
+}
+
+@theme {
+  --font-serif: 'DM Serif Display', serif;
+  --font-interface: 'Syne', sans-serif;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-0: var(--surface);
+  --color-surface-1: var(--surface-2);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-muted: var(--accent-muted);
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+
+  --color-severity-critical: var(--severity-critical);
+  --color-severity-warning: var(--severity-warning);
+  --color-severity-info: var(--severity-info);
+  --color-severity-ok: var(--severity-ok);
+
+  --color-ink-primary: var(--text-1);
+  --color-ink-secondary: var(--text-2);
+  --color-ink-muted: var(--text-3);
+  --color-ink-dim: var(--text-3);
+  --color-ink: var(--text-1);
+
+  --color-accent-custom: var(--accent);
+  --color-accent-primary: var(--accent);
+  --color-accent-soft: var(--accent-muted);
+  --color-accent-border: var(--border-strong);
+  --color-accent-glow: var(--accent);
+
+  --color-surface-alt: var(--surface-2);
+  --color-surface-1: var(--surface-2);
+  --color-surface-2: var(--surface-3);
+  --color-border-custom: var(--border);
+
+  --color-success: var(--severity-ok);
+  --color-success-subtle: rgba(34, 197, 94, 0.12);
+  --color-warning: var(--severity-warning);
+  --color-warning-subtle: rgba(245, 158, 11, 0.12);
+  --color-danger: var(--severity-critical);
+  --color-danger-subtle: rgba(239, 68, 68, 0.12);
+
+  --color-green-custom: var(--severity-ok);
+  --color-green-glow: var(--severity-ok);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: rgba(232, 101, 10, 0.08);
+  --color-destructive-border: rgba(232, 101, 10, 0.15);
+
+  --color-amber-custom: var(--severity-warning);
+  --color-amber-soft: rgba(245, 158, 11, 0.08);
+  --color-amber-border: rgba(245, 158, 11, 0.15);
+
+  --color-red-custom: var(--severity-critical);
+  --color-red-soft: rgba(239, 68, 68, 0.08);
+  --color-red-border: rgba(239, 68, 68, 0.15);
+
+  /* Secondary chat accent (Linear-inspired blue). */
+  --color-accent-info: var(--accent-info);
+  --color-accent-info-strong: var(--accent-info-strong);
+  --color-accent-info-soft: var(--accent-info-soft);
+  --color-accent-info-border: var(--accent-info-border);
+
+  --animate-fade-in: fade-in 0.2s var(--transition-base);
+  --animate-slide-in-right: slide-in-right 0.25s var(--transition-base);
+}
+
+.snap-inline {
+  scroll-snap-type: x mandatory;
+}
+.snap-start {
+  scroll-snap-align: start;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+html, body, #root {
+  background-color: var(--bg);
+  color: var(--text-1);
+  font-family: 'DM Sans', sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  width: 100vw;
+  overflow-x: hidden;
+  transition: background-color var(--transition-base), color var(--transition-base);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.card-glow-success {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--severity-ok) 5%, transparent);
+}
+.card-glow-success:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--severity-ok) 15%, transparent);
+  border-color: color-mix(in srgb, var(--severity-ok) 40%, transparent) !important;
+}
+
+.card-glow-warning {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--severity-warning) 6%, transparent);
+}
+.card-glow-warning:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--severity-warning) 18%, transparent);
+  border-color: color-mix(in srgb, var(--severity-warning) 40%, transparent) !important;
+}
+
+.card-glow-danger {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--severity-critical) 6%, transparent);
+}
+.card-glow-danger:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--severity-critical) 18%, transparent);
+  border-color: color-mix(in srgb, var(--severity-critical) 40%, transparent) !important;
+}
+
+.card-glow-offline {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--text-3) 2%, transparent);
+}
+.card-glow-offline:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--text-3) 12%, transparent);
+  border-color: color-mix(in srgb, var(--text-3) 30%, transparent) !important;
+}
+
+.card-glow-accent {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.card-glow-accent:hover {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
+}
+
+/* ─── Copilot / Chat utilities ───────────────────────────────── */
+.cp-glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+}
+
+.cp-turn {
+  position: relative;
+  padding: 14px 14px 16px;
+  margin: 0 10px 6px;
+  border-radius: var(--radius-lg);
+  border-left: 2px solid transparent;
+  background: transparent;
+  transition: background-color var(--transition-normal), border-color var(--transition-normal);
+}
+.cp-turn + .cp-turn {
+  margin-top: 4px;
+}
+.cp-turn:hover {
+  background: var(--turn-active-bg);
+  border-left-color: var(--turn-border-color);
+}
+.cp-turn.is-active {
+  background: var(--turn-active-bg);
+  border-left-color: var(--accent);
+}
+
+/* User bubble — left-rounded corner anchor. */
+.cp-bubble-user {
+  background: var(--surface-2);
+  color: var(--text-1);
+  padding: 10px 14px;
+  border-radius: var(--bubble-radius) var(--bubble-radius) var(--bubble-radius) var(--bubble-radius-corner);
+  border: 1px solid var(--border-strong);
+  max-width: 100%;
+}
+
+/* Assistant message: no bubble, just typography. */
+.cp-bubble-assistant p {
+  margin: 0;
+  line-height: 1.55;
+}
+.cp-bubble-assistant p + p {
+  margin-top: 0.5em;
+}
+
+/* Tool execution line — terminal-inspired compact row. */
+.cp-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  border-left: 2px solid var(--color-accent-info);
+  background: color-mix(in srgb, var(--accent-info) 4%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.cp-tool-line.is-error {
+  border-left-color: var(--severity-critical);
+  background: color-mix(in srgb, var(--severity-critical) 6%, transparent);
+  color: var(--text-1);
+}
+.cp-tool-line code,
+.cp-tool-line .cp-tool-name {
+  color: var(--accent-info-strong);
+  font-weight: 600;
+}
+
+/* Animated agent activity indicator. */
+.cp-agent-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cp-agent-typing span {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.45;
+  animation: cp-typing 1.2s infinite ease-in-out;
+}
+.cp-agent-typing span:nth-child(2) { animation-delay: 0.18s; }
+.cp-agent-typing span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes cp-typing {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+
+/* Pending ticker soft pulse. */
+.cp-pending-ticker {
+  animation: cp-ticker-pulse var(--ticker-pulse-duration) infinite ease-in-out;
+}
+@keyframes cp-ticker-pulse {
+  0%, 100% { background-color: color-mix(in srgb, var(--severity-critical) 6%, transparent); }
+  50% { background-color: color-mix(in srgb, var(--severity-critical) 14%, transparent); }
+}
+
+/* Smart Action card — risk-aware glow. */
+.cp-smart-action {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--surface-2) 60%, transparent),
+    color-mix(in srgb, var(--accent-muted) 25%, transparent));
+  border: 1px solid var(--accent-info-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.cp-smart-action[data-risk="high"],
+.cp-smart-action[data-risk="critical"] {
+  border-color: color-mix(in srgb, var(--severity-critical) 35%, transparent);
+  box-shadow: var(--smart-action-glow-high);
+  animation: cp-ticker-pulse var(--ticker-pulse-duration) infinite ease-in-out;
+}
+.cp-smart-action[data-risk="medium"] {
+  border-color: color-mix(in srgb, var(--severity-warning) 35%, transparent);
+}
+.cp-smart-action[data-risk="low"] {
+  border-color: color-mix(in srgb, var(--severity-ok) 30%, transparent);
+}
+.cp-smart-action-approve-btn {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+.cp-smart-action-approve-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cp-smart-action[data-risk="high"] .cp-smart-action-approve-btn,
+.cp-smart-action[data-risk="critical"] .cp-smart-action-approve-btn {
+  background: var(--severity-critical);
+  color: #fff;
+}
+.cp-smart-action[data-risk="high"] .cp-smart-action-approve-btn:hover:not(:disabled),
+.cp-smart-action[data-risk="critical"] .cp-smart-action-approve-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--severity-critical) 85%, #000);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--severity-critical) 35%, transparent);
+}
+
+/* Copilot sessions sidebar. */
+.cp-sidebar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  border-right: 1px solid var(--glass-border);
+  transition: width var(--transition-normal);
+}
+.cp-session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+.cp-session-item:hover {
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border);
+}
+.cp-session-item.is-active {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.cp-session-item.is-pending::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--severity-critical);
+  box-shadow: 0 0 6px var(--severity-critical);
+  margin-left: auto;
+}
+
+/* Ticker focus ring. */
+.cp-highlight-ring {
+  animation: cp-highlight-flash 1.6s ease-out;
+}
+@keyframes cp-highlight-flash {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  60%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 20%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}

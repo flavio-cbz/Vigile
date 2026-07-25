@@ -1,0 +1,72 @@
+{
+  "id": "plex",
+  "name": "Plex Media Server Integration",
+  "version": "1.0.0",
+  "author": "Vigile",
+  "description": "Auto-detect Plex Media Server, report active streaming sessions, and diagnose CPU load spikes.",
+  "hooks": [
+    "on_status_report",
+    "get_heavy_process_patterns"
+  ],
+  "pages": [
+    {
+      "id": "plex",
+      "title": "Plex",
+      "icon": "play",
+      "sidebar": true,
+      "component": "PlexAdmin",
+      "roles": ["admin", "operator"]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/{node_id}/detect",
+      "method": "GET",
+      "handler": "detect_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/sessions",
+      "method": "GET",
+      "handler": "sessions_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/library",
+      "method": "GET",
+      "handler": "library_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/users",
+      "method": "GET",
+      "handler": "users_route",
+      "roles": ["operator", "viewer"]
+    }
+  ],
+  "config_schema": {
+    "name": "Plex Media Server",
+    "description": "Auto-detects Plex instances, reports active library streaming sessions, and automates load-heavy investigation.",
+    "category": "Media",
+    "schema": {
+      "plex_token": {
+        "type": "string",
+        "title": "Plex Auth Token",
+        "default": "",
+        "description": "Auth token to communicate with Plex API (can be auto-configured via OAuth login)."
+      },
+      "plex_port_override": {
+        "type": "integer",
+        "title": "Plex Port Override",
+        "default": 0,
+        "description": "Override detected port (leave 0 for auto-detection or 32400 default)."
+      },
+      "cpu_threshold": {
+        "type": "integer",
+        "title": "CPU Threshold (%)",
+        "default": 80,
+        "description": "Alert diagnostic threshold."
+      }
+    }
+  }
+}

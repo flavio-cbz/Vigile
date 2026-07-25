@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Structured LLM
 
@@ -14,6 +16,7 @@ Pattern:
 
 import json
 import logging
+import re
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -70,12 +73,9 @@ class StructuredLLM:
             LLMError: If the LLM provider returns an error.
         """
         schema = response_model.model_json_schema()
-        system_prompt = (
-            "You are a precise JSON generator. "
-            "Respond ONLY with valid JSON matching this schema, "
-            "no markdown, no explanation, no code blocks:\n"
-            f"{json.dumps(schema, indent=2)}"
-        )
+        from master.core.prompts import load_prompt
+
+        system_prompt = load_prompt("structured_output", schema=json.dumps(schema, indent=2))
 
         full_messages = [{"role": "system", "content": system_prompt}, *messages]
 
@@ -85,33 +85,36 @@ class StructuredLLM:
                 **{k: v for k, v in kwargs.items() if k != "stream"},
             )
 
-            raw = (
-                response.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
+            raw = response.get("choices", [{}])[0].get("message", {}).get("content", "")
 
             if not raw:
                 if attempt == max_retries - 1:
-                    raise ValueError(
-                        f"LLM returned empty content after {max_retries} attempts"
-                    )
-                full_messages.append({
-                    "role": "assistant",
-                    "content": "(empty response)",
-                })
-                full_messages.append({
-                    "role": "user",
-                    "content": "You returned empty content. Output valid JSON only.",
-                })
+                    raise ValueError(f"LLM returned empty content after {max_retries} attempts")
+                full_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "(empty response)",
+                    }
+                )
+                full_messages.append(
+                    {
+                        "role": "user",
+                        "content": "You returned empty content. Output valid JSON only.",
+                    }
+                )
                 continue
 
             try:
-                return response_model.model_validate_json(raw)
+                # Strip <think> reasoning blocks (Nemotron, DeepSeek, etc.)
+                # before JSON validation to avoid parse failures
+                cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                return response_model.model_validate_json(cleaned)
             except Exception as exc:
                 logger.warning(
                     "StructuredLLM attempt %d/%d failed: %s",
-                    attempt + 1, max_retries, exc,
+                    attempt + 1,
+                    max_retries,
+                    exc,
                 )
                 if attempt == max_retries - 1:
                     raise ValueError(
@@ -119,9 +122,11 @@ class StructuredLLM:
                         f"Last error: {exc}"
                     ) from exc
                 full_messages.append({"role": "assistant", "content": raw})
-                full_messages.append({
-                    "role": "user",
-                    "content": f"Validation error: {exc}. Fix the JSON to match the schema exactly.",
-                })
+                full_messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Validation error: {exc}. Fix the JSON to match the schema exactly.",
+                    }
+                )
 
         raise ValueError("Unexpected: loop completed without return or raise")

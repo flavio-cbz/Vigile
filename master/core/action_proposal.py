@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Action Proposal Model
 
@@ -9,6 +11,7 @@ The Human-in-the-Loop cycle:
   4. On reject → status=REJECTED
 """
 
+import json
 import time
 import uuid
 from typing import Any
@@ -108,12 +111,10 @@ _VALID_STATUS_TRANSITIONS: dict[str, set[str]] = {
 
 
 def _json_dumps(obj: Any) -> str:
-    import json
     return json.dumps(obj, separators=(",", ":"))
 
 
 def _json_loads(s: str | None) -> Any:
-    import json
     if s is None:
         return None
     try:

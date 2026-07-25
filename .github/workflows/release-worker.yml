@@ -1,0 +1,149 @@
+name: Release Worker
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g., v0.6.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_DATE_EPOCH: "1"
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            goarch: amd64
+            goos: linux
+          - os: linux
+            arch: arm64
+            goarch: arm64
+            goos: linux
+          - os: linux
+            arch: armv7
+            goarch: arm
+            goarm: 7
+            goos: linux
+          - os: darwin
+            arch: amd64
+            goarch: amd64
+            goos: darwin
+          - os: darwin
+            arch: arm64
+            goarch: arm64
+            goos: darwin
+          - os: freebsd
+            arch: amd64
+            goarch: amd64
+            goos: freebsd
+          - os: freebsd
+            arch: arm64
+            goarch: arm64
+            goos: freebsd
+          - os: freebsd
+            arch: armv7
+            goarch: arm
+            goarm: 7
+            goos: freebsd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '' }}
+        run: |
+          cd worker
+          go build -trimpath \
+            -ldflags="-s -w -buildid= -X main.version=${{ github.ref_name }}" \
+            -o ../dist/worker-${{ matrix.os }}-${{ matrix.arch }} .
+      - name: Checksum
+        run: |
+          cd dist
+          sha256sum worker-${{ matrix.os }}-${{ matrix.arch }} \
+            > worker-${{ matrix.os }}-${{ matrix.arch }}.sha256
+      - name: Sign (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          echo "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          cd dist
+          printf '\n\n' | minisign -Sm worker-${{ matrix.os }}-${{ matrix.arch }} \
+            -s /tmp/minisign.key \
+            -x worker-${{ matrix.os }}-${{ matrix.arch }}.sig
+          rm -f worker-${{ matrix.os }}-${{ matrix.arch }}.minisig
+          rm -f /tmp/minisign.key
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/worker-${{ matrix.os }}-${{ matrix.arch }}
+            dist/worker-${{ matrix.os }}-${{ matrix.arch }}.sha256
+            dist/worker-${{ matrix.os }}-${{ matrix.arch }}.sig
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  manifest:
+    name: Generate Manifest
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          merge-multiple: true
+          path: dist/
+      - name: Generate manifest.json
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 .github/scripts/generate_manifest.py \
+            --version "${{ github.ref_name }}" \
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --dir dist/
+      - name: Upload manifest to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/manifest.json
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-revocation:
+    name: Upload Revocation List
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload revoked-versions.json to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: revoked-versions.json
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

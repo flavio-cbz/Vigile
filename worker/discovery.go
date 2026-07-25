@@ -7,12 +7,18 @@ import (
 	"runtime"
 )
 
+// Version is the current compiled release version of the Worker.
+// Declared as var (not const) so it can be overridden at build time via
+// -ldflags "-X main.Version=x.y.z".
+var Version = "1.0.0"
+
 // Fingerprint contains immutable node identity information.
 type Fingerprint struct {
 	Hostname  string `json:"hostname"`
 	MachineID string `json:"machine_id"`
 	Arch      string `json:"arch"`
 	OS        string `json:"os"`
+	Version   string `json:"version"`
 }
 
 // collectFingerprint gathers the node's identity from the environment.
@@ -22,6 +28,7 @@ func collectFingerprint() Fingerprint {
 		MachineID: getMachineID(),
 		Arch:      runtime.GOARCH,
 		OS:        runtime.GOOS,
+		Version:   Version,
 	}
 }
 

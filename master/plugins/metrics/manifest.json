@@ -1,0 +1,90 @@
+{
+  "id": "metrics",
+  "name": "Metrics Collector",
+  "version": "1.0.0",
+  "author": "Vigile",
+  "description": "Collect and persist CPU, memory, disk, network, and process telemetry from worker nodes.",
+  "hooks": [
+    "get_supported_actions",
+    "normalize_status_report",
+    "on_status_report"
+  ],
+  "database": {
+    "metrics_snapshots": [
+      { "name": "id", "type": "TEXT", "pk": true },
+      { "name": "node_id", "type": "TEXT", "not_null": true },
+      { "name": "collected_at", "type": "REAL", "not_null": true },
+      { "name": "created_at", "type": "REAL", "not_null": true },
+      { "name": "cpu_percent", "type": "REAL" },
+      { "name": "cpu_load_1m", "type": "REAL" },
+      { "name": "cpu_load_5m", "type": "REAL" },
+      { "name": "cpu_load_15m", "type": "REAL" },
+      { "name": "cpu_cores", "type": "INTEGER" },
+      { "name": "mem_total_bytes", "type": "INTEGER" },
+      { "name": "mem_used_bytes", "type": "INTEGER" },
+      { "name": "mem_percent", "type": "REAL" },
+      { "name": "swap_total_bytes", "type": "INTEGER" },
+      { "name": "swap_used_bytes", "type": "INTEGER" },
+      { "name": "disk_total_bytes", "type": "INTEGER" },
+      { "name": "disk_used_bytes", "type": "INTEGER" },
+      { "name": "disk_percent", "type": "REAL" },
+      { "name": "uptime_seconds", "type": "REAL" },
+      { "name": "processes", "type": "INTEGER" },
+      { "name": "disks_json", "type": "TEXT" },
+      { "name": "top_processes_json", "type": "TEXT" },
+      { "name": "net_bytes_recv", "type": "INTEGER" },
+      { "name": "net_bytes_sent", "type": "INTEGER" },
+      { "name": "net_packets_recv", "type": "INTEGER" },
+      { "name": "net_packets_sent", "type": "INTEGER" },
+      { "name": "net_errors_in", "type": "INTEGER" },
+      { "name": "net_errors_out", "type": "INTEGER" },
+      { "name": "net_drops_in", "type": "INTEGER" },
+      { "name": "net_drops_out", "type": "INTEGER" },
+      { "name": "disk_reads", "type": "INTEGER" },
+      { "name": "disk_writes", "type": "INTEGER" },
+      { "name": "disk_read_bytes", "type": "INTEGER" },
+      { "name": "disk_write_bytes", "type": "INTEGER" },
+      { "name": "temp_celsius", "type": "REAL" },
+      { "name": "psi_cpu_avg10", "type": "REAL" },
+      { "name": "psi_mem_avg10", "type": "REAL" },
+      { "name": "psi_io_avg10", "type": "REAL" },
+      { "name": "file_handles_used", "type": "INTEGER" },
+      { "name": "file_handles_max", "type": "INTEGER" },
+      { "name": "entropy_avail", "type": "INTEGER" },
+      { "name": "context_switches", "type": "INTEGER" },
+      { "name": "cpu_throttled_count", "type": "INTEGER" }
+    ]
+  },
+  "config_schema": {
+    "polling_interval": {
+      "type": "integer",
+      "title": "Polling Interval (seconds)",
+      "default": 60,
+      "description": "Frequency of metrics collection reports sent from the worker."
+    },
+    "retention_days": {
+      "type": "integer",
+      "title": "Metrics Retention (days)",
+      "default": 30,
+      "description": "Number of days to keep historical metrics snapshots in the database."
+    }
+  },
+  "pages": [
+    {
+      "id": "history",
+      "title": "Historique",
+      "icon": "trending",
+      "sidebar": true,
+      "component": "MetricsHistory",
+      "roles": ["admin", "operator", "viewer"]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/history",
+      "method": "GET",
+      "handler": "get_metrics_history",
+      "roles": ["admin", "operator", "viewer"]
+    }
+  ]
+}
