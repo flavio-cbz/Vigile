@@ -1,104 +1,92 @@
 # Vigile — Coding Standards
 
-Règles strictes de qualité de code, d'injection de dépendances, de typage, et de tests.
-**Ces règles ne sont pas négociables.** Applique-les à chaque ligne écrite.
+Strict rules for code quality, dependency injection, typing, and testing.
+**These rules are non-negotiable.** Apply them to every line of code written.
 
 ---
 
-## 0. PHILOSOPHIE GÉNÉRALE
+## 0. GENERAL PHILOSOPHY
 
-**La qualité prime sur la vitesse.** Toujours. Si une tâche peut être faite en 10 minutes
-avec un doute (99.9% de confiance) ou en 3 jours avec une certitude absolue (100%),
-on prend les 3 jours sans hésitation. Il n'y a pas d'urgence. Le code doit être
-indiscutable, testé, découplé, documenté. Pas de "on verra plus tard".
+**Quality over speed.** Always. If a task can be done in 10 minutes with any doubt (99.9% confidence) or in 3 days with absolute certainty (100%), we take the 3 days without hesitation. There is no rush. The code must be indisputable, tested, decoupled, and documented. No "we'll see later".
 
 ---
 
-## 1. INJECTION DE DÉPENDANCES (LA RÈGLE FONDAMENTALE)
+## 1. DEPENDENCY INJECTION (THE FUNDAMENTAL RULE)
 
-**Une classe du `core/` ne lit JAMAIS `settings.XXX`, `os.getenv`, ou le filesystem.
-Elle reçoit tout dans son constructeur.**
+**A core layer class NEVER reads `settings.XXX`, `os.getenv`, or the filesystem. It receives everything in its constructor.**
 
 ```python
-# ✅  Acceptable
+# ✅ Acceptable
 RateLimiter(max_requests=60, window_seconds=60)
 
-# ❌  Interdit — le constructeur va chercher sa config tout seul
-SecurityManager()  # lit settings.server_secret_key, settings.jwt_secret, I/O fichier
+# ❌ Forbidden — the constructor retrieves its configuration on its own
+SecurityManager()  # reads settings.server_secret_key, settings.jwt_secret, file I/O
 ```
 
-**Le filesystem I/O appartient à l'edge** (`main.py`, lifespan, `deps.py`).
-Les classes core reçoivent les objets déjà chargés. Par exemple un
-`Ed25519PrivateKey` déjà parsé, pas un path de fichier à lire.
+**Filesystem I/O belongs to the edge** (`main.py`, lifespan, `deps.py`).
+Core classes receive already loaded objects. For example, an already parsed `Ed25519PrivateKey`, not a file path to read.
 
 ---
 
 ## 2. SINGLETONS
 
-**Un singleton core est créé à l'import UNIQUEMENT si son constructeur
-est léger : 0 paramètres, 0 I/O, 0 side effects.**
+**A core singleton is created at import time ONLY if its constructor is lightweight: 0 parameters, 0 I/O, 0 side effects.**
 
 ```python
-# ✅  Acceptable — constructeur vide, pas de side effects
+# ✅ Acceptable — empty constructor, no side effects
 node_manager = NodeManager()
 
-# ❌  Interdit — side effects (I/O fichier, lecture config)
+# ❌ Forbidden — side effects (file I/O, config reading)
 security = SecurityManager()
 ```
 
-Quand le constructeur a besoin de paramètres (DI rule #1), la création se fait
-dans la `lifespan` de `main.py` et la factory est dans `deps.py`.
+When the constructor needs parameters (DI rule #1), the creation occurs in the `lifespan` of `main.py` and the factory is in `deps.py`.
 
 ---
 
 ## 3. CONFIGURATION
 
-**Toute variable d'env listée dans `.env.example` DOIT être lue par `config.py`.
-Si c'est documenté, ça doit marcher.** Pas de variable fantôme.
+**Every environment variable listed in `.env.example` MUST be read by `config.py`. If it is documented, it must work.** No ghost variables.
 
-**Une variable d'env = un champ dans `Settings`.** Pas de `os.getenv` éparpillé
-dans le code en dehors de `config.py`.
+**One env variable = one field in `Settings`.** No scattered `os.getenv` in the code outside of `config.py`.
 
 ---
 
 ## 4. IMPORTS
 
-**Tous les imports sont en haut du fichier. PAS d'imports différés**
-dans le corps des fonctions sauf cas de circular import avéré et documenté.
+**All imports are at the top of the file. NO deferred imports** in the body of functions except in cases of proven and documented circular imports.
 
-**Pas de `from master.config import settings` dans `core/` ou `api/`.**
-Les classes recoivent la config via DI (rule #1).
+**No `from master.config import settings` in `core/` or `api/`.** Core classes receive config via DI (rule #1).
 
 ---
 
-## 5. GESTION D'ERREURS
+## 5. ERROR HANDLING
 
-**Les boucles qui itèrent sur des données potentiellement invalides
-isolent chaque itération avec `try/except`.**
+**Loops iterating over potentially invalid data must isolate each iteration with a `try/except` block.**
 
 ```python
-# ✅  Un échec ne tue pas la boucle
+# ✅ A failure does not kill the loop
 for node in nodes:
     try:
         transition(node, new_state)
     except Exception:
-        logger.exception("Échec pour %s", node)
+        logger.exception("Failure for %s", node)
         continue
 
-# ❌  Un échec tue tout
+# ❌ A failure kills everything
 for node in nodes:
-    transition(node, new_state)  # si une exception, les suivants sautés
+    transition(node, new_state)  # if an exception occurs, subsequent items are skipped
 ```
+
+**Safety-sensitive Copilot action targets must be resolved before execution.** For `RESTART_CONTAINER`, accept common LLM target keys (`container_id`, `container`, `name`, `target`) but normalize them through the Master-side container resolver before persistence/execution. Use cached Docker inventory first, live `LIST_CONTAINERS` only as fallback, and fail closed on unknown or ambiguous fuzzy matches.
 
 ---
 
-## 6. TYPAGE
+## 6. TYPING
 
-**Tous les paramètres de fonction et valeurs de retour sont typés.**
-Aucun paramètre sans annotation (sauf `*args`, `**kwargs`).
-Aucun retour sans annotation (sauf `-> None` si la fonction ne retourne rien).
-Import `from __future__ import annotations` dans les fichiers Go? Non — c'est le
-typage Python standard.
+**All function parameters and return values must be typed.**
+No parameter without annotation (except `*args`, `**kwargs`).
+No return without annotation (except `-> None` if the function returns nothing).
 
 ```python
 # ✅
@@ -110,79 +98,76 @@ async def send_intent(self, node_id, intent, timeout=30.0):
 
 ---
 
-## 7. TESTS
+## 7. TESTING
 
-**Un test unitaire ne dépend JAMAIS du filesystem, des vrais tokens,
-de la vraie DB, ou du singleton réel.**
+**A unit test NEVER depends on the filesystem, real tokens, the real database, or the real singleton.**
 
 ```python
-# ✅  Acceptable — tout est injecté, pas de I/O réel
+# ✅ Acceptable — everything is injected, no real I/O
 sec = SecurityManager(server_secret="test", jwt_secret="test",
                       master_private_key=Ed25519PrivateKey.generate(), ...)
 
-# ❌  Interdit — va lire /etc/vigile/ et les vrais secrets
+# ❌ Forbidden — reads /etc/vigile/ and real secrets
 sec = SecurityManager()
 ```
 
-**Chaque test crée son propre environnement** (tmpdir, mocks, instances fraîches).
-Pas de state partagé entre tests. Pas d'ordre d'exécution implicite.
+**Each test creates its own environment** (tmpdir, mocks, fresh instances). No shared state between tests. No implicit execution order.
 
 ---
 
-## 8. VALIDATION DE SPRINT — 5 NIVEAUX DE TEST
+## 8. SPRINT VALIDATION — 5 LEVELS OF TESTING
 
-Chaque sprint est validé par **5 couches de test**, de la plus rapide à la plus réaliste.
-Un sprint n'est terminé que quand les 5 niveaux passent.
+Each sprint is validated by **5 layers of testing**, from fastest to most realistic.
+A sprint is only complete when all 5 levels pass.
 
-### Niveau 1 — Tests unitaires internes
+### Level 1 — Internal Unit Tests
 
-Tests automatisés, sans I/O réseau, sans fichiers réels.
+Automated tests, no network I/O, no real files.
 
 ```bash
 PYTHONPATH="." python3 tests/unit/test_core.py
 PYTHONPATH="." python3 tests/unit/test_plugins.py
-# ... chaque suite
+# ... each suite
 ```
 
-- Mock tout ce qui est externe (HTTP, DB, filesystem)
-- Un test = un environnement vierge (tmpdir, instances fraîches)
-- **Tous verts** avant de passer au niveau 2
+- Mock everything external (HTTP, DB, filesystem)
+- One test = one clean environment (tmpdir, fresh instances)
+- **All green** before moving to Level 2
 
-### Niveau 2 — Tests d'intégration externes
+### Level 2 — External Integration Tests
 
-Tests contre l'API HTTP réelle (serveur lancé).
+Tests against the actual HTTP API (server running).
 
 ```bash
-# Terminal 1 : lancer le serveur
+# Terminal 1: run server
 uvicorn master.main:app --port 8000
-# Terminal 2 : lancer les tests
+# Terminal 2: run tests
 PYTHONPATH="." python3 tests/integration/test_api.py
 ```
 
-- Teste les routes, le RBAC, les codes HTTP
-- Utilise httpx contre le vrai serveur
-- **Tous verts** avant de passer au niveau 3
+- Tests routes, RBAC, HTTP status codes
+- Uses httpx against the real server
+- **All green** before moving to Level 3
 
-### Niveau 3 — Simulation réaliste
+### Level 3 — Realistic Simulation
 
-Tests en environnement conteneurisé avec données simulées parfaites.
+Tests in a containerized environment with perfect simulated data.
 
 ```bash
-scripts/test_all_simulation.py  # 41 tests de simulation
+scripts/test_all_simulation.py  # 41 simulation tests
 ```
 
-- Worker Alpine avec mock systemctl/journalctl
-- **Services réalistes** : running, failed (mysql OOM, prometheus disk full),
-  inactive (apache2, backup), exited (apparmor, networking)
-- **Logs réalistes** : intrusions SSH, scans WordPress, crash MySQL, OOM killer
-- **Containers réels** via le socket Docker monté
-- **Statistiques CPU/RAM/DISK réelles** via /proc
-- Teste tous les endpoints : services, logs, containers, stats, restart, chat, proposals
-- **Tous verts** avant de passer au niveau 4
+- Alpine worker with mocked systemctl/journalctl
+- **Realistic services**: running, failed (mysql OOM, prometheus disk full), inactive (apache2, backup), exited (apparmor, networking)
+- **Realistic logs**: SSH intrusions, WordPress scans, MySQL crashes, OOM killer
+- **Real containers** via mounted Docker socket
+- **Real CPU/RAM/DISK statistics** via /proc
+- Tests all endpoints: services, logs, containers, stats, restart, chat, proposals
+- **All green** before moving to Level 4
 
-### Niveau 4 — Déploiement terrain
+### Level 4 — Staging Deployment
 
-Déploiement sur le serveur de production/staging.
+Deployment to the production/staging server.
 
 ```bash
 rsync -avz . youcloud.ovh:/opt/vigile/
@@ -190,101 +175,135 @@ docker compose build master worker
 docker compose up -d master
 ```
 
-- Master conteneurisé + worker conteneurisé
-- Vérifier `GET /health` → `connected_nodes >= 1`
-- **Tous les endpoints répondent** avant de passer au niveau 5
+- Containerized Master + containerized Worker
+- Verify `GET /health` → `connected_nodes >= 1`
+- **All endpoints respond** before moving to Level 5
 
-### Niveau 5 — Conditions réelles
+### Level 5 — Real-World Conditions
 
-Déploiement natif (Worker sur l'hôte, sans Docker).
+Native deployment (Worker on host, no Docker).
 
 ```bash
 sudo /usr/local/bin/vigile-worker --master https://vigile.local --token "..."
 ```
 
-- Worker s'exécute **nativement** sur le serveur cible
-- systemd réel, Docker réel, logs réels
-- L'IA interagit avec le vrai système
-- Le cycle complet est testé : chat → proposition → approbation → exécution → résultat
-- **Validation finale** du sprint
+- Worker runs **natively** on target machine
+- Real systemd, real Docker, real logs
+- AI interacts with the real system
+- Complete cycle is tested: chat → proposal → approval → execution → result
+- **Final validation** of the sprint
 
 ---
 
 ## 9. COMMITS
 
-**Un commit = une unité logique.** Pas de "fix typos + refactor + feature"
-dans le même commit.
+**One commit = one logical unit.** No "fix typos + refactor + feature" in the same commit.
 
-Format du message :
+Message format:
 
 ```text
-Sprint X — Description courte (max 72 chars)
+Sprint X — Short description (max 72 chars)
 
-- Détail 1
-- Détail 2
+- Detail 1
+- Detail 2
 
-Tests : N verts (M modifiés)
+Tests: N green (M modified)
 ```
 
-Rappel : ne jamais commit sans autorisation explicite de l'utilisateur.
+Reminder: never commit without explicit user authorization.
 
 ---
 
 ## 10. NOMENCLATURE
 
-| Élément | Convention | Exemple |
+| Element | Convention | Example |
 | --- | --- | --- |
-| Fichiers et dossiers | `snake_case` | `worker_handler.py` |
+| Files and directories | `snake_case` | `worker_handler.py` |
 | Classes | `PascalCase` | `SecurityManager` |
-| Fonctions / méthodes | `snake_case` | `generate_join_token` |
-| Constantes | `UPPER_SNAKE_CASE` | `VALID_TRANSITIONS` |
-| Privé | préfixe `_` | `self._connections` |
-| Privé fort (name mangling) | préfixe `__` | éviter sauf besoin réel |
+| Functions / methods | `snake_case` | `generate_join_token` |
+| Constants | `UPPER_SNAKE_CASE` | `VALID_TRANSITIONS` |
+| Private | `_` prefix | `self._connections` |
 
 ---
 
-## 11. SÉCURITÉ (SECOPS) — Règles intangibles
+## 11. SECURITY (SECOPS) — Tangible Rules
 
-- **Zéro SSH** : Le Master ne se connecte jamais aux Workers. Toujours les Workers
-  qui initient la connexion via WebSocket (contournement NAT).
-- **Cryptographie forte** : HMAC-SHA256 pour les tokens, Ed25519 pour l'auth Worker.
-- **Pas de shell interactif** : Le Worker a un dictionnaire d'actions autorisées
-  hardcodé. Jamais de `exec()` ou de shell arbitrary.
-- **Audit trail** : Toute mutation DB doit passer par `log_action()` (SHA256 chain).
-- **Zéro dépendance tierce sur le core** : La whitelist est sacrée (voir section 11).
+- **Zero SSH**: Master never connects to Workers. Workers always initiate the connection via WebSocket (NAT bypass).
+- **Strong Cryptography**: HMAC-SHA256 for tokens, Ed25519 for Worker auth.
+- **No Interactive Shell**: Worker has a hardcoded dictionary of allowed actions. Never use arbitrary `exec()` or shell execution.
+- **Audit Trail**: Every DB mutation must go through `log_action()` (SHA256 chain).
+- **Zero Third-party Dependencies on Core**: Whitelist is sacred (see Section 12).
 
 ---
 
-## 12. ZÉRO DÉPENDANCE (NO BLOATWARE)
+## 12. ZERO DEPENDENCY (NO BLOATWARE)
 
-**Aucune dépendance externe sans autorisation explicite.**
+**No external dependencies without explicit authorization.**
 
-**Whitelist Python (Master) :** `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`,
-`passlib`, `httpx`, `pydantic`
+**Python (Master) Whitelist:** `fastapi`, `uvicorn`, `aiosqlite`, `python-jose`, `passlib`, `httpx`, `pydantic`, `bcrypt` (via passlib), `itsdangerous` (via python-jose), `python-multipart` (via starlette), `anyio`, `pydantic-settings`
 
-**Whitelist Go (Worker) :** Standard Library uniquement. `go get` interdit.
+**Go (Worker) Whitelist:** Standard Library only. `go get` forbidden.
 
-Si une fonctionnalité complexe est nécessaire (client LLM, plugins, retry logic),
-on étudie le code open source existant et on implémente le pattern nativement.
+If a complex feature is needed (LLM client, plugins, retry logic), study existing open-source code and implement the pattern natively.
 
 ---
 
-## 13. FLUX IA (HUMAN-IN-THE-LOOP)
+## 13. AI FLOW (HUMAN-IN-THE-LOOP)
 
-- L'IA ne touche **jamais** un Worker directement.
-- L'IA génère des objets typés Pydantic via `StructuredLLM`.
-- Un humain valide toujours l'action avant exécution.
-
----
-
-## 14. ENVIRONNEMENT DE DÉVELOPPEMENT VS CIBLE
-
-- **Dev / tests** : Docker Compose.
-- **Cible finale** : Worker Go s'exécute **nativement** sur la machine cible
-  (binaire autonome, pas de Docker). Le Master peut tourner en Docker ou pas.
-- Docker = outil de dev/test, pas une dépendance pour l'utilisateur final.
+- AI **never** touches a Worker directly.
+- AI generates typed Pydantic objects via `StructuredLLM`.
+- A human always validates the action before execution.
 
 ---
 
-*Chaque ligne de code engagée engage le projet pour des années.
-Tu ne fais pas de compromis sur les règles ci-dessus.*
+## 14. DEV VS TARGET ENVIRONMENT
+
+- **Dev / tests**: Docker Compose.
+- **Final target**: Go Worker runs **natively** on target machine (standalone binary, no Docker). Master can run in Docker or not.
+- Docker is a dev/test tool, not a dependency for the final user.
+
+---
+
+## 15. APPROVED DEPENDENCY WHITELIST
+
+Dependencies MUST be explicitly whitelisted here. New dependencies require a documented justification.
+
+### Python (requirements.txt)
+- fastapi, uvicorn, aiosqlite — core web/DB stack
+- python-jose, passlib, bcrypt — JWT + password hashing
+- itsdangerous — secure token signing (password reset, etc.)
+- httpx — async HTTP client (LLM, webhooks)
+- python-multipart — form data parsing (file uploads)
+- pydantic, pydantic-settings — data validation + settings
+- pytest, pytest-cov, pip-audit — test + security tooling
+- ruff, mypy, coverage — lint + type-check
+- **NOT allowed**: pandas, numpy, django, flask, sqlalchemy (use aiosqlite raw SQL by project convention)
+
+### Go (worker/ — zero external dependencies)
+- Standard library ONLY. No `go.mod` external requires.
+
+### Frontend (package.json — runtime)
+- react, react-dom — UI
+- vite — build tool
+- tailwindcss, autoprefixer, postcss — styling
+- recharts — charts
+- zustand — state management
+- lucide-react — icons
+- class-variance-authority, clsx, tailwind-merge — utility
+- typescript, @types/* — typing
+
+---
+
+## 16. AGENT BEHAVIORAL PROTOCOLS
+
+The agent must maintain absolute rigor. The following four protocols are mandatory for any intervention:
+
+- **Mandatory Global Scanning**: Before modifying any shared behavior, API contract, or core component, the agent must perform a global scan to identify all downstream impacts, references, and dependencies across Python (master), Go (worker), and React (frontend) codebases. Isolated local modifications without checking global context are strictly prohibited.
+- **Proactive Inconsistency Detection**: During any audit, refactoring, or code modification task, the agent must actively look for and report implicit inconsistencies, code duplication, hardcoded values, style deviations, or tech debt in neighboring or related modules.
+- **Long-Term Memory Updates**: Every architectural decision, design pattern discovery, new convention, style invariant, or tech debt finding must be recorded and updated in the project's markdown memory files (`AGENTS.md` and `RULES.md`). The agent must systematically keep these files synchronized with the current state of the code.
+- **No Blind Local Patching**: Local hotfixes or workarounds are strictly forbidden if they introduce style divergence, bypass defined abstractions, or conflict with the architectural guidelines of this project. If a fix requires updating an abstraction, the abstraction itself must be refactored globally.
+
+---
+
+*Every line of committed code commits the project for years to come.
+You make no compromises on the rules above.*

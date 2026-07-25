@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Worker WebSocket Handler
 
@@ -36,13 +38,12 @@ import uuid
 from typing import Any
 
 import aiosqlite
-from fastapi import WebSocket, WebSocketDisconnect, WebSocketException, status
+from fastapi import WebSocket, WebSocketDisconnect
 
-from master.config import settings
-from master.core.audit import log_action
-from master.core.node_manager import NodeManager, NodeState, node_manager
+from master.core.audit import AuditAction, log_action
+from master.core.node_manager import NodeState, node_manager
 from master.core.plugin_manager import plugin_manager
-from master.core.security_manager import SecurityManager, get_security_instance
+from master.core.security_manager import get_security_instance
 from master.db.database import get_db_conn, transaction
 
 logger = logging.getLogger(__name__)
@@ -74,10 +75,28 @@ async def worker_join_handler(websocket: WebSocket) -> None:
     the operational loop. Handles all errors by closing with appropriate codes.
     """
     logger.debug("HANDLER CALLED for WS %s", id(websocket))
+
+    from master.config import settings
+
+    if settings.enforce_https:
+        url = getattr(websocket, "url", None)
+        scheme = getattr(url, "scheme", None) if url else None
+        headers = getattr(websocket, "headers", {})
+        x_proto = headers.get("x-forwarded-proto", "") if hasattr(headers, "get") else ""
+        is_secure = scheme == "wss" or x_proto.lower() == "https"
+        if not is_secure:
+            logger.warning("Rejecting unencrypted WebSocket connection (enforce_https=True)")
+            await websocket.accept()
+            await websocket.close(code=4426, reason="WSS/TLS required")
+            return
+
     await websocket.accept()
     logger.debug("WEBSOCKET ACCEPTED for WS %s", id(websocket))
     remote = _get_remote_address(websocket)
     logger.info("Worker connected from %s (WS=%s)", remote, id(websocket))
+
+    if get_security_instance().audit_compromised:
+        raise _EnrollmentError(4433, "Security compromise detected")
 
     db = get_db_conn()
     node_id: str | None = None
@@ -110,13 +129,9 @@ async def worker_join_handler(websocket: WebSocket) -> None:
             try:
                 current = await _get_node_state(db, node_id)
                 if current == NodeState.CONNECTED:
-                    await node_manager.transition_state(
-                        db, node_id, NodeState.RECONNECTING
-                    )
+                    await node_manager.transition_state(db, node_id, NodeState.RECONNECTING)
                 elif current == NodeState.ENROLLING:
-                    await node_manager.transition_state(
-                        db, node_id, NodeState.PENDING
-                    )
+                    await node_manager.transition_state(db, node_id, NodeState.PENDING)
             except Exception:
                 logger.exception("Failed to update state on disconnect for node %s", node_id)
 
@@ -140,11 +155,23 @@ async def _run_enrollment(
     req = await _recv_typed(websocket, "ENROLLMENT_REQUEST", timeout=ENROLLMENT_STEP_TIMEOUT)
 
     join_token: str = req.get("join_token", "")
+    worker_token: str = req.get("worker_token", "")
+    reconnect: bool = req.get("reconnect", False)
     public_key_b64: str = req.get("public_key", "")
     fingerprint: dict = req.get("fingerprint", {})
 
-    if not join_token or not public_key_b64:
-        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing join_token or public_key")
+    if not public_key_b64:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing public_key")
+
+    # ── Step 1.5: Reconnect mode — skip JOIN_TOKEN + Ed25519 challenge ─────
+    if reconnect and worker_token:
+        return await _run_reconnect(
+            websocket, db, remote, worker_token, public_key_b64, fingerprint
+        )
+
+    # Regular enrollment: require join_token
+    if not join_token:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing join_token or worker_token")
 
     # ── Step 2: Validate JOIN_TOKEN (HMAC + TTL) ────────────────────────────
     try:
@@ -159,7 +186,9 @@ async def _run_enrollment(
     if ip_prefix and not remote.startswith(ip_prefix):
         logger.warning(
             "Worker %s rejected: IP %s doesn't match prefix %s",
-            node_id, remote, ip_prefix,
+            node_id,
+            remote,
+            ip_prefix,
         )
         raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "IP prefix restriction violated")
 
@@ -175,33 +204,43 @@ async def _run_enrollment(
     if token_row is None:
         raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "Token not found")
     if token_row["consumed"]:
-        logger.error(
-            "SECURITY: consumed token reused! node_id=%s remote=%s", node_id, remote
-        )
+        logger.error("SECURITY: consumed token reused! node_id=%s remote=%s", node_id, remote)
         raise _EnrollmentError(WS_CLOSE_TOKEN_CONSUMED, "Token already consumed")
     if time.time() > token_row["expires_at"]:
         raise _EnrollmentError(WS_CLOSE_TOKEN_EXPIRED, "Token expired")
 
     # ── Step 5: Check node state ────────────────────────────────────────────
+    # None = first-time enrollment (no `nodes` row yet — created below).
+    # REVOKED = reject. PENDING/LOST/STALE/RECONNECTING = re-enrollment.
     node_state = await _get_node_state(db, node_id)
 
     if node_state == NodeState.REVOKED:
         logger.warning("REVOKED node attempted enrollment: %s", node_id)
         raise _EnrollmentError(WS_CLOSE_REVOKED, "Node is revoked")
 
-    if node_state not in (NodeState.PENDING, NodeState.LOST, NodeState.STALE, NodeState.RECONNECTING):
+    if node_state is not None and node_state not in (
+        NodeState.PENDING,
+        NodeState.LOST,
+        NodeState.STALE,
+        NodeState.RECONNECTING,
+    ):
         # Node might already be in ENROLLING from another connection
         raise _EnrollmentError(
             WS_CLOSE_PROTOCOL_ERROR,
             f"Node is in unexpected state: {node_state}",
         )
 
-    # ── Step 6: Transition to ENROLLING ─────────────────────────────────────
-    await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
+    is_first_enrollment = node_state is None
+
+    # ── Step 6: Transition to ENROLLING (no-op on first enrollment) ─────────
+    if not is_first_enrollment:
+        await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
 
     # ── Step 7: Generate and send CHALLENGE ─────────────────────────────────
     challenge = get_security_instance().generate_challenge()
-    await _send(websocket, {"type": "ENROLLMENT_CHALLENGE", "challenge": challenge})
+    await _send(
+        websocket, {"type": "ENROLLMENT_CHALLENGE", "challenge": challenge}, node_id=node_id
+    )
 
     # ── Step 8: Receive ENROLLMENT_RESPONSE ─────────────────────────────────
     resp = await _recv_typed(websocket, "ENROLLMENT_RESPONSE", timeout=ENROLLMENT_STEP_TIMEOUT)
@@ -211,10 +250,13 @@ async def _run_enrollment(
         raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Missing signature in response")
 
     # ── Step 9: Verify Ed25519 signature ────────────────────────────────────
-    if not get_security_instance().verify_ed25519_signature(public_key_b64, challenge, signature_b64):
+    if not get_security_instance().verify_ed25519_signature(
+        public_key_b64, challenge, signature_b64
+    ):
         logger.warning(
             "Ed25519 signature verification FAILED: node_id=%s remote=%s",
-            node_id, remote,
+            node_id,
+            remote,
         )
         raise _EnrollmentError(WS_CLOSE_SIGNATURE_INVALID, "Signature verification failed")
 
@@ -226,6 +268,12 @@ async def _run_enrollment(
     machine_id = fingerprint.get("machine_id", "")
     arch = fingerprint.get("arch", "")
     os_name = fingerprint.get("os", "")
+    version = fingerprint.get("version", "")
+    # Name and group are carried in the JOIN_TOKEN payload (set by generate-join).
+    # On first enrollment, we need them to satisfy the NOT NULL `name` column.
+    pending_name = payload.get("name", "") or hostname
+    pending_group = payload.get("group", "")
+    ip_prefix = payload.get("ip_prefix", "")
 
     async with transaction(db):
         # Atomic consume: only succeeds if consumed=0 (prevents double-enrollment race)
@@ -236,24 +284,68 @@ async def _run_enrollment(
         if cursor.rowcount == 0:
             logger.error(
                 "SECURITY: token already consumed in race window! node_id=%s remote=%s",
-                node_id, remote,
+                node_id,
+                remote,
             )
             raise _EnrollmentError(WS_CLOSE_TOKEN_CONSUMED, "Token already consumed")
 
-        await db.execute(
-            """
-            UPDATE nodes SET
-                hostname = ?,
-                machine_id = ?,
-                arch = ?,
-                os = ?,
-                public_key = ?,
-                enrolled_at = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (hostname, machine_id, arch, os_name, public_key_b64, now, now, node_id),
-        )
+        if is_first_enrollment:
+            # INSERT the `nodes` row (the Worker is what creates the row,
+            # see migration 006 + master/api/nodes.py).
+            await db.execute(
+                """
+                INSERT INTO nodes (
+                    id, name, hostname, machine_id, arch, os, public_key,
+                    state, ip_prefix, node_group, version, worker_version,
+                    enrolled_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    node_id,
+                    pending_name,
+                    hostname,
+                    machine_id,
+                    arch,
+                    os_name,
+                    public_key_b64,
+                    NodeState.CONNECTED.value,
+                    ip_prefix,
+                    pending_group,
+                    version,
+                    version,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+        else:
+            await db.execute(
+                """
+                UPDATE nodes SET
+                    hostname = ?,
+                    machine_id = ?,
+                    arch = ?,
+                    os = ?,
+                    public_key = ?,
+                    version = ?,
+                    worker_version = ?,
+                    enrolled_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    hostname,
+                    machine_id,
+                    arch,
+                    os_name,
+                    public_key_b64,
+                    version,
+                    version,
+                    now,
+                    now,
+                    node_id,
+                ),
+            )
 
         worker_token, lifecycle = get_security_instance().generate_worker_token(node_id)
         worker_token_hash = get_security_instance().worker_token_hash(worker_token)
@@ -278,31 +370,45 @@ async def _run_enrollment(
     logger.info("Enrollment DB committed for node %s (hostname=%s)", node_id, hostname)
 
     # ── Step 11: Transition to CONNECTED ────────────────────────────────────
-    await node_manager.transition_state(
-        db,
-        node_id,
-        NodeState.CONNECTED,
-        extra_fields={"last_heartbeat": now},
-    )
+    # On first enrollment, the INSERT above already set state=CONNECTED —
+    # we just need to update last_heartbeat. Otherwise we go through the
+    # state machine transition.
+    if is_first_enrollment:
+        await db.execute(
+            "UPDATE nodes SET last_heartbeat = ?, updated_at = ? WHERE id = ?",
+            (now, now, node_id),
+        )
+        await db.commit()
+    else:
+        await node_manager.transition_state(
+            db,
+            node_id,
+            NodeState.CONNECTED,
+            extra_fields={"last_heartbeat": now},
+        )
 
     # ── Step 12: Register WebSocket connection ───────────────────────────────
     conn = await node_manager.register_connection(node_id, websocket)
     conn.remote_address = remote
 
     # ── Step 13: Send ENROLLMENT_SUCCESS ────────────────────────────────────
-    await _send(websocket, {
-        "type": "ENROLLMENT_SUCCESS",
-        "worker_token": worker_token,
-        "master_public_key": get_security_instance().master_public_key_b64,
-        "node_id": node_id,
-        "heartbeat_interval": settings.heartbeat_interval,
-    })
+    await _send(
+        websocket,
+        {
+            "type": "ENROLLMENT_SUCCESS",
+            "worker_token": worker_token,
+            "master_public_key": get_security_instance().master_public_key_b64,
+            "node_id": node_id,
+            "heartbeat_interval": node_manager.heartbeat_interval,
+        },
+        node_id=node_id,
+    )
 
     # ── Step 14: Audit ───────────────────────────────────────────────────────
     await log_action(
         db,
         user_id="system",
-        action="NODE_ENROLLED",
+        action=AuditAction.NODE_ENROLLED,
         node_id=node_id,
         details={
             "hostname": hostname,
@@ -315,8 +421,182 @@ async def _run_enrollment(
 
     logger.info(
         "✓ Node ENROLLED: id=%s hostname=%s arch=%s os=%s",
-        node_id, hostname, arch, os_name,
+        node_id,
+        hostname,
+        arch,
+        os_name,
     )
+    return node_id
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.5: Reconnect enrollment (skip Ed25519 challenge)
+# ---------------------------------------------------------------------------
+
+
+async def _run_reconnect(
+    websocket: WebSocket,
+    db: aiosqlite.Connection,
+    remote: str,
+    worker_token: str,
+    public_key_b64: str,
+    fingerprint: dict | None = None,
+) -> str:
+    """Handle reconnect enrollment: validate worker_token, verify public_key match, skip challenge."""
+    fingerprint = fingerprint or {}
+    security = get_security_instance()
+
+    # ── R1: Verify worker_token (JWT validity + DB revocation) ──────────────
+    try:
+        claims = await security.verify_worker_token_async(worker_token, db)
+    except ValueError as exc:
+        logger.warning("Reconnect rejected: invalid worker_token from %s: %s", remote, exc)
+        raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, f"Invalid worker token: {exc}")
+
+    node_id: str = claims.get("sub", "")
+    if not node_id:
+        raise _EnrollmentError(WS_CLOSE_PROTOCOL_ERROR, "Worker token missing subject")
+
+    # ── R2: Fetch node and verify public_key match (anti-theft) ────────────
+    async with db.execute("SELECT state, public_key FROM nodes WHERE id = ?", (node_id,)) as cursor:
+        node_row = await cursor.fetchone()
+
+    if node_row is None:
+        raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "Node not found for worker token")
+
+    stored_pubkey = node_row["public_key"]
+    if not stored_pubkey:
+        raise _EnrollmentError(
+            WS_CLOSE_PROTOCOL_ERROR, "Node has no stored public key (not enrolled)"
+        )
+
+    if stored_pubkey != public_key_b64:
+        logger.error(
+            "SECURITY: public_key mismatch for node %s! Token theft detected from %s",
+            node_id,
+            remote,
+        )
+        raise _EnrollmentError(
+            WS_CLOSE_SIGNATURE_INVALID, "Public key mismatch — token theft detected"
+        )
+
+    # ── R3: Check node state ───────────────────────────────────────────────
+    node_state = NodeState(node_row["state"])
+    if node_state == NodeState.REVOKED:
+        raise _EnrollmentError(WS_CLOSE_REVOKED, "Node is revoked")
+    if node_state in (NodeState.PENDING, NodeState.ENROLLING, NodeState.CONNECTED):
+        raise _EnrollmentError(
+            WS_CLOSE_PROTOCOL_ERROR,
+            f"Node is in unexpected state for reconnect: {node_state}",
+        )
+
+    # Accepted states for reconnect: RECONNECTING, LOST, STALE
+    logger.info("Reconnect for node %s (state=%s, remote=%s)", node_id, node_state.value, remote)
+
+    # ── R4: Transition to ENROLLING ───────────────────────────────────────
+    await node_manager.transition_state(db, node_id, NodeState.ENROLLING)
+
+    # ── R5: Generate fresh worker_token, update DB ─────────────────────────
+    now = time.time()
+    hostname = fingerprint.get("hostname", "")
+    machine_id = fingerprint.get("machine_id", "")
+    arch = fingerprint.get("arch", "")
+    os_name = fingerprint.get("os", "")
+    version = fingerprint.get("version", "")
+    async with transaction(db):
+        # Update node fingerprint/version on reconnect
+        await db.execute(
+            """
+            UPDATE nodes SET
+                hostname = ?,
+                machine_id = ?,
+                arch = ?,
+                os = ?,
+                version = ?,
+                worker_version = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (hostname, machine_id, arch, os_name, version, version, now, node_id),
+        )
+        # Revoke old token
+        old_token_hash = security.worker_token_hash(worker_token)
+        await db.execute(
+            "UPDATE worker_tokens SET revoked = 1, revoked_at = ? WHERE token_hash = ?",
+            (now, old_token_hash),
+        )
+
+        # Create new token
+        new_token, lifecycle = security.generate_worker_token(node_id)
+        new_token_hash = security.worker_token_hash(new_token)
+        token_id = str(uuid.uuid4())
+        await db.execute(
+            """
+            INSERT INTO worker_tokens
+                (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (
+                token_id,
+                node_id,
+                new_token_hash,
+                lifecycle["issued_at"],
+                lifecycle["rotation_due"],
+                lifecycle["expires_at"],
+            ),
+        )
+
+    # ── R6: Transition to CONNECTED ────────────────────────────────────────
+    await node_manager.transition_state(
+        db,
+        node_id,
+        NodeState.CONNECTED,
+        extra_fields={"last_heartbeat": now},
+    )
+
+    # ── R7: Register WebSocket connection ──────────────────────────────────
+    conn = await node_manager.register_connection(node_id, websocket)
+    conn.remote_address = remote
+
+    # ── R8: Send ENROLLMENT_SUCCESS ────────────────────────────────────────
+    await _send(
+        websocket,
+        {
+            "type": "ENROLLMENT_SUCCESS",
+            "worker_token": new_token,
+            "master_public_key": security.master_public_key_b64,
+            "node_id": node_id,
+            "heartbeat_interval": node_manager.heartbeat_interval,
+        },
+        node_id=node_id,
+    )
+
+    # ── R9: Audit ───────────────────────────────────────────────────────────
+    reconnection_count = 1
+    try:
+        async with db.execute(
+            "SELECT COUNT(*) as cnt FROM audit_log WHERE action = 'NODE_RECONNECTED' AND node_id = ?",
+            (node_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            reconnection_count = row["cnt"] + 1
+    except Exception:
+        pass
+
+    await log_action(
+        db,
+        user_id="system",
+        action=AuditAction.NODE_RECONNECTED,
+        node_id=node_id,
+        details={
+            "token_id": token_id,
+            "reconnection_count": reconnection_count,
+            "remote_ip": remote,
+        },
+    )
+
+    logger.info("↻ Node RECONNECTED: id=%s (count=%d)", node_id, reconnection_count)
     return node_id
 
 
@@ -349,7 +629,7 @@ async def _run_operational(
         try:
             raw = await asyncio.wait_for(
                 websocket.receive_text(),
-                timeout=settings.heartbeat_interval * 3,  # 3× heartbeat grace period
+                timeout=node_manager.heartbeat_interval * 3,  # 3× heartbeat grace period
             )
         except asyncio.TimeoutError:
             # Worker hasn't sent anything in 3× heartbeat interval → likely dead
@@ -368,20 +648,74 @@ async def _run_operational(
 
         if msg_type == "HEARTBEAT":
             await node_manager.touch_heartbeat(node_id)
-            await _send(websocket, {"type": "HEARTBEAT_ACK", "ts": time.time()})
+            await _send(websocket, {"type": "HEARTBEAT_ACK", "ts": time.time()}, node_id=node_id)
+            hv = msg.get("version")
+            if hv:
+                await db.execute(
+                    "UPDATE nodes SET worker_version = ?, updated_at = ? WHERE id = ?",
+                    (hv, time.time(), node_id),
+                )
+                await db.commit()
+
+            # ── WORKER_TOKEN rotation check ──────────────────────────────
+            try:
+                async with db.execute(
+                    "SELECT token_hash, rotation_due FROM worker_tokens "
+                    "WHERE node_id = ? AND revoked = 0 ORDER BY issued_at DESC LIMIT 1",
+                    (node_id,),
+                ) as cursor:
+                    token_row = await cursor.fetchone()
+                if token_row and token_row["rotation_due"] < time.time():
+                    new_token, lifecycle = get_security_instance().generate_worker_token(node_id)
+                    new_token_hash = get_security_instance().worker_token_hash(new_token)
+                    token_id = str(uuid.uuid4())
+                    old_token_hash = token_row["token_hash"]
+                    async with transaction(db):
+                        await db.execute(
+                            "UPDATE worker_tokens SET revoked = 1, revoked_at = ? WHERE token_hash = ?",
+                            (time.time(), old_token_hash),
+                        )
+                        await db.execute(
+                            """
+                            INSERT INTO worker_tokens
+                                (id, node_id, token_hash, issued_at, rotation_due, expires_at, revoked)
+                            VALUES (?, ?, ?, ?, ?, ?, 0)
+                            """,
+                            (
+                                token_id,
+                                node_id,
+                                new_token_hash,
+                                lifecycle["issued_at"],
+                                lifecycle["rotation_due"],
+                                lifecycle["expires_at"],
+                            ),
+                        )
+                    await _send(
+                        websocket,
+                        {
+                            "type": "TOKEN_ROTATION_COMMAND",
+                            "worker_token": new_token,
+                        },
+                        node_id=node_id,
+                    )
+                    logger.info("Node %s: WORKER_TOKEN rotation sent (token_id=%s)", node_id, token_id)
+            except Exception:
+                logger.exception("Node %s: WORKER_TOKEN rotation failed", node_id)
 
         elif msg_type == "INTENT_RESULT":
             intent_id = msg.get("intent_id", "?")
             success = msg.get("success", False)
             logger.info(
                 "Node %s INTENT_RESULT: id=%s success=%s",
-                node_id, intent_id, success,
+                node_id,
+                intent_id,
+                success,
             )
             await node_manager.resolve_intent(intent_id, msg)
             await log_action(
                 db,
                 user_id="system",
-                action="INTENT_RESULT",
+                action=AuditAction.INTENT_RESULT,
                 node_id=node_id,
                 details={
                     "intent_id": intent_id,
@@ -390,20 +724,56 @@ async def _run_operational(
                     "error": msg.get("error"),
                 },
             )
+            # Suivi du taux d'échec des intents pour l'alert engine
+            from master.core.alert_engine import alert_engine
+            from master.core.automation_engine import automation_engine
+            asyncio.create_task(
+                alert_engine.track_intent_result(node_id, success, db),
+                name=f"alert:intent:{node_id[:12]}",
+            )
+            # Évaluation des règles d'automation node_intent_failure
+            asyncio.create_task(
+                automation_engine.evaluate_intent_failure(
+                    node_id, msg.get("action", ""), success, db
+                ),
+                name=f"automation:intent:{node_id[:12]}",
+            )
 
         elif msg_type == "STATUS_REPORT":
             # Normalize and store metrics snapshot via plugin system
-            snapshot = plugin_manager.call_first(
+            snapshot = await plugin_manager.async_call_first(
                 "normalize_status_report", raw_report=msg
             )
             if snapshot:
                 await plugin_manager.async_call(
                     "on_status_report", node_id=node_id, snapshot=snapshot, db=db
                 )
+
+                # Trigger automatic profiling on first STATUS_REPORT
+                try:
+                    async with db.execute(
+                        "SELECT insight_profile FROM nodes WHERE id = ?", (node_id,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    if row and not row["insight_profile"]:
+                        from master.api.deps import get_insights_manager
+
+                        im = get_insights_manager()
+                        asyncio.create_task(im.generate_profile(node_id, db, node_manager))
+                except Exception as ex:
+                    logger.warning(
+                        "Failed to start background profiling task for node %s: %s", node_id, ex
+                    )
             else:
-                logger.warning(
-                    "Node %s: invalid STATUS_REPORT rejected", node_id
+                logger.warning("Node %s: invalid STATUS_REPORT rejected", node_id)
+
+            sv = msg.get("version")
+            if sv:
+                await db.execute(
+                    "UPDATE nodes SET worker_version = ?, updated_at = ? WHERE id = ?",
+                    (sv, time.time(), node_id),
                 )
+                await db.commit()
 
         else:
             logger.warning("Node %s: unknown message type '%s'", node_id, msg_type)
@@ -451,9 +821,19 @@ async def _recv_typed(
     return msg
 
 
-async def _send(websocket: WebSocket, data: dict[str, Any]) -> None:
-    """Serialize and send a JSON message over the WebSocket."""
-    await websocket.send_text(json.dumps(data, separators=(",", ":")))
+async def _send(websocket: WebSocket, data: dict[str, Any], node_id: str | None = None) -> None:
+    """Serialize and send a JSON message over the WebSocket.
+
+    Protected against WebSocketDisconnect: catches the exception, cleans up
+    any pending intent futures for the given node, logs a warning, and does
+    NOT re-raise (avoids orphan futures and worker handler crashes).
+    """
+    try:
+        await websocket.send_text(json.dumps(data, separators=(",", ":")))
+    except WebSocketDisconnect:
+        logger.warning("WebSocket disconnected mid-send (node=%s)", node_id)
+        if node_id:
+            await node_manager.unregister_connection(node_id)
 
 
 async def _close(websocket: WebSocket, code: int, reason: str) -> None:
@@ -464,14 +844,18 @@ async def _close(websocket: WebSocket, code: int, reason: str) -> None:
         pass
 
 
-async def _get_node_state(db: aiosqlite.Connection, node_id: str) -> NodeState:
-    """Fetch the current state of a node from the DB."""
-    async with db.execute(
-        "SELECT state FROM nodes WHERE id = ?", (node_id,)
-    ) as cursor:
+async def _get_node_state(db: aiosqlite.Connection, node_id: str) -> NodeState | None:
+    """
+    Fetch the current state of a node from the DB.
+
+    Returns None if the `nodes` row does not exist yet — this is the
+    normal case for a first-time enrollment, where the row is only
+    created by the Worker handshake (see migration 006 + node_manager).
+    """
+    async with db.execute("SELECT state FROM nodes WHERE id = ?", (node_id,)) as cursor:
         row = await cursor.fetchone()
     if row is None:
-        raise _EnrollmentError(WS_CLOSE_INVALID_TOKEN, "Node not found")
+        return None
     return NodeState(row["state"])
 
 
@@ -482,8 +866,9 @@ def _get_remote_address(websocket: WebSocket) -> str:
     client_ip = client.host if client else ""
 
     # Only use X-Forwarded-For if the direct connection comes from a trusted proxy
-    if client_ip and settings.trusted_proxies:
-        if client_ip in settings.trusted_proxies:
+    trusted_proxies = getattr(websocket.app.state, "trusted_proxies", [])
+    if client_ip and trusted_proxies:
+        if client_ip in trusted_proxies:
             forwarded_for = websocket.headers.get("x-forwarded-for", "")
             if forwarded_for:
                 return forwarded_for.split(",")[0].strip()

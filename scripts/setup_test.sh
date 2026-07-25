@@ -49,7 +49,7 @@ docker compose -f "$COMPOSE_FILE" up -d master
 
 echo "Waiting for Master to be healthy..."
 for i in $(seq 1 30); do
-  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -sk http://localhost:8000/health >/dev/null 2>&1; then
     echo "Master is ready!"
     break
   fi
@@ -64,7 +64,7 @@ done
 # ── 2. Login as admin ─────────────────────────────────────────────────
 echo ""
 echo "=== Authenticating as admin ==="
-ADMIN_LOGIN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+ADMIN_LOGIN=$(curl -sk -X POST http://localhost:8000/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}')
 
@@ -82,7 +82,7 @@ for i in $(seq 1 "$WORKERS"); do
   echo "=== Setting up $NODE ==="
 
   # Generate JOIN_TOKEN via Master API
-  JOIN=$(curl -s -X POST http://localhost:8000/api/nodes/generate-join \
+  JOIN=$(curl -sk -X POST http://localhost:8000/api/nodes/generate-join \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -d "{\"name\":\"$NODE\"}")
@@ -119,14 +119,14 @@ echo "Quick checks:"
 echo "  docker compose logs -f master    # Watch Master logs"
 echo ""
 echo "  # List nodes with enrollment status:"
-echo "  TOKEN=\$(curl -s http://localhost:8000/api/auth/login \\"
+echo "  TOKEN=\$(curl -sk http://localhost:8000/api/auth/login \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{\"username\":\"admin\",\"password\":\"admin\"}' | jq -r '.access_token')"
-echo "  curl -s http://localhost:8000/api/nodes \\"
+echo "  curl -sk http://localhost:8000/api/nodes \\"
 echo "    -H \"Authorization: Bearer \$TOKEN\" | jq '.[] | {id, name, state, hostname}'"
 echo ""
 echo "  # Get stats for a node:"
-echo '  curl -s http://localhost:8000/api/nodes/<NODE_ID>/stats \'
+echo '  curl -sk http://localhost:8000/api/nodes/<NODE_ID>/stats \'
 echo "    -H \"Authorization: Bearer \$TOKEN\" | jq"
 echo ""
 echo "  # Cleanup:"

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Audit Trail
 
@@ -15,30 +17,68 @@ Design:
 The hash function is pure Python stdlib (hashlib) — no dependencies.
 """
 
-import asyncio
 import hashlib
 import json
 import logging
 import time
 import uuid
+from master.core.enums import StrEnum
 from typing import Any
 
 import aiosqlite
 
+from master.core.lock import LoopBoundLock
+
 logger = logging.getLogger(__name__)
 
+
+class AuditAction(StrEnum):
+    USER_LOGIN = "USER_LOGIN"
+    USER_LOGOUT = "USER_LOGOUT"
+    USER_CHANGE_PASSWORD = "USER_CHANGE_PASSWORD"
+    REFRESH_THEFT_DETECTED = "REFRESH_THEFT_DETECTED"
+    TOKEN_REFRESH = "TOKEN_REFRESH"
+    PROPOSAL_APPROVED = "PROPOSAL_APPROVED"
+    PROPOSAL_REJECTED = "PROPOSAL_REJECTED"
+    GENERATE_JOIN_TOKEN = "GENERATE_JOIN_TOKEN"
+    REGENERATE_JOIN_TOKEN = "REGENERATE_JOIN_TOKEN"
+    REVOKE_NODE = "REVOKE_NODE"
+    CONFIGURE_NODE = "CONFIGURE_NODE"
+    DISABLE_NODE = "DISABLE_NODE"
+    ENABLE_NODE = "ENABLE_NODE"
+    UPDATE_NODE = "UPDATE_NODE"
+    UPDATE_LLM_SETTINGS = "UPDATE_LLM_SETTINGS"
+    UPDATE_INTENT_CONFIG = "UPDATE_INTENT_CONFIG"
+    UPLOAD_PLUGIN = "UPLOAD_PLUGIN"
+    CONFIGURE_PLUGIN = "CONFIGURE_PLUGIN"
+    TOGGLE_PLUGIN = "TOGGLE_PLUGIN"
+    DELETE_PLUGIN = "DELETE_PLUGIN"
+    NODE_ENROLLED = "NODE_ENROLLED"
+    NODE_RECONNECTED = "NODE_RECONNECTED"
+    INTENT_RESULT = "INTENT_RESULT"
+    CACHE_REFRESH = "CACHE_REFRESH"
+    NODE_LOST = "NODE_LOST"
+    NODE_STALE = "NODE_STALE"
+    NODE_DELETED = "NODE_DELETED"
+    DEMO_RESET = "DEMO_RESET"
+    RESTART_SERVICE = "RESTART_SERVICE"
+    RESTART_CONTAINER = "RESTART_CONTAINER"
+    CREATE_AUTOMATION_RULE = "CREATE_AUTOMATION_RULE"
+    UPDATE_AUTOMATION_RULE = "UPDATE_AUTOMATION_RULE"
+    DELETE_AUTOMATION_RULE = "DELETE_AUTOMATION_RULE"
+    TOGGLE_AUTOMATION_RULE = "TOGGLE_AUTOMATION_RULE"
+    AUTOMATION_TRIGGERED = "AUTOMATION_TRIGGERED"
+    DISK_SCAN = "DISK_SCAN"
+
+
 # Serialize writes to prevent sequence collision
-_audit_lock = asyncio.Lock()
+_audit_lock = LoopBoundLock()
 
 # Sentinel for the first entry in the chain
 GENESIS_HASH = "0" * 64
 
 
-# ---------------------------------------------------------------------------
 # Core hash computation (shared with migrations.py for genesis entry)
-# ---------------------------------------------------------------------------
-
-
 def compute_entry_hash(
     previous_hash: str,
     sequence: int,
@@ -53,28 +93,25 @@ def compute_entry_hash(
     Fields joined with '|' — a character that cannot appear in any field value
     (UUIDs, action names, and JSON all use different separators).
     """
-    raw = "|".join([
-        previous_hash,
-        str(sequence),
-        f"{timestamp:.6f}",
-        action,
-        user_id,
-        node_id or "",
-        details_json,
-    ])
+    raw = "|".join(
+        [
+            previous_hash,
+            str(sequence),
+            f"{timestamp:.6f}",
+            action,
+            user_id,
+            node_id or "",
+            details_json,
+        ]
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 async def log_action(
     db: aiosqlite.Connection,
     *,
     user_id: str,
-    action: str,
+    action: AuditAction | str,
     node_id: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> str:
@@ -94,6 +131,7 @@ async def log_action(
     details_json = json.dumps(details or {}, separators=(",", ":"), ensure_ascii=False)
     timestamp = time.time()
     entry_id = str(uuid.uuid4())
+    in_trans = db.in_transaction
 
     # Serialized via asyncio.Lock to prevent sequence collision under concurrency.
     # (BEGIN IMMEDIATE alone isn't sufficient because await points inside the
@@ -129,22 +167,41 @@ async def log_action(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                entry_id, sequence, timestamp, user_id, action,
-                node_id, details_json, previous_hash, entry_hash,
+                entry_id,
+                sequence,
+                timestamp,
+                user_id,
+                action,
+                node_id,
+                details_json,
+                previous_hash,
+                entry_hash,
             ),
         )
-        await db.commit()
+        if not in_trans:
+            await db.commit()
 
     logger.info(
         "AUDIT seq=%d action=%s user=%s node=%s",
-        sequence, action, user_id, node_id or "-",
+        sequence,
+        action,
+        user_id,
+        node_id or "-",
     )
     return entry_id
 
 
-async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
+async def verify_chain(
+    db: aiosqlite.Connection,
+    *,
+    max_entries: int | None = None,
+) -> dict[str, Any]:
     """
-    Walk the entire audit log and verify the hash chain integrity.
+    Walk the audit log and verify the hash chain integrity.
+
+    Args:
+        max_entries: limit the number of entries verified (None = all).
+                     Useful for large tables where full scan is expensive.
 
     Returns a report dict:
       {
@@ -161,60 +218,81 @@ async def verify_chain(db: aiosqlite.Connection) -> dict[str, Any]:
         "error": None,
     }
 
-    expected_previous_hash = GENESIS_HASH
+    if max_entries is not None:
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence DESC
+            LIMIT ?
+        """
+        async with db.execute(sql, (max_entries,)) as cursor:
+            rows: list = list(await cursor.fetchall())
+        rows.reverse()
+    else:
+        sql = """
+            SELECT id, sequence, timestamp, user_id, action, node_id,
+                   details_json, previous_hash, entry_hash
+            FROM audit_log
+            ORDER BY sequence ASC
+        """
+        async with db.execute(sql) as cursor:
+            rows = list(await cursor.fetchall())
+
+    if not rows:
+        report["total_entries"] = 0
+        return report
+
+    first_row = rows[0]
+    if first_row["sequence"] == 1:
+        expected_previous_hash = GENESIS_HASH
+    else:
+        expected_previous_hash = first_row["previous_hash"]
+
     count = 0
+    for row in rows:
+        count += 1
+        seq = row["sequence"]
 
-    async with db.execute(
-        """
-        SELECT id, sequence, timestamp, user_id, action, node_id,
-               details_json, previous_hash, entry_hash
-        FROM audit_log
-        ORDER BY sequence ASC
-        """
-    ) as cursor:
-        async for row in cursor:
-            count += 1
-            seq = row["sequence"]
-
-            # Check that previous_hash matches expected value
-            if row["previous_hash"] != expected_previous_hash:
-                report["valid"] = False
-                report["first_broken_sequence"] = seq
-                report["error"] = (
-                    f"Sequence {seq}: previous_hash mismatch. "
-                    f"Expected '{expected_previous_hash[:12]}...', "
-                    f"got '{row['previous_hash'][:12]}...'"
-                )
-                break
-
-            # Recompute entry_hash
-            computed = compute_entry_hash(
-                previous_hash=row["previous_hash"],
-                sequence=seq,
-                timestamp=row["timestamp"],
-                action=row["action"],
-                user_id=row["user_id"],
-                node_id=row["node_id"],
-                details_json=row["details_json"],
+        if row["previous_hash"] != expected_previous_hash:
+            report["valid"] = False
+            report["first_broken_sequence"] = seq
+            report["error"] = (
+                f"Sequence {seq}: previous_hash mismatch. "
+                f"Expected '{expected_previous_hash[:12]}...', "
+                f"got '{row['previous_hash'][:12]}...'"
             )
+            break
 
-            if computed != row["entry_hash"]:
-                report["valid"] = False
-                report["first_broken_sequence"] = seq
-                report["error"] = (
-                    f"Sequence {seq}: entry_hash mismatch. "
-                    f"Record has been tampered with."
-                )
-                break
+        computed = compute_entry_hash(
+            previous_hash=row["previous_hash"],
+            sequence=seq,
+            timestamp=row["timestamp"],
+            action=row["action"],
+            user_id=row["user_id"],
+            node_id=row["node_id"],
+            details_json=row["details_json"],
+        )
 
-            expected_previous_hash = row["entry_hash"]
+        if computed != row["entry_hash"]:
+            report["valid"] = False
+            report["first_broken_sequence"] = seq
+            report["error"] = (
+                f"Sequence {seq}: entry_hash mismatch. " f"Record has been tampered with."
+            )
+            break
+
+        expected_previous_hash = row["entry_hash"]
 
     report["total_entries"] = count
     if report["valid"]:
         logger.info("Audit chain verification OK — %d entries verified.", count)
     else:
-        logger.error("Audit chain BROKEN at sequence %s: %s",
-                     report["first_broken_sequence"], report["error"])
+        logger.error(
+            "Audit chain BROKEN at sequence %s: %s",
+            report["first_broken_sequence"],
+            report["error"],
+        )
 
     return report
 
@@ -255,16 +333,18 @@ async def get_recent_entries(
     rows = []
     async with db.execute(sql, params) as cursor:
         async for row in cursor:
-            rows.append({
-                "id": row["id"],
-                "sequence": row["sequence"],
-                "timestamp": row["timestamp"],
-                "user_id": row["user_id"],
-                "action": row["action"],
-                "node_id": row["node_id"],
-                "details": json.loads(row["details_json"]),
-                "previous_hash": row["previous_hash"],
-                "entry_hash": row["entry_hash"],
-            })
+            rows.append(
+                {
+                    "id": row["id"],
+                    "sequence": row["sequence"],
+                    "timestamp": row["timestamp"],
+                    "user_id": row["user_id"],
+                    "action": row["action"],
+                    "node_id": row["node_id"],
+                    "details": json.loads(row["details_json"]),
+                    "previous_hash": row["previous_hash"],
+                    "entry_hash": row["entry_hash"],
+                }
+            )
 
     return rows

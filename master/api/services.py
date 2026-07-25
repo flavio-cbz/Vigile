@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Services & Containers API
 
@@ -12,22 +14,29 @@ Endpoints:
   POST   /api/nodes/{node_id}/containers/{container_id}/restart  Admin: restart container
 """
 
-import json
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
 
-from master.api.deps import DB, CurrentUser, get_node_manager, require_role
+from master.api.demo_data import (
+    DEMO_CONTAINERS,
+    DEMO_SERVICES,
+    get_demo_node,
+    get_demo_service,
+    is_demo,
+)
+from master.api.deps import DB, get_node_manager, require_role
+from master.api.rate_limits import WORKER_CONTROL_LIMIT
+from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
-from master.plugins.systemd_plugin import (
-    ServiceInfo,
-    ServiceStatus,
+from master.core.rate_limiter import rate_limiter
+from master.core.plugin_helpers import (
+    parse_container_list,
     parse_service_list,
     parse_service_status,
 )
-from master.plugins.docker_plugin import ContainerSummary, parse_container_list
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +48,7 @@ router = APIRouter(prefix="/api/nodes/{node_id}", tags=["services"])
 # ---------------------------------------------------------------------------
 
 
-async def _get_node_or_404(
-    nm: NodeManager, db: DB, node_id: str
-) -> dict[str, Any]:
+async def _get_node_or_404(nm: NodeManager, db: DB, node_id: str) -> dict[str, Any]:
     """Fetch a node or raise 404."""
     node = await nm.get_node(db, node_id)
     if node is None:
@@ -119,6 +126,7 @@ class ContainerActionResponse(BaseModel):
     "/services",
     response_model=ServiceListResponse,
     summary="List systemd services on a node (Operator+)",
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def list_services(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -127,6 +135,11 @@ async def list_services(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceListResponse:
     """Fetch the list of all systemd services from a Worker."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ServiceListResponse(node_id=node_id, services=DEMO_SERVICES)
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "LIST_SERVICES", {})
 
@@ -150,6 +163,7 @@ async def list_services(
     "/services/{service_name}",
     response_model=ServiceStatusResponse,
     summary="Get service status (Operator+)",
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def get_service_status(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -159,6 +173,24 @@ async def get_service_status(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceStatusResponse:
     """Fetch the status of a specific systemd service on a Worker."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        svc = get_demo_service(service_name)
+        if svc is not None:
+            return ServiceStatusResponse(
+                node_id=node_id,
+                service=service_name,
+                active=svc.get("state", "active"),
+                enabled=svc.get("status", "enabled"),
+            )
+        return ServiceStatusResponse(
+            node_id=node_id,
+            service=service_name,
+            active="unknown",
+            enabled="unknown",
+        )
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "STATUS_SERVICE", {"service": service_name})
 
@@ -167,7 +199,9 @@ async def get_service_status(
         if parsed is not None:
             return ServiceStatusResponse(node_id=node_id, **parsed)
     else:
-        logger.warning("Node %s: STATUS_SERVICE failed: %s", node_id, result.get("error", "unknown"))
+        logger.warning(
+            "Node %s: STATUS_SERVICE failed: %s", node_id, result.get("error", "unknown")
+        )
 
     return ServiceStatusResponse(
         node_id=node_id,
@@ -182,6 +216,7 @@ async def get_service_status(
     response_model=ServiceActionResponse,
     summary="Restart a systemd service (Admin only)",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def restart_service(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -191,8 +226,27 @@ async def restart_service(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceActionResponse:
     """Restart a systemd service on a Worker (requires admin role)."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ServiceActionResponse(
+            node_id=node_id,
+            service=service_name,
+            output=f"Simulated restart of {service_name} completed successfully.",
+            error=None,
+        )
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "RESTART_SERVICE", {"service": service_name})
+
+    if result.get("success"):
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.RESTART_SERVICE,
+            node_id=node_id,
+            details={"service_name": service_name},
+        )
 
     return ServiceActionResponse(
         node_id=node_id,
@@ -211,6 +265,7 @@ async def restart_service(
     "/containers",
     response_model=ContainerListResponse,
     summary="List Docker containers on a node (Operator+)",
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def list_containers(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -219,6 +274,12 @@ async def list_containers(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerListResponse:
     """Fetch the list of all Docker containers from a Worker."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        node_containers = [c for c in DEMO_CONTAINERS if c.get("node_id") == node_id]
+        return ContainerListResponse(node_id=node_id, containers=node_containers)
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "LIST_CONTAINERS", {})
 
@@ -230,7 +291,9 @@ async def list_containers(
         else:
             logger.warning("Node %s: unparseable container list", node_id)
     else:
-        logger.warning("Node %s: LIST_CONTAINERS failed: %s", node_id, result.get("error", "unknown"))
+        logger.warning(
+            "Node %s: LIST_CONTAINERS failed: %s", node_id, result.get("error", "unknown")
+        )
 
     return ContainerListResponse(
         node_id=node_id,
@@ -243,6 +306,7 @@ async def list_containers(
     response_model=ContainerActionResponse,
     summary="Restart a Docker container (Admin only)",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(rate_limiter.dependency(WORKER_CONTROL_LIMIT))],
 )
 async def restart_container(
     node_id: Annotated[str, Path(description="Node UUID")],
@@ -252,8 +316,27 @@ async def restart_container(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerActionResponse:
     """Restart a Docker container on a Worker (requires admin role)."""
+    if is_demo(claims):
+        if get_demo_node(node_id) is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        return ContainerActionResponse(
+            node_id=node_id,
+            container_id=container_id,
+            output=f"Simulated restart of container {container_id} completed successfully.",
+            error=None,
+        )
+
     await _get_node_or_404(nm, db, node_id)
     result = await _send_intent(nm, node_id, "RESTART_CONTAINER", {"container_id": container_id})
+
+    if result.get("success"):
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.RESTART_CONTAINER,
+            node_id=node_id,
+            details={"container_id": container_id},
+        )
 
     return ContainerActionResponse(
         node_id=node_id,

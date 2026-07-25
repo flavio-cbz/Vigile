@@ -1,113 +1,161 @@
-# Vigile — Agent Guide
+# PROJECT KNOWLEDGE BASE
 
-## Session start
+**Generated:** 2026-07-23T00:00:00+00:00
+**Commit:** da42dbc
+**Branch:** refactor/plugin-engine-v2
+**Updated by /init-deep:** root updated, subdirectory files (re)created.
 
-Read `docs/SESSION.md` first — it has the current sprint status.
-Read `RULES.md` second — **coding standards, DI rules, typing, tests**.
-Read `docs/LIMITS.md` third — known bugs and architectural limits.
+## OVERVIEW
+Vigile is a zero-trust fleet management server and agent system. The Python/FastAPI Master node coordinates authenticated operator commands via an LLM agent with human-in-the-loop validation, communicating with autonomous, zero-dependency Go Workers over WebSocket.
 
-**IMPORTANT :** `RULES.md` contient les règles strictes de qualité de code,
-d'injection de dépendances, de typage, et de tests. Ces règles ne sont pas
-négociables. Applique-les à chaque ligne écrite.
-
-## Commit & Push policy
-
-**Never commit or push without explicit approval.**
-At the end of each sprint or feature, ask the user for permission:
-
-  1. Present the summary of changes (files changed, tests passed)
-  2. Wait for a "go ahead" before committing
-  3. Only push after the commit is confirmed
-
-## Project structure
-
+## STRUCTURE
 ```text
-master/main.py           # FastAPI entrypoint
-master/config.py         # Settings from env vars (.env.example)
-master/core/             # SecurityManager, NodeManager, PluginManager, audit, rate_limiter
-master/api/              # auth.py, nodes.py (REST), deps.py (FastAPI dependencies)
-master/ws/               # worker_handler.py (WebSocket enrollment + operational)
-master/db/               # database.py, models.py (pure SQL), migrations.py
-master/plugins/          # metrics_plugin.py (CPU/RAM/disque/swap/uptime), + à venir
-tests/unit/              # test_core.py (57), test_worker_handler.py (15), test_plugins.py (88), test_logs_api.py (22), test_services_api.py (36), test_llm_client.py (8), test_structured_llm.py (8), test_action_proposal.py (25), test_chat_api.py (26) = 285 tests
-tests/integration/       # test_api.py (22 tests, requires running server)
-docs/                    # PLAN.md (architecture plan), SESSION.md (sprint status), LIMITS.md (bugs)
-RULES.md                 # Coding standards, DI, typing, tests
-worker/                  # Go binary (stdlib only, zero imports)
-  main.go               # Entrypoint, CLI flags, signal handling
-  wsclient.go            # WebSocket client — RFC 6455 pur stdlib
-  connection.go          # Connect, reconnect backoff, heartbeat, status reports
-  enrollment.go          # Ed25519 keypair generation, handshake protocol
-  dispatcher.go          # Intent whitelist + dispatch to actions
-  discovery.go           # Hostname, machine-id, OS, arch detection
-  stats.go               # CPU/RAM/disk/uptime from /proc (Linux)
-  logs.go                # Log reading (journalctl, file)
-  containers.go          # Docker API via Unix socket
-  services.go            # systemd service management
-  Dockerfile             # Multi-stage build (golang:1.23-alpine → alpine)
-scripts/
-  setup_test.sh          # Docker Compose test environment automation
-Dockerfile.master        # Python Master container image
-docker-compose.yml       # Full test stack (Master + Workers)
+master/                  # Control plane FastAPI server
+├── api/                 # REST API layer (auth, nodes, services, chat)
+├── core/                # Trusted domain logic (state, crypto, LLM, audit)
+├── db/                  # Raw SQL SQLite database & Alembic migrations
+├── plugins/             # OS systemd/Docker/metrics/disk_analysis telemetry plugins
+├── ws/                  # Two-phase WebSocket enrollment & operational connection handler
+├── static/              # Compiled React SPA files served directly by FastAPI
+worker/                  # Zero-dependency autonomous Go agent binary (DISK_SCAN handler)
+frontend/                # React Vite SPA for operator interaction & Copilot (d3-hierarchy treemap)
+tests/                   # Pytest test suite (93% coverage)
+scripts/                 # Dev launcher and Docker-based simulation tests
+docs/                    # Planning, known limits, and session logs
 ```
 
-`worker/` (Go binary) — implémenté en Sprint 2, zéro dépendance externe.
+## WHERE TO LOOK
 
-## Key architecture facts
+| Task | Location | Notes |
+|------|----------|-------|
+| Core logic (state machine, crypto, audit, LLM, insights, plugin engine) | [master/core/](master/core/) | See [master/core/AGENTS.md](master/core/AGENTS.md) |
+| REST API endpoints (auth, nodes, services, chat, admin, audit, demo) | [master/api/](master/api/) | See [master/api/AGENTS.md](master/api/AGENTS.md) |
+| Go Worker binary | [worker/](worker/) | See [worker/AGENTS.md](worker/AGENTS.md) |
+| Database (pure SQL, migrations, alembic) | [master/db/](master/db/) | Single small dir; see root CODE MAP for `run_migrations`. |
+| Plugins (metrics, systemd, docker, disk_analysis, plex, clean_logs) | [master/plugins/](master/plugins/) | See [master/plugins/AGENTS.md](master/plugins/AGENTS.md) |
+| WebSocket protocol handler | [master/ws/](master/ws/) | Single dir: `worker_handler.py` (`worker_join_handler`), see root CODE MAP. |
+| Pytest test suite | [tests/](tests/) | See [tests/AGENTS.md](tests/AGENTS.md) |
+| Simulation & dev launcher | [scripts/](scripts/) | Single dir; see root COMMANDS for invocation. |
+| React SPA | [frontend/](frontend/) | See [frontend/AGENTS.md](frontend/AGENTS.md) |
 
-- **No ORM** — pure SQL via aiosqlite. All DDL in `master/db/models.py`.
-- **No SSH** — Workers initiate connections via WebSocket (`/ws/worker/join`).
-- **No interactive shell** — Worker has a hardcoded action whitelist.
-- **State machine** in `NodeManager`: `PENDING → ENROLLING → CONNECTED → LOST/REVOKED → STALE`. Transitions are validated.
-- **Audit trail** — append-only SHA256 hash chain. Every DB mutation must call `log_action()`.
-- **Ed25519 handshake** for Worker enrollment (challenge/response over WebSocket).
-- **JOIN_TOKEN** = HMAC-SHA256, single-use, 30-min TTL. Atomic consumption via `UPDATE ... WHERE consumed=0`.
-- **Rate limiter** in-memory sliding window (60 req/min per route, 10 req/min on `/login`).
-- **Zero-dependency rule** : voir `RULES.md` section 12.
+## CODE MAP
 
-## Commands
+| Symbol | Type | Location | Refs | Role |
+|--------|------|----------|------|------|
+| `SecurityManager` | Class | [security_manager.py](master/core/security_manager.py) | High | Cryptography, JOIN_TOKEN (HMAC), JWT, Ed25519 challenge/response verification |
+| `NodeManager` | Class | [node_manager.py](master/core/node_manager.py) | High | Worker lifecycle state machine and active WebSocket registries |
+| `PluginManager` | Class | [plugin_manager.py](master/core/plugin_manager.py) | Medium | Hook-based plugin loading and sync/async hook dispatching |
+| `RateLimiter` | Class | [rate_limiter.py](master/core/rate_limiter.py) | Medium | Sliding window rate limiting per IP + endpoint with lifespan cleanups |
+| `LLMClient` | Class | [llm_client.py](master/core/llm_client.py) | Medium | Native HTTP client for OpenAI-compatible chat completion & streams |
+| `StructuredLLM` | Class | [structured_llm.py](master/core/structured_llm.py) | Medium | System prompts for JSON schema validation & LLM retry feedback loops |
+| `ActionProposal` | Class | [action_proposal.py](master/core/action_proposal.py) | Medium | Operator-approved action model (PENDING to APPROVED to EXECUTED/FAILED) |
+| `DiskScanResult` | Class | [disk_scan.py](master/schemas/disk_scan.py) | Medium | Pydantic v2 schema validating Worker DISK_SCAN output before cache write (fail-closed against malicious workers) |
+| `handleDiskScan` | Function | [disk_scan.go](worker/disk_scan.go) | Medium | Go stdlib disk-scan intent handler — dynamic whitelist via `params.mounts`, allocated size via `stat.Blocks×stat.Blksize`, 45s timeout, 2 MB payload cap |
+| `DiskAnalysisPlugin` | Class | [disk_analysis/__init__.py](master/plugins/disk_analysis/__init__.py) | Low | Frontend-only plugin for the GrandPerspective-style treemap view |
+| `worker_join_handler` | Function | [worker_handler.py](master/ws/worker_handler.py) | High | Entry point router `/ws/worker/join` for worker connections |
+| `verify_chain` | Function | [audit.py](master/core/audit.py) | Medium | Full SHA256 chain verification walking the entire audit log table |
+| `run_migrations` | Function | [migrations.py](master/db/migrations.py) | Medium | Idempotent table creation, indexes registration, and admin seeder |
 
+## CONVENTIONS
+- **No ORM**: Raw SQL text queries via `aiosqlite`.
+- **No pyproject.toml**: Only bare `requirements.txt`. Execution relies on setting `PYTHONPATH="."`.
+- **DI at edge**: Domain logic constructors in `master/core/` are lightweight and receive raw configuration/arguments, never reading env vars or settings directly.
+- **WebSocket Handshake**: Ed25519 challenge-response sequence over raw WS frames implemented from scratch in both Python and Go (zero external WS libraries in Go worker).
+- **Dynamic path allow-list (DISK_SCAN)**: The Worker keeps **no static whitelist** of scannable paths. The Master injects `params.mounts` (derived from the Worker's last `STATUS_REPORT.disks[].mount_point`) into each `DISK_SCAN` intent. The Worker validates the requested `path` against this runtime-provided list only, and fails closed if `mounts` is empty/absent. Eliminates the stale-allowlist attack surface (a dismounted `/media/Disque_1` leaves no open door).
+- **Allocated on-disk size**: `DiskNode.size` reflects allocated blocks (`stat.Blocks × stat.Blksize` in Go), not the apparent file size. Matches GrandPerspective's "size on disk" semantics and is consistent with `du`.
+
+## ANTI-PATTERNS (THIS PROJECT)
+- **CORS Wildcard**: CORS origins allow wildcards mapped dynamically via echoing middleware, but must be configured securely in production.
+- **Dependency Injection leakage**: Module-level import `from master.config import settings` in `master/api/deps.py` (lines 63, 213) violates DI rules.
+- **Sync call of async hooks**: Running async plugin hooks via sync `call()` emits a warning and is ignored. Always use `async_call()`.
+- **Database transaction locks**: Shared single aiosqlite Connection; multi-statement mutations must be wrapped in `transaction()` context to prevent sequence conflicts.
+- **Dynamic execution**: `compile()` and `exec()` inside `master/api/admin.py:337` allow dynamic python running; access must remain strictly role-gated.
+- **DELETE_* intent without fail-closed guardrails**: A future `DELETE_FILES` intent MUST follow the same fail-closed pattern as DISK_SCAN (dynamic `mounts` whitelist, symlink-resolve, Pydantic schema validation of worker output) plus double-confirm operator approval, trash-bin staging, and explicit audit chain entry. Never bypass `ActionProposal` (PENDING → APPROVED → EXECUTED) for any mutation.
+
+## UNIQUE STYLES
+- **Hash Chain Audit Trail**: Cryptographically linked logs where each entry contains `SHA256(previous_hash + sequence + data)`.
+- **Two-phase WebSocket Enrollment**: challenge-response protocol with `JOIN_TOKEN` verification before operational heartbeats start.
+- **Zero-Dependency Go worker**: Raw network socket frame decoding for RFC 6455 WebSocket connectivity without standard library extensions.
+- **Copilot Target Resolution**: Before executing `RESTART_CONTAINER`, the Master resolves LLM/operator targets against cached Docker containers, with live `LIST_CONTAINERS` fallback and conservative fuzzy matching. Ambiguous or unknown targets fail closed before Worker restart intent dispatch.
+- **Squarified Treemap Vis (DISK_SCAN)**: Frontend uses `d3-hierarchy treemapSquarify()` (Bruls et al. 1999) over a custom SVG `<rect>` renderer — NOT recharts `<Treemap>` which uses the inferior slice-and-dice algorithm. Color gradient amber→red encodes size ratio. Directories drill-down into their subtree. Matches GrandPerspective's reference rendering.
+
+## COMMANDS
 ```bash
-# Run all unit tests (no server required)
-# Linux/macOS:
-PYTHONPATH="." PYTHONIOENCODING=utf-8 .venv/bin/python tests/unit/test_core.py
-PYTHONPATH="." PYTHONIOENCODING=utf-8 .venv/bin/python tests/unit/test_worker_handler.py
-PYTHONPATH="." PYTHONIOENCODING=utf-8 .venv/bin/python tests/unit/test_plugins.py
+# Lancer les tests unitaires (ne requiert pas le serveur actif)
+$env:PYTHONPATH="."  # Windows PowerShell
+python -m pytest -m "not integration" -v
 
-# Windows:
-set PYTHONPATH=. && set PYTHONIOENCODING=utf-8 && .venv\Scripts\python tests/unit/test_core.py
-set PYTHONPATH=. && set PYTHONIOENCODING=utf-8 && .venv\Scripts\python tests/unit/test_worker_handler.py
-set PYTHONPATH=. && set PYTHONIOENCODING=utf-8 && .venv\Scripts\python tests/unit/test_plugins.py
+# Lancer le serveur de dev Master
+python -m uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
 
-# Run integration tests (requires server running on :8000)
-PYTHONPATH="." uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
-# then in another terminal:
-PYTHONPATH="." .venv/bin/python tests/integration/test_api.py
+# Lancer les tests d'intégration (nécessite le serveur sur le port 8000)
+python -m pytest -m "integration" -v
 
-# Start dev server
-PYTHONPATH="." uvicorn master.main:app --host 127.0.0.1 --port 8000 --reload
+# Lancer la totalité des tests (nécessite le serveur actif)
+python -m pytest -v
 
-# Default admin: admin / admin
+# Simulation tests (requires Docker Compose stack)
+./scripts/setup_test.sh
+PYTHONPATH="." .venv/bin/python scripts/test_all_simulation.py
+
+# Docker test stack
+docker compose build
+docker compose up -d master
+./scripts/setup_test.sh --workers 2
+
+# Default admin: admin / admin (Changement obligatoire à la première connexion)
 ```
 
-## Gotchas
+## AGENT BEHAVIORAL PROTOCOLS
+To ensure the integrity, consistency, and long-term maintainability of the project, the agent MUST strictly adhere to the following behavioral protocols before, during, and after any task:
+- **Mandatory Global Scanning**: Before modifying any shared behavior, API contract, or core component, the agent must perform a global scan to identify all downstream impacts, references, and dependencies across Python (master), Go (worker), and React (frontend) codebases.
+- **Proactive Inconsistency Detection**: During any audit, refactoring, or code modification task, the agent must actively look for and report implicit inconsistencies, code duplication, hardcoded values, style deviations, or tech debt in neighboring or related modules.
+- **Long-Term Memory Updates**: Every architectural decision, design pattern discovery, new convention, style invariant, or tech debt finding must be recorded and updated in the project's markdown memory files (`AGENTS.md` and `RULES.md`). The agent must systematically keep these files synchronized with the current state of the code.
+- **No Blind Local Patching**: Local hotfixes or workarounds are strictly forbidden if they introduce style divergence, bypass defined abstractions, or conflict with the architectural guidelines of this project.
 
-- `data/` and `__pycache__/` are gitignored — but `data/` contains the DB and the master Ed25519 private key. Never commit them.
-- Secrets are auto-generated if env vars are empty — fine for dev, **never for prod**. Always set `SERVER_SECRET_KEY` and `JWT_SECRET_KEY` in production.
-- `generate_join_token()` returns `(token_string, payload_dict)`, not just a string.
-- `NodeManager` methods `get_connection`, `touch_heartbeat`, `is_connected` are `async` — always `await` them.
-- The `transaction()` context manager exists in `database.py` — use it for multi-statement DB operations.
-- Plugin hooks have sync (`call()`) and async (`async_call()`) dispatch. Async hooks called via `call()` emit a `warning` log.
-- `PYTHONIOENCODING=utf-8` is required on Windows (emoji in test names crash cp1252).
-- The `.venv` may have broken symlinks when moving between OS — system Python works with `PYTHONPATH="."`.
-- New plugins go in `master/plugins/` and auto-register via hooks — no config change needed.
+## NOTES
+- `data/` and `__pycache__` are gitignored.
+- `AGENTS.md` and `RULES.md` are gitignored to preserve developer workspace preferences.
+- SQLite WAL mode enables parallel reads but writes are serialized.
+- Auto-generated secrets (`secrets.token_hex(32)`) occur dynamically if config values are blank in development.
+- Copilot `RESTART_CONTAINER` proposals normalize `container_id`/`container`/`name`/`target` to canonical `{"container_id": ..., "target": ...}` before persistence when a single safe match exists, and revalidate at approval for legacy pending proposals.
+- Disk Analysis plugin (`master/plugins/disk_analysis/`): Visualisation treemap (style GrandPerspective) — Worker `DISK_SCAN` intent (read-only, dynamic `mounts` whitelist fail-closed), Master endpoint `GET /api/nodes/{node_id}/disk-scan` with 5 min cache + Pydantic v2 schema validation + audit chain logging, Frontend `NodeDetailDiskTab` using `d3-hierarchy treemapSquarify` over SVG `<rect>` renderer with drill-down breadcrumb, path selector from `STATUS_REPORT.disks[].mount_point`, admin-gated rescan. Tier 2 (drill-down + Copilot integration + filters) shipped. Tier 3 (snapshots history, diff growth, `DELETE_FILES` intent) is a separate plan.
+- DISK_SCAN security review (2026-07-19, self-review after Oracle timeout): **SHIP with notes**. PASS: symlink safety in walk (skip on `os.ModeSymlink`), dynamic whitelist fail-closed (empty `mounts` → reject), Pydantic schema validation rejects unknown fields (`extra="forbid"`) and caps `children` at 100. GAPs: (a) **Rate-limit on `force=true`** — no per-node in-flight lock or `RateLimiter` dep; admin can trigger concurrent 45s scans → worker WS exhaustion. Open a follow-up issue before Tier 3. (b) **Cache write + audit log are separate transactions** — a crash between them leaves cache-without-audit; consistent with existing codebase split-transaction pattern but not ideal. (c) **TOCTOU on `EvalSymlinks` vs `ReadDir`** — low severity, requires root on worker host (which is already a trusted actor). (d) **No Master-side size cap on `result["output"]` before `model_validate_json`** — minor defense-in-depth.
 
-## Reference files
+## AUDIT FINDINGS (2026-06-04)
+File-by-file audit (4 specialists + cross-critique + Oracle verification) found **79 issues** the 8 audit documents in `docs/` missed:
+- **Cross-cutting**: 8 mega-issues (e.g., no TLS anywhere, no fix enforcement, no worker concurrency)
+- **Backend**: 13 new issues (require_role bypasses must_change_password/is_active, migration stamping broken)
+- **Worker**: 10 new issues (no TLS, no exec timeouts, frame parse panic)
+- **Frontend**: 18 new issues (zero AbortSignal, stale closures, localStorage token bypass)
+- **Infra**: 30 new issues (live API key in .env, zero Go/frontend tests, CI no pre-commit/securité)
 
-| File | Purpose |
-| ------ | --------- |
-| `RULES.md` | **Coding standards, DI rules, typing, tests, security, zero-dependency** |
-| `docs/PLAN.md` | Full architecture plan, protocol specs, future sprints (Sprints 1→11) |
-| `docs/SESSION.md` | Current sprint status |
-| `docs/LIMITS.md` | Known bugs, races, scalability limits |
-| `.env.example` | All configurable env vars with defaults |
+Full report: `.sisyphus/reports/audit-missed-report.md`
+
+## FIELD VALIDATION 2026-06-17 (youcloud.ovh, prod stack)
+Live test of the worker against the production deployment on youcloud.ovh:
+
+**Stack state** (before test): master `youcloud-master-1` running 4 weeks, BDD persisted on `vigile_data` volume. Worker `youcloud-persistent` running with an **expired** JOIN_TOKEN (exp 2026-05-15 22:34 UTC) — crashlooping on `peer closed connection` because the master rejects the stale token. `connected_nodes: 0`.
+
+**Fresh test worker** (`node_id: 13d2e23a-4eee-43dd-a00b-d43bd179c29c`, name `test-worker-1`):
+- WebSocket upgrade against `http://master:8000/ws/worker/join` — **OK**
+- Ed25519 challenge/response (44-byte challenge, 32-byte raw signature) — **OK**
+- Node appears in `/api/nodes` as `state: CONNECTED, online: true` — **OK**
+- Plugin intents dispatched successfully:
+  - `LIST_SERVICES` → 39 services returned (mysql: failed, prometheus: failed, ssh: active/running, etc.)
+  - `LIST_CONTAINERS` → 40 containers returned
+  - `READ_LOGS` → syslog tail returned
+  - `STATUS_SERVICE ssh.service` → `{"active": "active", "enabled": "enabled"}`
+- All intents completed `success=true`.
+
+**BUG DISCOVERED — Worker env var mismatch** (worker/main.go:23-28):
+- The Go binary reads `MASTER_URL` and `JOIN_TOKEN` **only** via `--master` and `--token` CLI flags (or via `/etc/vigile/master_url` and `/etc/vigile/enrollment.token` files).
+- The `docker-compose.yml` declares these as **environment variables** (`MASTER_URL=http://master:8000` on the `worker` service) but the binary **ignores them entirely**.
+- `docker compose run --rm -e JOIN_TOKEN=... worker` from `setup_test.sh` only works if the container inherits `--master` and `--token` args from the service definition; it does NOT.
+- The historical `youcloud-persistent` container has `--master http://master:8000 --token <...>` in `Config.Cmd` (set at creation time by Compose), which is why it worked.
+- **Fix candidates** (none applied — needs design decision):
+  1. Add `os.Getenv("MASTER_URL")` and `os.Getenv("JOIN_TOKEN")` fallbacks in `worker/main.go` after `flag.Parse()`
+  2. Modify `setup_test.sh` to override `--entrypoint` with full arg list (what I used: `--entrypoint "/usr/local/bin/vigile-worker --master http://master:8000 --token $TOKEN"`)
+  3. Modify `docker-compose.yml` `worker` service to set `command: ["--master", "http://master:8000"]`
+
+**Worker `vigile-test-worker-1` and `vigile-debug-worker` containers were cleaned up manually**. The historical `youcloud-persistent` was preserved. Master was inadvertently stopped+removed by `docker compose down --remove-orphans` (cleanup mistake) and was immediately restored with `docker compose up -d master`. BDD is intact.

@@ -7,23 +7,31 @@ import json
 import time
 import urllib.request
 
-BASE = "http://localhost:8002"
+BASE = "http://localhost:8000"
 
 
 def login():
-    r = json.loads(urllib.request.urlopen(urllib.request.Request(
-        f"{BASE}/api/auth/login",
-        data=json.dumps({"username": "admin", "password": "admin"}).encode(),
-        headers={"Content-Type": "application/json"},
-    )).read())
+    r = json.loads(
+        urllib.request.urlopen(
+            urllib.request.Request(
+                f"{BASE}/api/auth/login",
+                data=json.dumps({"username": "admin", "password": "admin"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+        ).read()
+    )
     return r["access_token"]
 
 
 def get_node_id(token):
-    r = json.loads(urllib.request.urlopen(urllib.request.Request(
-        f"{BASE}/api/nodes",
-        headers={"Authorization": f"Bearer {token}"},
-    )).read())
+    r = json.loads(
+        urllib.request.urlopen(
+            urllib.request.Request(
+                f"{BASE}/api/nodes",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        ).read()
+    )
     for n in r:
         if n["state"] == "CONNECTED":
             return n["id"]
@@ -66,14 +74,18 @@ def approve(token, proposal_id):
         return None
     print(f"  Approving {proposal_id[:12]}...")
     try:
-        a = json.loads(urllib.request.urlopen(urllib.request.Request(
-            f"{BASE}/api/chat/proposals/{proposal_id}/approve",
-            data=b"{}",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-        )).read())
+        a = json.loads(
+            urllib.request.urlopen(
+                urllib.request.Request(
+                    f"{BASE}/api/chat/proposals/{proposal_id}/approve",
+                    data=b"{}",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+            ).read()
+        )
         print(f"  Result: {a['status']}")
         if a.get("result_json"):
             print(f"  Output: {a['result_json'][:200]}")
@@ -87,10 +99,14 @@ def approve(token, proposal_id):
 
 def check_pending(token):
     """Check for any pending proposals."""
-    r = json.loads(urllib.request.urlopen(urllib.request.Request(
-        f"{BASE}/api/chat/proposals",
-        headers={"Authorization": f"Bearer {token}"},
-    )).read())
+    r = json.loads(
+        urllib.request.urlopen(
+            urllib.request.Request(
+                f"{BASE}/api/chat/proposals",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        ).read()
+    )
     pending = [p for p in r if p["status"] == "PENDING"]
     return pending
 
@@ -110,9 +126,11 @@ def main():
     print("TEST 1: Status check + restart proposal")
     print("=" * 70)
 
-    pid = chat(token, node_id,
+    pid = chat(
+        token,
+        node_id,
         "Check if nginx service is running. If it's active, "
-        "propose to restart it for a config reload."
+        "propose to restart it for a config reload.",
     )
     if pid:
         time.sleep(3)
@@ -129,10 +147,12 @@ def main():
     print("TEST 2: SSH log analysis + remediation")
     print("=" * 70)
 
-    pid = chat(token, node_id,
+    pid = chat(
+        token,
+        node_id,
         "Read the ssh service logs with journalctl. "
         "Check for any failed login attempts or suspicious activity. "
-        "If you find failed attempts, propose a security action."
+        "If you find failed attempts, propose a security action.",
     )
     if pid:
         time.sleep(3)
@@ -149,11 +169,13 @@ def main():
     print("TEST 3: Full server health check")
     print("=" * 70)
 
-    pid = chat(token, node_id,
+    pid = chat(
+        token,
+        node_id,
         "Give me a complete health check of my server: "
         "check CPU usage, memory, disk space, list critical services "
         "(ssh, nginx, docker, postgresql), and check recent syslog errors. "
-        "Summarize everything in a clear report."
+        "Summarize everything in a clear report.",
     )
 
     print("\n" + "=" * 70)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vigile — Plugin Manager
 
@@ -9,63 +11,332 @@ Concepts:
   - Implementation: a callable registered to a hook
   - Plugin: a Python module with a register(pm) function
 
-Features beyond the PLAN.md sketch:
-  - Async-aware: async_call() awaits coroutine implementations
-  - Registration metadata: track which plugin registered which hook
-  - Thread/task safety: locks protect the hook registry during load
-
-A plugin module must expose:
-    def register(pm: PluginManager) -> None:
-        pm.register("hook_name", my_handler_function)
+Sandbox Isolation:
+  - Supports running plugins in separate subprocesses (sandbox=True) for crash resilience.
+  - Implements remote database operations proxying to preserve database functionality.
 """
 
 import asyncio
 import importlib.util
 import inspect
+import json
 import logging
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from master.core.plugin_engine import PluginEngine
 
 logger = logging.getLogger(__name__)
+
+_BUILTIN_PLUGIN_FILE_TO_ID = {
+    "metrics_plugin": "metrics",
+    "systemd_plugin": "systemd",
+    "docker_plugin": "docker",
+}
+
+_BUILTIN_PLUGIN_ID_TO_FILE = {
+    plugin_id: file_stem for file_stem, plugin_id in _BUILTIN_PLUGIN_FILE_TO_ID.items()
+}
+
+
+def canonical_plugin_id(plugin_name: str) -> str:
+    """Map an on-disk plugin stem to the public plugin id."""
+    return _BUILTIN_PLUGIN_FILE_TO_ID.get(plugin_name, plugin_name)
+
+
+def plugin_file_stem(plugin_id: str) -> str:
+    """Resolve the file stem for a public plugin id."""
+    return _BUILTIN_PLUGIN_ID_TO_FILE.get(plugin_id, plugin_id)
+
+
+class PluginProcessWrapper:
+    """
+    Manages the lifecycle of an isolated plugin subprocess.
+    Communicates via JSON-RPC lines on stdin/stdout, and handles database proxying.
+    """
+
+    def __init__(self, plugin_name: str, plugin_path: str):
+        self.plugin_name = plugin_name
+        self.plugin_path = plugin_path
+        self.process: asyncio.subprocess.Process | None = None
+        self.hooks: list[str] = []
+        self.schema: dict[str, Any] = {}
+        self._pending_calls: dict[str, asyncio.Future] = {}
+        self._active_db_conns: dict[str, Any] = {}
+        self._stdout_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
+        self._init_future: asyncio.Future | None = None
+
+    async def start(self) -> None:
+        import sys
+
+        # Resolve script path relative to this file
+        worker_script = os.path.join(os.path.dirname(__file__), "plugin_worker.py")
+        loop = asyncio.get_running_loop()
+        self._init_future = loop.create_future()
+
+        logger.info("Starting isolated plugin process for '%s'...", self.plugin_name)
+        self.process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            worker_script,
+            self.plugin_name,
+            self.plugin_path,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        self._stdout_task = asyncio.create_task(self._read_stdout())
+        self._stderr_task = asyncio.create_task(self._read_stderr())
+
+        try:
+            await asyncio.wait_for(self._init_future, timeout=5.0)
+            logger.info(
+                "Isolated plugin process '%s' initialized with hooks: %s",
+                self.plugin_name,
+                self.hooks,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Initialization timed out for plugin process '%s'", self.plugin_name)
+            await self.stop()
+            raise RuntimeError(
+                f"Plugin '{self.plugin_name}' worker process failed to initialize within 5s"
+            )
+
+    async def stop(self) -> None:
+        logger.info("Stopping isolated plugin process '%s'...", self.plugin_name)
+        if self.process:
+            try:
+                self.process.terminate()
+                await asyncio.wait_for(self.process.wait(), timeout=2.0)
+            except Exception:
+                if self.process:
+                    try:
+                        self.process.kill()
+                    except Exception:
+                        pass
+            self.process = None
+
+        if self._stdout_task:
+            self._stdout_task.cancel()
+            self._stdout_task = None
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            self._stderr_task = None
+
+    async def _send_to_child(self, msg: dict) -> None:
+        if self.process and self.process.stdin:
+            data = (json.dumps(msg) + "\n").encode()
+            self.process.stdin.write(data)
+            await self.process.stdin.drain()
+
+    async def _read_stdout(self) -> None:
+        while self.process and self.process.stdout:
+            line = await self.process.stdout.readline()
+            if not line:
+                break
+            try:
+                msg = json.loads(line.decode().strip())
+                msg_type = msg.get("type")
+                call_id = msg.get("call_id")
+
+                if msg_type == "init":
+                    self.hooks = msg.get("hooks", [])
+                    self.schema = msg.get("schema", {})
+                    if self._init_future and not self._init_future.done():
+                        self._init_future.set_result(True)
+                    continue
+
+                if msg_type == "response":
+                    fut = self._pending_calls.get(call_id)
+                    if fut and not fut.done():
+                        if msg.get("status") == "success":
+                            fut.set_result(msg.get("result"))
+                        else:
+                            fut.set_exception(RuntimeError(msg.get("error")))
+                    continue
+
+                if msg_type in ("db_execute", "db_commit"):
+                    asyncio.create_task(self._handle_db_request(msg))
+                    continue
+
+            except Exception:
+                logger.exception(
+                    "[%s-parent] Failed to parse stdout line: %r", self.plugin_name, line
+                )
+
+    async def _read_stderr(self) -> None:
+        while self.process and self.process.stderr:
+            line = await self.process.stderr.readline()
+            if not line:
+                break
+            logger.info("[%s-child-stderr] %s", self.plugin_name, line.decode().strip())
+
+    async def _handle_db_request(self, msg: dict) -> None:
+        call_id = cast(str, msg.get("call_id"))
+        db_call_id = msg.get("db_call_id")
+        msg_type = msg.get("type")
+
+        # Get DB connection from call context or fallback
+        db = self._active_db_conns.get(call_id)
+        if not db:
+            from master.db.database import get_db_conn
+
+            try:
+                db = get_db_conn()
+            except Exception:
+                db = None
+
+        if not db:
+            await self._send_to_child(
+                {
+                    "type": "db_result",
+                    "db_call_id": db_call_id,
+                    "status": "error",
+                    "error": "No database connection available",
+                }
+            )
+            return
+
+        try:
+            if msg_type == "db_execute":
+                sql = msg["sql"]
+                params = msg.get("params", [])
+                cursor = await db.execute(sql, params)
+                rows = await cursor.fetchall()
+                serializable_rows = [dict(r) for r in rows]
+                await self._send_to_child(
+                    {
+                        "type": "db_result",
+                        "db_call_id": db_call_id,
+                        "status": "success",
+                        "result": {
+                            "rowcount": cursor.rowcount,
+                            "lastrowid": cursor.lastrowid,
+                            "rows": serializable_rows,
+                        },
+                    }
+                )
+            elif msg_type == "db_commit":
+                await db.commit()
+                await self._send_to_child(
+                    {
+                        "type": "db_result",
+                        "db_call_id": db_call_id,
+                        "status": "success",
+                        "result": {},
+                    }
+                )
+        except Exception as e:
+            logger.exception("[%s-parent] Database request failed", self.plugin_name)
+            await self._send_to_child(
+                {"type": "db_result", "db_call_id": db_call_id, "status": "error", "error": str(e)}
+            )
+
+    async def call_hook(self, hook_name: str, **kwargs: Any) -> Any:
+        # Check process status and restart if dead
+        if not self.process or self.process.returncode is not None:
+            logger.warning("Plugin process '%s' is not running. Restarting...", self.plugin_name)
+            await self.start()
+
+        call_id = str(asyncio.get_running_loop().time()) + "-" + os.urandom(4).hex()
+        fut = asyncio.get_running_loop().create_future()
+        self._pending_calls[call_id] = fut
+
+        # Extract db connection if present
+        db = kwargs.pop("db", None)
+        if db:
+            self._active_db_conns[call_id] = db
+
+        try:
+            await self._send_to_child(
+                {"type": "call_hook", "call_id": call_id, "hook_name": hook_name, "kwargs": kwargs}
+            )
+            return await fut
+        finally:
+            self._pending_calls.pop(call_id, None)
+            self._active_db_conns.pop(call_id, None)
 
 
 class PluginManager:
     """
     Lightweight hook-based plugin system.
-
-    Usage:
-        pm = PluginManager()
-        pm.register("on_node_connected", my_handler)
-        results = pm.call("on_node_connected", node_id="abc123")
-
-    Async hooks:
-        results = await pm.async_call("on_node_connected", node_id="abc123")
+    Supports in-process (sandbox=False) and out-of-process (sandbox=True) runners.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, engine: Any | None = None) -> None:
         # { hook_name: [(plugin_name, callable)] }
         self._hooks: dict[str, list[tuple[str, Callable]]] = {}
         self._loaded_plugins: list[str] = []
+        self._db: Any | None = None
+        self._active_calls: dict[str, int] = {}
+        self._draining_plugins: set[str] = set()
+        self._enabled_plugins: set[str] | None = None
+        self._disabled_plugins: set[str] | None = None
+        self._sandbox: bool = False
+        self._wrappers: dict[str, PluginProcessWrapper] = {}
+        self._engine: Any = engine
+
+    def set_engine(self, engine: Any) -> None:
+        self._engine = engine
+
+    async def initialize(self, db: Any, sandbox: bool = True) -> None:
+        """
+        Initialize the plugin manager with a database connection,
+        load disabled plugin IDs, and set sandbox mode.
+        """
+        self._db = db
+        self._sandbox = sandbox
+        try:
+            async with db.execute(
+                "SELECT id FROM plugins WHERE enabled = 0"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                self._disabled_plugins = {row[0] for row in rows}
+            logger.info(
+                "PluginManager initialized. Disabled plugins: %s (Sandbox=%s)",
+                self._disabled_plugins,
+                self._sandbox,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to query disabled plugins during PluginManager initialization: %s", e
+            )
+            self._disabled_plugins = set()
+
+    async def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
+        """
+        Retrieve configuration for a plugin from the database.
+        """
+        if self._db is None:
+            return {}
+        try:
+            async with self._db.execute(
+                "SELECT config_json FROM plugins WHERE id = ?", (plugin_name,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return json.loads(row[0])
+        except Exception as e:
+            logger.error("Error fetching config for plugin '%s': %s", plugin_name, e)
+        return {}
 
     # -----------------------------------------------------------------------
     # Registration
     # -----------------------------------------------------------------------
 
     def register(self, hook_name: str, fn: Callable, *, plugin_name: str = "anonymous") -> None:
-        """
-        Register a callable under a hook name.
-
-        Args:
-            hook_name   : the event name (e.g. "handle_intent")
-            fn          : sync or async callable to invoke
-            plugin_name : for introspection/logging
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            self._engine.hook_bus.register(hook_name, fn, plugin_name=plugin_name)
+            return
         self._hooks.setdefault(hook_name, []).append((plugin_name, fn))
         logger.debug("Plugin '%s' registered hook '%s'", plugin_name, hook_name)
 
     def unregister(self, hook_name: str, plugin_name: str) -> int:
-        """Remove all implementations registered by a given plugin for a hook."""
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.unregister(hook_name, plugin_name)
         if hook_name not in self._hooks:
             return 0
         before = len(self._hooks[hook_name])
@@ -80,21 +351,23 @@ class PluginManager:
     # -----------------------------------------------------------------------
 
     def call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        """
-        Invoke all sync implementations registered for hook_name.
-        Async implementations are skipped (use async_call for those).
-
-        Returns a list of non-None return values (same contract as Pluggy firstresult=False).
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.call(hook_name, **kwargs)
         results: list[Any] = []
         for plugin_name, fn in self._hooks.get(hook_name, []):
             if inspect.iscoroutinefunction(fn):
                 logger.warning(
                     "Hook '%s' impl from '%s' is async — skipped in sync call(). "
                     "Use async_call() instead.",
-                    hook_name, plugin_name,
+                    hook_name,
+                    plugin_name,
                 )
                 continue
+
+            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
+                continue
+
+            self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
             try:
                 result = fn(**kwargs)
                 if result is not None:
@@ -103,16 +376,21 @@ class PluginManager:
                 logger.exception(
                     "Hook '%s' impl from '%s' raised an exception", hook_name, plugin_name
                 )
+            finally:
+                self._active_calls[plugin_name] -= 1
         return results
 
     def call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        """
-        Like call(), but returns only the first non-None result.
-        Useful for hooks where only one plugin should handle a given action.
-        """
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.call_first(hook_name, **kwargs)
         for plugin_name, fn in self._hooks.get(hook_name, []):
             if inspect.iscoroutinefunction(fn):
                 continue
+
+            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
+                continue
+
+            self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
             try:
                 result = fn(**kwargs)
                 if result is not None:
@@ -121,31 +399,41 @@ class PluginManager:
                 logger.exception(
                     "Hook '%s' impl from '%s' raised an exception", hook_name, plugin_name
                 )
+            finally:
+                self._active_calls[plugin_name] -= 1
         return None
 
     # -----------------------------------------------------------------------
     # Async dispatch
     # -----------------------------------------------------------------------
 
-    async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        """
-        Invoke all implementations (sync + async) for hook_name concurrently.
-        Sync implementations are run in the event loop's executor.
+    async def _run_async_hook(
+        self, plugin_name: str, fn: Callable, hook_name: str, **kwargs: Any
+    ) -> Any:
+        self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
+        try:
+            if inspect.iscoroutinefunction(fn):
+                return await fn(**kwargs)
+            else:
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, lambda: fn(**kwargs))
+        finally:
+            self._active_calls[plugin_name] -= 1
 
-        Returns a list of non-None results.
-        """
+    async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return await self._engine.hook_bus.async_call(hook_name, **kwargs)
         tasks: list[asyncio.Future] = []
 
         for plugin_name, fn in self._hooks.get(hook_name, []):
-            if inspect.iscoroutinefunction(fn):
-                tasks.append(asyncio.create_task(fn(**kwargs), name=f"{plugin_name}.{hook_name}"))
-            else:
-                # Run sync hook in default thread pool to avoid blocking the loop
-                # run_in_executor returns an asyncio.Future (awaitable), not a coroutine
-                # Capture kwargs in closure to prevent cross-call contamination
-                loop = asyncio.get_running_loop()
-                fut = loop.run_in_executor(None, lambda f=fn, kw=kwargs: f(**kw))
-                tasks.append(fut)
+            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
+                continue
+
+            fut = asyncio.create_task(
+                self._run_async_hook(plugin_name, fn, hook_name, **kwargs),
+                name=f"{plugin_name}.{hook_name}",
+            )
+            tasks.append(fut)
 
         if not tasks:
             return []
@@ -154,16 +442,15 @@ class PluginManager:
         results: list[Any] = []
         for i, res in enumerate(results_raw):
             if isinstance(res, Exception):
-                logger.exception(
-                    "Async hook '%s' task %d raised: %s", hook_name, i, res
-                )
+                logger.exception("Async hook '%s' task %d raised: %s", hook_name, i, res)
             elif res is not None:
                 results.append(res)
 
         return results
 
     async def async_call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        """Async version of call_first — returns the first non-None result."""
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return await self._engine.hook_bus.async_call_first(hook_name, **kwargs)
         results = await self.async_call(hook_name, **kwargs)
         return results[0] if results else None
 
@@ -171,16 +458,9 @@ class PluginManager:
     # Dynamic plugin loading
     # -----------------------------------------------------------------------
 
-    def load_plugins_from_dir(self, plugins_dir: str) -> list[str]:
+    async def load_plugins_from_dir(self, plugins_dir: str) -> list[str]:
         """
         Scan a directory for Python plugin files and load them.
-
-        A plugin file must:
-          - End with .py
-          - Not start with _ (private/helper files excluded)
-          - Export a register(pm: PluginManager) function
-
-        Returns the list of successfully loaded plugin names.
         """
         if not os.path.isdir(plugins_dir):
             logger.warning("Plugins directory not found: %s", plugins_dir)
@@ -193,52 +473,180 @@ class PluginManager:
                 continue
 
             plugin_name = fname[:-3]
-            plugin_path = os.path.join(plugins_dir, fname)
+            plugin_id = canonical_plugin_id(plugin_name)
 
+            if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
+                logger.info("Plugin '%s' is disabled in database — skipping load.", plugin_id)
+                continue
+
+            if plugin_id in self._loaded_plugins:
+                logger.debug("Plugin '%s' already loaded — skipped.", plugin_id)
+                continue
+
+            success = await self.load_plugin(plugin_name, plugins_dir)
+            if success:
+                loaded.append(plugin_id)
+
+        return loaded
+
+    async def load_plugin(self, plugin_name: str, plugins_dir: str) -> bool:
+        plugin_id = canonical_plugin_id(plugin_name)
+        plugin_path = os.path.join(plugins_dir, f"{plugin_name}.py")
+        if not os.path.isfile(plugin_path):
+            logger.warning("Plugin file not found: %s", plugin_path)
+            return False
+
+        if plugin_id in self._loaded_plugins:
+            logger.debug("Plugin '%s' already loaded — skipped.", plugin_id)
+            return True
+
+        if self._sandbox:
             try:
-                spec = importlib.util.spec_from_file_location(
-                    f"vigile.plugins.{plugin_name}", plugin_path
-                )
+                wrapper = PluginProcessWrapper(plugin_id, plugin_path)
+                await wrapper.start()
+                self._wrappers[plugin_id] = wrapper
+
+                # Register hook proxies
+                for hook_name in wrapper.hooks:
+                    self.register(
+                        hook_name, self._make_proxy(wrapper, hook_name), plugin_name=plugin_id
+                    )
+
+                self._loaded_plugins.append(plugin_id)
+                if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
+                    self._disabled_plugins.remove(plugin_id)
+                if self._engine is not None:
+                    from master.core.plugin_engine import STATE_ACTIVE
+                    self._engine.lifecycle._states[plugin_id] = STATE_ACTIVE
+                logger.info("Plugin loaded in isolated subprocess: %s", plugin_id)
+                return True
+            except Exception:
+                logger.exception("Failed to load plugin '%s' in isolated subprocess", plugin_id)
+                return False
+        else:
+            # Standalone dynamic load
+            try:
+                module_name = f"vigile.plugins.{plugin_name}"
+                spec = importlib.util.spec_from_file_location(module_name, plugin_path)
                 if spec is None or spec.loader is None:
                     raise ImportError(f"Could not load spec for {plugin_path}")
 
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)  # type: ignore[union-attr]
+                import sys
+
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
 
                 if not hasattr(module, "register"):
-                    logger.warning(
-                        "Plugin '%s' has no register() function — skipped.", plugin_name
-                    )
-                    continue
+                    logger.warning("Plugin '%s' has no register() function — skipped.", plugin_id)
+                    if module_name in sys.modules:
+                        del sys.modules[module_name]
+                    return False
 
                 module.register(self)
-                self._loaded_plugins.append(plugin_name)
-                loaded.append(plugin_name)
-                logger.info("Plugin loaded: %s", plugin_name)
-
+                self._loaded_plugins.append(plugin_id)
+                if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
+                    self._disabled_plugins.remove(plugin_id)
+                if self._engine is not None:
+                    from master.core.plugin_engine import STATE_ACTIVE
+                    self._engine.lifecycle._states[plugin_id] = STATE_ACTIVE
+                logger.info("Plugin loaded in-process: %s", plugin_id)
+                return True
             except Exception:
-                logger.exception("Failed to load plugin '%s'", plugin_name)
+                logger.exception("Failed to load plugin '%s' in-process", plugin_id)
+                module_name = f"vigile.plugins.{plugin_name}"
+                import sys
 
-        return loaded
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                return False
+
+    def _make_proxy(self, wrapper: PluginProcessWrapper, hook_name: str) -> Callable:
+        async def proxy(**kwargs: Any) -> Any:
+            return await wrapper.call_hook(hook_name, **kwargs)
+
+        return proxy
+
+    async def unload_plugin(self, plugin_name: str) -> None:
+        """
+        Safely unload a plugin by stopping its worker process or unregistering hooks.
+        """
+        plugin_id = canonical_plugin_id(plugin_name)
+        module_stem = plugin_file_stem(plugin_name)
+
+        logger.info("Unloading plugin '%s'...", plugin_id)
+        self._draining_plugins.add(plugin_id)
+
+        # Deactivate via engine if available to clean up hooks, scheduler, routes
+        if self._engine is not None:
+            try:
+                if self._engine.lifecycle.get_state(plugin_id) == "ACTIVE":
+                    await self._engine.deactivate(plugin_id)
+            except Exception as e:
+                logger.error("Failed to deactivate plugin '%s' via engine: %s", plugin_id, e)
+
+        # Stop wrapper subprocess if running in sandbox mode
+        wrapper = self._wrappers.pop(plugin_id, None)
+        if wrapper:
+            await wrapper.stop()
+
+        # Unmount all routes
+        if self._engine is not None and self._engine.route_registrar is not None:
+            self._engine.route_registrar.unmount(plugin_id)
+
+        # Unregister all hooks
+        hooks_to_check = (
+            list(self._engine.hook_bus.get_hooks().keys())
+            if (self._engine is not None and self._engine.hook_bus is not None)
+            else list(self._hooks.keys())
+        )
+        for hook_name in hooks_to_check:
+            self.unregister(hook_name, plugin_id)
+
+        # Drain active running tasks
+        while self._active_calls.get(plugin_id, 0) > 0:
+            logger.debug(
+                "Draining plugin '%s' (active calls: %d)", plugin_id, self._active_calls[plugin_id]
+            )
+            await asyncio.sleep(0.05)
+
+        if plugin_id in self._loaded_plugins:
+            self._loaded_plugins.remove(plugin_id)
+        if self._disabled_plugins is not None:
+            self._disabled_plugins.add(plugin_id)
+        if self._engine is not None:
+            self._engine.lifecycle._states.pop(plugin_id, None)
+
+        module_name = f"vigile.plugins.{module_stem}"
+        import sys
+
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+
+        self._draining_plugins.discard(plugin_id)
+        logger.info("Plugin '%s' unloaded successfully.", plugin_id)
 
     # -----------------------------------------------------------------------
     # Introspection
     # -----------------------------------------------------------------------
 
     def get_hooks(self) -> dict[str, list[str]]:
-        """Return a dict of hook_name → [plugin_names] for debugging."""
-        return {
-            hook: [pn for pn, _ in impls]
-            for hook, impls in self._hooks.items()
-        }
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.get_hooks()
+        return {hook: [pn for pn, _ in impls] for hook, impls in self._hooks.items()}
 
     @property
     def loaded_plugins(self) -> list[str]:
+        if self._engine is not None:
+            return self._engine.loaded_plugins
         return list(self._loaded_plugins)
 
     def has_hook(self, hook_name: str) -> bool:
+        if self._engine is not None and self._engine.hook_bus is not None:
+            return self._engine.hook_bus.has_hook(hook_name)
         return bool(self._hooks.get(hook_name))
 
 
-# Module-level singleton (imported by other modules)
+# Module-level singleton
 plugin_manager = PluginManager()
+plugin_engine: Any | None = None

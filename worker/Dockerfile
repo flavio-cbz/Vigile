@@ -290,11 +290,15 @@ LOG
 
 # ── Final image setup ─────────────────────────────────────────────────
 
-RUN mkdir -p /etc/vigile /var/log
+RUN mkdir -p /etc/vigile /var/log /tmp && chmod 1777 /tmp
 
 COPY --from=builder /build/vigile-worker /usr/local/bin/vigile-worker
 
 # Run as root for /proc and Docker socket access in test environment.
 # Hardening (non-root + docker group) will be done before production.
+
+# Declare /tmp as a writable volume so self-update can download the new
+# binary there even when the container rootfs is read-only.
+VOLUME ["/tmp"]
 
 ENTRYPOINT ["/usr/local/bin/vigile-worker"]

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec // required for RFC 6455
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -66,7 +68,18 @@ const (
 	opPing   = 0x9
 	opPong   = 0xA
 
-	wsMagicGUID = "258EAFA5-E914-47DA-95CA-5AB5E20B12A"
+	wsKeyLen     = 16 // RFC 6455: 16-byte random key for Sec-WebSocket-Key
+	wsMaskKeyLen = 4  // RFC 6455: 4-byte XOR mask for client frames
+	wsMagicGUID  = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+	statusSwitchingProtocols = 101
+	maxFrameSize             = 1_048_576
+
+	// WebSocket frame layout sizes (RFC 6455 §5.2)
+	headerLen  = 2 // FIN + RSV + opcode + initial payload length byte
+	extLen2    = 2 // 16-bit extended payload length
+	extLen8    = 8 // 64-bit extended payload length
+	maskKeyLen = 4 // client-to-server masking key
 )
 
 // WSConn wraps a net.Conn after WebSocket upgrade.
@@ -78,14 +91,14 @@ type WSConn struct {
 }
 
 // DialWebSocket performs the WebSocket handshake and returns an upgraded connection.
-func DialWebSocket(rawURL string) (*WSConn, error) {
+func DialWebSocket(ctx context.Context, rawURL string) (*WSConn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("ws: invalid URL %q: %w", rawURL, err)
 	}
 
 	// Build WebSocket key
-	key := make([]byte, 16)
+	key := make([]byte, wsKeyLen)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("ws: random key: %w", err)
 	}
@@ -95,16 +108,30 @@ func DialWebSocket(rawURL string) (*WSConn, error) {
 	host := u.Host
 	if !strings.Contains(host, ":") {
 		if u.Scheme == "wss" || u.Scheme == "https" {
-			host += ":443"
+			host = net.JoinHostPort(host, "443")
 		} else {
-			host += ":80"
+			host = net.JoinHostPort(host, "80")
 		}
 	}
 
 	var dialer net.Dialer
 	dialer.Timeout = 10 * time.Second
 
-	conn, err := dialer.Dial("tcp", host)
+	var conn net.Conn
+	if u.Scheme == "wss" || u.Scheme == "https" {
+		tcpConn, errDial := dialer.DialContext(ctx, "tcp", host)
+		if errDial != nil {
+			return nil, fmt.Errorf("ws: dial %s: %w", host, errDial)
+		}
+		tlsConn := tls.Client(tcpConn, &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tlsConn.Handshake(); err != nil {
+			tcpConn.Close()
+			return nil, fmt.Errorf("ws: tls handshake: %w", err)
+		}
+		conn = tlsConn
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", host)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ws: dial %s: %w", host, err)
 	}
@@ -114,8 +141,15 @@ func DialWebSocket(rawURL string) (*WSConn, error) {
 	if u.RawQuery != "" {
 		path += "?" + u.RawQuery
 	}
-	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
-		path, u.Host, wsKey)
+	var builder strings.Builder
+	builder.WriteString("GET ")
+	builder.WriteString(path)
+	builder.WriteString(" HTTP/1.1\r\nHost: ")
+	builder.WriteString(u.Host)
+	builder.WriteString("\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ")
+	builder.WriteString(wsKey)
+	builder.WriteString("\r\nSec-WebSocket-Version: 13\r\n\r\n")
+	req := builder.String()
 
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()
@@ -131,13 +165,15 @@ func DialWebSocket(rawURL string) (*WSConn, error) {
 		return nil, fmt.Errorf("ws: read response: %w", err)
 	}
 
-	if statusCode != 101 {
+	if statusCode != statusSwitchingProtocols {
 		conn.Close()
-		return nil, fmt.Errorf("ws: expected 101, got %d", statusCode)
+		return nil, fmt.Errorf("ws: expected %d, got %d", statusSwitchingProtocols, statusCode)
 	}
 
-	// Sec-WebSocket-Accept validation skipped (see note above).
-	_ = headers
+	if headers["Sec-WebSocket-Accept"] != computeAcceptKey(wsKey) {
+		conn.Close()
+		return nil, errors.New("ws: invalid Sec-WebSocket-Accept")
+	}
 
 	return &WSConn{
 		conn:   conn,
@@ -169,7 +205,7 @@ func (ws *WSConn) writeFrame(opcode byte, payload []byte) error {
 	header := []byte{0x80 | opcode}
 
 	// Masking key (4 bytes, required for client frames)
-	maskKey := make([]byte, 4)
+	maskKey := make([]byte, wsMaskKeyLen)
 	if _, err := rand.Read(maskKey); err != nil {
 		return fmt.Errorf("ws: mask key: %w", err)
 	}
@@ -225,29 +261,38 @@ func (ws *WSConn) ReadText() ([]byte, error) {
 
 func (ws *WSConn) readFrame() (opcode byte, payload []byte, err error) {
 	// FIN + RSV + opcode
-	header := make([]byte, 2)
+	header := make([]byte, headerLen)
 	if _, err := io.ReadFull(ws.reader, header); err != nil {
 		return 0, nil, fmt.Errorf("ws: read header: %w", err)
 	}
 
 	opcode = header[0] & 0x0F
 	// fin := header[0]&0x80 != 0 (we assume single frames for simplicity)
+
+	// Validate RSV bits (MUST be 0 per RFC 6455)
+	if header[0]&0x70 != 0 {
+		return 0, nil, errors.New("ws: invalid RSV bits")
+	}
+
 	masked := header[1]&0x80 != 0
-	length := int64(header[1] & 0x7F)
+	length := uint64(header[1] & 0x7F)
 
 	switch {
 	case length == 126:
-		ext := make([]byte, 2)
+		ext := make([]byte, extLen2)
 		if _, err := io.ReadFull(ws.reader, ext); err != nil {
 			return 0, nil, fmt.Errorf("ws: read ext length 16: %w", err)
 		}
-		length = int64(binary.BigEndian.Uint16(ext))
+		length = uint64(binary.BigEndian.Uint16(ext))
 	case length == 127:
-		ext := make([]byte, 8)
+		ext := make([]byte, extLen8)
 		if _, err := io.ReadFull(ws.reader, ext); err != nil {
 			return 0, nil, fmt.Errorf("ws: read ext length 64: %w", err)
 		}
-		length = int64(binary.BigEndian.Uint64(ext))
+		length = binary.BigEndian.Uint64(ext)
+		if length&(1<<63) != 0 {
+			return 0, nil, errors.New("ws: invalid 64-bit payload length")
+		}
 	}
 
 	var maskKey [4]byte
@@ -257,8 +302,8 @@ func (ws *WSConn) readFrame() (opcode byte, payload []byte, err error) {
 		}
 	}
 
-	// Security: limit frame size to 1MB
-	if length > 1_048_576 {
+	// Security: limit frame size
+	if length > maxFrameSize {
 		return 0, nil, fmt.Errorf("ws: frame too large: %d bytes", length)
 	}
 

@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import aiosqlite
+import pytest
+from fastapi import HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials
+from httpx import ASGITransport, AsyncClient
+
+from master.api import deps
+from master.core.node_manager import NodeState, node_manager
+from master.core.security_manager import SecurityManager, get_security_instance
+from master.main import app
+
+
+@pytest.fixture
+def auth_headers(security: SecurityManager):
+    def _make(role: str = "admin"):
+        token = security.create_access_token("test-user", "test_user", role)
+        return {"Authorization": f"Bearer {token}"}
+
+    return _make
+
+
+@pytest.fixture
+async def test_client(db):
+    app.dependency_overrides[deps.get_db] = lambda: db
+    app.state.master_url = "http://test"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.pop(deps.get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def reset_compromised(security):
+    # Ensure audit_compromised is reset before and after each test
+    security.audit_compromised = False
+    yield
+    security.audit_compromised = False
+
+
+@pytest.mark.asyncio
+async def test_lockdown_closes_active_connections():
+    # Setup mock WebSocket
+    class MockWebSocket:
+        def __init__(self):
+            self.closed = False
+            self.code = None
+            self.reason = None
+
+        async def close(self, code: int, reason: str):
+            self.closed = True
+            self.code = code
+            self.reason = reason
+
+    ws = MockWebSocket()
+    node_id = "test-node-lockdown"
+
+    # Register connection in NodeManager
+    await node_manager.register_connection(node_id, ws)
+    assert await node_manager.is_connected(node_id)
+
+    # Trigger lockdown
+    await node_manager.lockdown()
+
+    # Verify connection unregistered and closed with 4433
+    assert not await node_manager.is_connected(node_id)
+    assert ws.closed
+    assert ws.code == 4433
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_lockdown_rules(security, db):
+    # Seed users first
+    await db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES ('admin-id', 'admin_user', 'no-hash', 'admin', 1, 0, 0, 0)"
+    )
+    await db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES ('viewer-id', 'viewer_user', 'no-hash', 'viewer', 1, 0, 0, 0)"
+    )
+    await db.commit()
+
+    # Setup mock request
+    class MockRequest:
+        def __init__(self, method: str):
+            self.method = method
+
+    # Create credentials
+    admin_token = security.create_access_token("admin-id", "admin_user", "admin")
+    viewer_token = security.create_access_token("viewer-id", "viewer_user", "viewer")
+
+    admin_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=admin_token)
+    viewer_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=viewer_token)
+
+    # 1. Normal state - should pass
+    security.audit_compromised = False
+
+    claims = await deps.get_current_user(MockRequest("GET"), admin_creds, security, db)
+    assert claims["role"] == "admin"
+
+    # 2. Compromised state
+    security.audit_compromised = True
+
+    # Operator/admin GET request should fail
+    with pytest.raises(HTTPException) as excinfo:
+        await deps.get_current_user(MockRequest("GET"), admin_creds, security, db)
+    assert excinfo.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # Any mutating/write request (POST) should fail (even for viewer)
+    with pytest.raises(HTTPException) as excinfo:
+        await deps.get_current_user(MockRequest("POST"), viewer_creds, security, db)
+    assert excinfo.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # Viewer GET request should succeed (as it is not an operator nor state-changing)
+    viewer_claims = await deps.get_current_user(MockRequest("GET"), viewer_creds, security, db)
+    assert viewer_claims["role"] == "viewer"
+
+
+@pytest.mark.asyncio
+async def test_require_role_lockdown(security, db):
+    # Seed users first
+    await db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "
+        "VALUES ('admin-id', 'admin_user', 'no-hash', 'admin', 1, 0, 0, 0)"
+    )
+    await db.commit()
+
+    security.audit_compromised = True
+    admin_token = security.create_access_token("admin-id", "admin_user", "admin")
+    admin_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=admin_token)
+
+    class MockRequest:
+        def __init__(self, method: str):
+            self.method = method
+
+    # Under lockdown, resolving current_user claims fails with 503
+    with pytest.raises(HTTPException) as excinfo:
+        await deps.get_current_user(MockRequest("GET"), admin_creds, security, db)
+    assert excinfo.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # Test require_role role validation directly using claims dict
+    dep = deps.require_role("admin")
+    claims = {"sub": "admin-id", "role": "admin"}
+    assert await dep(claims) == claims
+
+    # Test require_role raises 403 on insufficient permissions
+    viewer_claims = {"sub": "viewer-id", "role": "viewer"}
+    with pytest.raises(HTTPException) as excinfo:
+        await dep(viewer_claims)
+    assert excinfo.value.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_api_endpoints_lockdown(test_client, auth_headers):
+    # Setup test node
+    # When compromised, GET endpoints requiring admin/operator (like verify-chain) must fail with 503
+    get_security_instance().audit_compromised = True
+
+    # Call verify-chain (requires admin) -> 503
+    response = await test_client.get("/api/nodes/verify-chain", headers=auth_headers("admin"))
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    # Call list nodes (requires operator) -> 503
+    response = await test_client.get("/api/nodes", headers=auth_headers("operator"))
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE

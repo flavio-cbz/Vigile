@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vigile — Homelab Command Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@500;700;800&display=swap" rel="stylesheet" />
+    <script>
+      (function() {
+        const themes = {
+          'warm-dark': {
+            '--bg': '#0a0a0f', '--surface': '#12121a', '--surface-2': '#1a1a26', '--surface-3': '#232335',
+            '--border': 'rgba(232, 228, 240, 0.05)', '--border-strong': 'rgba(232, 228, 240, 0.12)',
+            '--accent': '#6366f1', '--accent-hover': '#4f46e5', '--accent-muted': 'rgba(99,102,241,0.15)',
+            '--text-1': '#e8e4f0', '--text-2': '#9a97b0', '--text-3': '#52506b'
+          },
+          'cool-dark': {
+            '--bg': '#090B0E', '--surface': '#101418', '--surface-2': '#161B22', '--surface-3': '#1C2330',
+            '--border': 'rgba(255,255,255,0.06)', '--border-strong': 'rgba(255,255,255,0.12)',
+            '--accent': '#2DD4BF', '--accent-hover': '#20B9A6', '--accent-muted': 'rgba(45,212,191,0.12)',
+            '--text-1': '#E8F0F5', '--text-2': '#7A9AB0', '--text-3': '#3A5060'
+          },
+          'gray-dark': {
+            '--bg': '#0A0A0C', '--surface': '#111114', '--surface-2': '#18181C', '--surface-3': '#1E1E24',
+            '--border': 'rgba(255,255,255,0.06)', '--border-strong': 'rgba(255,255,255,0.12)',
+            '--accent': '#E8650A', '--accent-hover': '#D4560A', '--accent-muted': 'rgba(232,101,10,0.12)',
+            '--text-1': '#F0F0F5', '--text-2': '#8080A0', '--text-3': '#404060'
+          },
+          'light': {
+            '--bg': '#F5F0EB', '--surface': '#FFFFFF', '--surface-2': '#F0EBE5', '--surface-3': '#E8E0D8',
+            '--border': 'rgba(0,0,0,0.08)', '--border-strong': 'rgba(0,0,0,0.15)',
+            '--accent': '#E8650A', '--accent-hover': '#D4560A', '--accent-muted': 'rgba(232,101,10,0.12)',
+            '--text-1': '#1A1210', '--text-2': '#6A5C50', '--text-3': '#A09080'
+          }
+        };
+        let theme = localStorage.getItem('vigile_theme') || 'warm-dark';
+        const themeMap = {
+          'cold-night': 'cool-dark',
+          'operator-gray': 'gray-dark',
+          'light-ops': 'light'
+        };
+        if (themeMap[theme]) {
+          theme = themeMap[theme];
+          localStorage.setItem('vigile_theme', theme);
+        }
+        const activeTheme = themes[theme] || themes['warm-dark'];
+        const root = document.documentElement;
+        Object.entries(activeTheme).forEach(([variable, value]) => {
+          root.style.setProperty(variable, value);
+        });
+        root.classList.add(theme);
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DFLPgkzn.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C40vOSFY.css">
+  </head>
+  <body class="selection:bg-accent/30 selection:text-text-1">
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,359 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router';
+import { useAuthStore } from '../store/authStore';
+import { LoginForm } from '../components/auth/LoginForm';
+import { KeyRound, Loader2, Cpu, Activity, Terminal as TerminalIcon } from 'lucide-react';
+import { VigileLogo } from '../components/ui/VigileLogo';
+import { api } from '../hooks/useApi';
+import { useLocale } from '../i18n';
+import { ParticleCanvas } from '../components/login/ParticleCanvas';
+import type { MeResponse, LoginLocationState } from '../types';
+const LOG_LINES = [
+  'SECURE MANAGER: Cryptography layer loaded (Ed25519 standard).',
+  'DATABASE: aiosqlite pool initialized.',
+  'AUDIT: Append-only hash chain checked. Integrity validated.',
+  'WEBSOCKET: join listener configured on port 8000.',
+  'NODE MANAGER: Loading active worker inventory...',
+  'SYSTEM: 3 nodes loaded. Health checks resolved.',
+  'PLUGINS: metric snapshot scanning active (60s tick).',
+  'RATE LIMITER: Sliding window setup initialized.',
+  'LLM INTEGRITY: Custom OpenAI complete client active.',
+  'SYSTEM: challenge response handshake initialized.',
+];
+
+const BootLogs: React.FC = () => {
+  const { t } = useLocale();
+  const [logs, setLogs] = useState<string[]>(() =>
+    LOG_LINES.slice(0, 6).map((log, i) => {
+      const ts = new Date(Date.now() - (6 - i) * 3000).toLocaleTimeString();
+      return `[${ts}] ${log}`;
+    })
+  );
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLogs((prev) => {
+        const next = LOG_LINES[Math.floor(Math.random() * LOG_LINES.length)];
+        const ts = new Date().toLocaleTimeString();
+        const full = `[${ts}] ${next}`;
+        const update = [...prev, full];
+        if (update.length > 15) update.shift();
+        return update;
+      });
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [logs]);
+
+  return (
+    <div className="font-mono text-[11px] text-text-2 leading-relaxed p-4 bg-surface-2 border border-border rounded-lg h-44 overflow-hidden flex flex-col justify-end relative shadow-inner">
+      <div className="absolute top-2 left-3 flex items-center gap-1.5 text-[8px] text-text-2 uppercase tracking-wider font-semibold pointer-events-none select-none">
+        <TerminalIcon className="w-3 h-3 text-accent animate-pulse" />
+        <span>{t('login.boot_logs_title')}</span>
+      </div>
+      <div ref={ref} className="overflow-y-auto max-h-[140px] space-y-1 pr-1 no-scrollbar">
+        {logs.map((log, i) => {
+          let c = 'text-text-2';
+          if (log.includes('SECURE') || log.includes('AUDIT') || log.includes('Integrity')) c = 'text-accent';
+          else if (log.includes('validated') || log.includes('initialized') || log.includes('loaded')) c = 'text-severity-ok';
+          return <div key={i} className={c}>{log}</div>;
+        })}
+      </div>
+    </div>
+  );
+};
+
+export const LoginPage: React.FC = () => {
+  const { t } = useLocale();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const loginStore = useAuthStore((state) => state.login);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [originalUsername, setOriginalUsername] = useState<string>('');
+
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [tempToken, setTempToken] = useState<string | null>(null);
+
+  const from = (location.state as LoginLocationState | null)?.from?.pathname || '/';
+
+  const handleLogin = async (username: string, password: string) => {
+    setOriginalUsername(username);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await api<{ access_token: string; refresh_token: string }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+        skipToast: true,
+      });
+
+      if (!data) {
+        throw new Error(t('login.error_invalid'));
+      }
+      const { access_token, refresh_token } = data;
+
+      let meData: MeResponse | null = null;
+      try {
+        meData = await api<MeResponse>('/api/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+          },
+          skipToast: true,
+        });
+      } catch (err: unknown) {
+        // If meData throws 403, check if it's MUST_CHANGE_PASSWORD
+        try {
+          const message = err instanceof Error ? err.message : String(err);
+          const parsed = JSON.parse(message);
+          if (parsed.code === 'MUST_CHANGE_PASSWORD' || parsed.detail === 'Must change password first') {
+            setTempToken(access_token);
+            setOldPassword(password);
+            setMustChangePassword(true);
+            setIsLoading(false);
+            return;
+          }
+        } catch {
+          // not a JSON error response, proceed to re-throw
+        }
+        throw err;
+      }
+
+      if (!meData) {
+        throw new Error(t('login.error_session_validation'));
+      }
+
+      loginStore(access_token, refresh_token, {
+        username: meData.username,
+        role: meData.role,
+        user_id: meData.user_id,
+      });
+
+      navigate(from, { replace: true });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setIsLoading(false);
+    }
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoading) return;
+
+    if (newPassword !== confirmPassword) {
+      setError(t('login.error_password_mismatch'));
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setError(t('login.error_password_minlength'));
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await api<{ detail?: string }>('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${tempToken}`,
+        },
+        body: JSON.stringify({
+          old_password: oldPassword,
+          new_password: newPassword,
+        }),
+        skipToast: true,
+      });
+
+      setMustChangePassword(false);
+      setTempToken(null);
+
+      await handleLogin(originalUsername, newPassword);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setIsLoading(false);
+    }
+  };
+
+  const formatError = (msg: string): string => {
+    try {
+      const parsed = JSON.parse(msg);
+      return typeof parsed?.detail === 'string' ? parsed.detail : msg;
+    } catch {
+      return msg;
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-screen bg-bg flex flex-col lg:flex-row overflow-hidden relative">
+      <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-surface-2 to-surface-3 border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
+        <ParticleCanvas />
+
+        <div className="z-10 flex items-center gap-3">
+          <VigileLogo className="w-10 h-10" />
+          <div>
+            <div className="font-serif text-lg font-bold text-text-1 tracking-wide">Vigile</div>
+            <div className="text-[8px] font-extrabold text-accent uppercase tracking-widest mt-0.5 font-interface">
+              {t('login.brand_subtitle')}
+            </div>
+          </div>
+        </div>
+
+        <div className="z-10 max-w-lg my-auto space-y-8 animate-fade-in">
+          <div>
+            <span className="text-[9px] font-extrabold text-accent uppercase tracking-widest bg-accent-muted px-2 py-0.5 border border-accent/15 rounded font-interface">
+              {t('login.badge_secure_access')}
+            </span>
+            <h1 className="font-serif text-3xl font-bold text-text-1 tracking-wide mt-3 leading-snug">
+              {t('login.hero_title')}
+            </h1>
+            <p className="text-xs text-text-2 mt-3 leading-relaxed font-sans">
+              {t('login.hero_description')}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title={t('login.feature_audit_tooltip')}>
+              <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
+                <Activity className="w-2.5 h-2.5 text-accent" /> {t('login.feature_audit')}
+              </span>
+              <span className="text-xs font-bold text-severity-ok font-interface" title="Toutes les données sont infalsifiables et horodatées">{t('login.feature_audit_value')}</span>
+            </div>
+            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title={t('login.feature_encryption_tooltip')}>
+              <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
+                <Cpu className="w-2.5 h-2.5 text-accent" /> {t('login.feature_encryption')}
+              </span>
+              <span className="text-xs font-bold text-text-1 font-interface font-mono" title="Chiffrement asymmetric Ed25519 avec AES-256-GCM">{t('login.feature_encryption_value')}</span>
+            </div>
+            <div className="bg-surface border border-border p-3 rounded-lg flex flex-col gap-1" title={t('login.feature_websocket_tooltip')}>
+              <span className="text-[8px] font-extrabold text-text-3 uppercase tracking-wider flex items-center gap-1 font-interface">
+                <TerminalIcon className="w-2.5 h-2.5 text-accent" /> {t('login.feature_websocket')}
+              </span>
+              <span className="text-xs font-bold text-accent font-interface" title="WebSocket natif sans bibliothèque tierce (RFC 6455)">{t('login.feature_websocket_value')}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="z-10">
+          <BootLogs />
+        </div>
+      </div>
+
+      <div className="w-full lg:w-1/2 xl:w-2/5 flex items-center justify-center p-6 sm:p-12 bg-bg relative overflow-hidden shrink-0">
+        <div className="absolute inset-0 block lg:hidden">
+          <ParticleCanvas />
+        </div>
+
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-accent-muted rounded-full filter blur-[100px] opacity-40 pointer-events-none" />
+
+        <div className="w-full max-w-sm border border-border rounded-xl bg-surface p-8 relative animate-fade-in z-10 shadow-2xl">
+          <div className="flex flex-col items-center mb-8 text-center">
+            <VigileLogo className="w-12 h-12 mb-3 mx-auto lg:hidden" />
+            <h2 className="font-serif text-xl font-bold text-text-1 tracking-wide">
+              {mustChangePassword ? t('login.form_title_change_password') : t('login.form_title')}
+            </h2>
+            <p className="text-[9px] font-extrabold text-accent uppercase tracking-widest mt-1.5 font-interface">
+              {t('login.form_subtitle')}
+            </p>
+          </div>
+
+          {error && (
+            <div className="mb-5 p-3.5 rounded-lg bg-severity-critical/10 border border-severity-critical/20 text-severity-critical text-xs animate-fade-in font-semibold flex items-start gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-severity-critical mt-1 animate-pulse shrink-0" />
+              <span>{formatError(error)}</span>
+            </div>
+          )}
+
+          {!mustChangePassword ? (
+            <LoginForm onSubmit={handleLogin} loading={isLoading} onDemoLogin={() => handleLogin('guest', 'guest')} />
+          ) : (
+            <form onSubmit={handlePasswordChange} className="space-y-4 font-sans text-xs">
+              <div className="mb-4 text-xs text-severity-warning bg-severity-warning/10 border border-severity-warning/20 p-3.5 rounded-lg font-medium flex items-start gap-2 leading-relaxed">
+                <div className="w-1.5 h-1.5 rounded-full bg-severity-warning mt-1.5 animate-pulse shrink-0" />
+                <span>{t('login.must_change_password_message')}</span>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-extrabold text-text-2 uppercase tracking-wider font-interface" htmlFor="newPassword">
+                  {t('login.new_password_label')}
+                </label>
+                <input
+                  id="newPassword"
+                  type="password"
+                  required
+                  disabled={isLoading}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder={t('login.new_password_placeholder')}
+                  className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-extrabold text-text-2 uppercase tracking-wider font-interface" htmlFor="confirmPassword">
+                  {t('login.confirm_password_label')}
+                </label>
+                <input
+                  id="confirmPassword"
+                  type="password"
+                  required
+                  disabled={isLoading}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder={t('login.confirm_password_placeholder')}
+                  className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded px-3.5 py-2.5 text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
+                />
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMustChangePassword(false);
+                    setTempToken(null);
+                    setError(null);
+                  }}
+                  className="flex-1 border border-border hover:border-border-strong px-4 py-2 text-[10px] font-bold font-interface uppercase tracking-wider rounded cursor-pointer transition-colors"
+                >
+                  {t('login.cancel_button')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading || !newPassword.trim() || !confirmPassword.trim()}
+                  className="flex-1 bg-accent hover:bg-accent-hover text-text-1 px-4 py-2 text-[10px] font-bold font-interface uppercase tracking-wider rounded flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-accent/15 transition-all"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>{t('login.validate_button')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="text-center text-[8px] text-text-3 mt-8 select-none tracking-widest font-mono">
+            {t('login.footer_version')}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
