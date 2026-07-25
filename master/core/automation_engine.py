@@ -307,6 +307,40 @@ class AutomationEngine:
                     name=f"automation:{rule['id']}",
                 )
 
+    async def evaluate_alert_callback(
+        self,
+        node_id: str,
+        alert_name: str,
+        severity: str,
+        db: aiosqlite.Connection,
+    ) -> None:
+        """
+        Called by AlertEngine when an alert fires.
+        Evaluates all alert_* trigger rules that match the alert name.
+        """
+        async with self._lock:
+            rules = list(self._rules)
+
+        for rule in rules:
+            trigger_type = rule.get("trigger_type", "")
+            if not trigger_type.startswith("alert_"):
+                continue
+            # Match trigger_type (e.g. "alert_cpu_high") to alert_name
+            if trigger_type != alert_name:
+                continue
+            if not self._matches_node_scope(rule, node_id, {}):
+                continue
+
+            context = {
+                "alert_name": alert_name,
+                "severity": severity,
+                "node_id": node_id,
+            }
+            asyncio.create_task(
+                self._fire_rule(rule, node_id, context, db),
+                name=f"automation:{rule['id']}",
+            )
+
     # -----------------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------------
