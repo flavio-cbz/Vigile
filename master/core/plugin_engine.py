@@ -19,6 +19,13 @@ from master.core.plugin_manifest import PluginManifest
 
 logger = logging.getLogger(__name__)
 
+# Plugin lifecycle states (referenced by plugin_manager)
+STATE_DECOUVERT = "DECOUVERT"
+STATE_INSTALLED = "INSTALLED"
+STATE_ACTIVE = "ACTIVE"
+STATE_DEACTIVATED = "DEACTIVATED"
+STATE_UNINSTALL = "UNINSTALL"
+
 DEFAULT_TIMEOUT: float = 30.0
 
 def canonical_plugin_id(name: str) -> str:
