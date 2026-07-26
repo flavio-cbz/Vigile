@@ -1,6 +1,5 @@
 import React from 'react';
 import { Server, Plus, Trash2 } from 'lucide-react';
-import { clsx } from 'clsx';
 import { t } from '../../i18n';
 import { FormRow, Section } from './FormSection';
 import type { FormAction } from './RuleFormModal';

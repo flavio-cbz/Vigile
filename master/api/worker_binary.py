@@ -220,9 +220,14 @@ async def _fetch_and_cache(
             binary_info = b
             break
     if not binary_info:
+        available = sorted(
+            {f"{b['os']}/{b['arch']}" for b in manifest.get("binaries", [])}
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No binary found for {os_name}/{arch} in manifest",
+            detail=f"No binary found for {os_name}/{arch} in manifest. "
+            f"Available architectures: {', '.join(available) if available else 'none'}. "
+            f"Rebuild with ./scripts/build_worker.sh and redeploy.",
         )
 
     cache_dir = Path(settings.worker_binary_cache_dir) / os_name / arch

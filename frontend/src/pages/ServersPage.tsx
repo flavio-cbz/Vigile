@@ -102,10 +102,8 @@ export const ServersPage: React.FC = () => {
 
   useEffect(() => {
     fetchNodes();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBulkMetrics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchNodes]);
 
   const filtered = nodes.filter((n: Node) => {
     if (!search) return true;

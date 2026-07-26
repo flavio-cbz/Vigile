@@ -39,7 +39,7 @@ export const AutomationsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, t]);
 
   useEffect(() => {
     fetchRules();

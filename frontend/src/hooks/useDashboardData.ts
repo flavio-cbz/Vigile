@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { api } from './useApi';
 import { usePolling } from './usePolling';
@@ -103,7 +103,7 @@ export function useDashboardData() {
     }
   };
 
-  const fetchAllContainers = async () => {
+  const fetchAllContainers = useCallback(async () => {
     const onlineNodes = nodes.filter((n) => n.online);
     if (onlineNodes.length === 0) {
       setContainers([]);
@@ -152,7 +152,7 @@ export function useDashboardData() {
     } finally {
       setLoadingContainers(false);
     }
-  };
+  }, [nodes]);
 
   // Initial load: nodes -> bulk metrics + proposals + activity -> insights
   useEffect(() => {
@@ -185,13 +185,9 @@ export function useDashboardData() {
   // Re-aggregate containers whenever the online node set changes
   useEffect(() => {
     if (nodes.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       void fetchAllContainers();
     }
-    // fetchAllContainers closes over `nodes` from this render; running it on
-    // every `nodes` mutation is the desired behaviour.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes]);
+  }, [nodes, fetchAllContainers]);
 
   usePolling('bulk_metrics_poll', fetchBulkMetrics, 15000);
   usePolling('dashboard_proposals_poll', fetchProposalsList, 30000);

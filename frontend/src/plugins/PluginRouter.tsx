@@ -91,7 +91,7 @@ export const PluginRouter: React.FC = () => {
   // Load active plugin pages on mount
   useEffect(() => {
     fetchPluginPages();
-  }, []);
+  }, [fetchPluginPages]);
 
   const allowedPages = React.useMemo(() => {
     const roleIndex = { viewer: 0, operator: 1, admin: 2 } as Record<string, number>;

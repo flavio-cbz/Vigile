@@ -25,26 +25,25 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ api }) => {
   const [stateFilter, setStateFilter] = useState<string>('all');
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
 
-  const fetchContainers = async () => {
-    setLoading(true);
-    try {
-      const url = selectedNode === 'all' ? '/containers' : `/containers?node_id=${selectedNode}`;
-      const data = await api.fetch<{ containers: Container[] }>(url);
-      setContainers(data?.containers || []);
-    } catch (err) {
-      console.error('Failed to fetch docker containers:', err);
-      api.toast(
-        err instanceof Error ? err.message : 'Erreur lors du chargement des conteneurs',
-        'error'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchContainers();
-  }, [selectedNode]);
+    const doFetch = async () => {
+      setLoading(true);
+      try {
+        const url = selectedNode === 'all' ? '/containers' : `/containers?node_id=${selectedNode}`;
+        const data = await api.fetch<{ containers: Container[] }>(url);
+        setContainers(data?.containers || []);
+      } catch (err) {
+        console.error('Failed to fetch docker containers:', err);
+        api.toast(
+          err instanceof Error ? err.message : 'Erreur lors du chargement des conteneurs',
+          'error'
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+    doFetch();
+  }, [selectedNode, api]);
 
   const handleContainerAction = async (nodeId: string, containerId: string, action: string) => {
     const key = `${nodeId}-${containerId}`;

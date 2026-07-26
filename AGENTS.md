@@ -159,3 +159,27 @@ Live test of the worker against the production deployment on youcloud.ovh:
   3. Modify `docker-compose.yml` `worker` service to set `command: ["--master", "http://master:8000"]`
 
 **Worker `vigile-test-worker-1` and `vigile-debug-worker` containers were cleaned up manually**. The historical `youcloud-persistent` was preserved. Master was inadvertently stopped+removed by `docker compose down --remove-orphans` (cleanup mistake) and was immediately restored with `docker compose up -d master`. BDD is intact.
+
+## WORKER BINARY DISTRIBUTION ISSUE — 2026-07-25
+
+**Problem**: `https://vigile.youcloud.ovh/api/nodes/binary/linux/arm64/worker` returns 404 when running the kickstart script on an arm64 machine (e.g. `NetHunter-ServerV3`). The production `manifest.json` only listed `linux/amd64` — no `linux/arm64`.
+
+**Root cause**: Production `docker-compose.yml` overrides `WORKER_BINARY_MANIFEST_URL` to `file:///var/cache/vigile/worker/manifest.json`, which requires pre-built binaries in `./data/worker-dist/` (gitignored). The production `data/worker-dist/` was only ever populated for `linux/amd64` via an older manual process that also used a flat path format (`worker-linux-amd64`) instead of the current structured format (`linux/amd64/worker`). The `data/worker-dist/` directory must be rebuilt with all target architectures whenever a new architecture is needed or the build script changes.
+
+**Fix** (applied on production server vigile.youcloud.ovh):
+```bash
+cd ~/Docker-Compose/vigile
+./scripts/build_worker.sh          # rebuilds all 4 targets including linux/arm64
+docker compose down master         # full teardown required — restart/recreate does NOT refresh bind mounts
+docker compose up -d master        # picks up new manifest + binaries from data/worker-dist/
+```
+
+> **Note**: `docker compose restart master` and `docker compose up -d master --force-recreate` do NOT reliably refresh bind-mounted volumes on the production server. Only `docker compose down` + `up` guarantees the container sees the new host files. See `docs/architecture/worker-deployment.md` for the full 404 troubleshooting procedure.
+
+**Prevention**: The improved `_fetch_and_cache` error in `worker_binary.py` now lists available architectures in the 404 detail message, making it immediately clear which architectures are missing and prompting the operator to rebuild.
+
+**Key files**:
+- Build script: `scripts/build_worker.sh` (targets: linux/amd64, linux/arm64, darwin/arm64, freebsd/amd64)
+- Deployment: `docker-compose.yml` volume `./data/worker-dist:/var/cache/vigile/worker`
+- Manifest format: `data/worker-dist/manifest.json` with structured paths (`linux/arm64/worker`)
+- Production manifest endpoint: `GET /api/nodes/binary/manifest.json`

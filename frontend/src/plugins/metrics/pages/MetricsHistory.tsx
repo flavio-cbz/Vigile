@@ -31,29 +31,28 @@ export const MetricsHistory: React.FC<MetricsHistoryProps> = ({ api }) => {
   const [selectedNode, setSelectedNode] = useState<string>('all');
   const [period, setPeriod] = useState<string>('24h');
 
-  const fetchHistory = async () => {
-    setLoading(true);
-    try {
-      let url = `/history?period=${period}`;
-      if (selectedNode !== 'all') {
-        url += `&node_id=${selectedNode}`;
-      }
-      const data = await api.fetch<{ history: MetricPoint[] }>(url);
-      setHistory(data?.history || []);
-    } catch (err) {
-      console.error('Failed to fetch metrics history:', err);
-      api.toast(
-        err instanceof Error ? err.message : 'Erreur lors du chargement de l\'historique',
-        'error'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchHistory();
-  }, [selectedNode, period]);
+    const doFetch = async () => {
+      setLoading(true);
+      try {
+        let url = `/history?period=${period}`;
+        if (selectedNode !== 'all') {
+          url += `&node_id=${selectedNode}`;
+        }
+        const data = await api.fetch<{ history: MetricPoint[] }>(url);
+        setHistory(data?.history || []);
+      } catch (err) {
+        console.error('Failed to fetch metrics history:', err);
+        api.toast(
+          err instanceof Error ? err.message : 'Erreur lors du chargement de l\'historique',
+          'error'
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+    doFetch();
+  }, [selectedNode, period, api]);
 
   // Format timestamp for display in Recharts X-axis
   const formatXAxis = (tickItem: number) => {
