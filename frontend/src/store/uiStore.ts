@@ -26,7 +26,7 @@ export interface ActionProposal {
   approved_by?: string | null;
   rejected_by?: string | null;
   rejection_reason?: string | null;
-  result?: Record<string, any> | null;
+  result?: Record<string, unknown> | null;
 }
 
 export type CopilotContext = {

@@ -1,8 +1,6 @@
 import React from 'react';
-import { Cpu } from 'lucide-react';
 import { TrendBar } from './TrendBar';
 import type { BarData } from './TrendBar';
-import { PeriodSelector } from './PeriodSelector';
 import type { Node } from '../../store/nodeStore';
 import { useLocale } from '../../i18n';
 import type { IncidentPeriod } from './trendDataUtils';

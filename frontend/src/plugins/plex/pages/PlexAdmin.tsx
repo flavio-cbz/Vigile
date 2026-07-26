@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import type { PluginAPI } from '../../../types/plugins';
 import { useNodeStore } from '../../../store/nodeStore';
 import { useAuthStore } from '../../../store/authStore';
@@ -69,7 +69,7 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
     }
   }, [nodes, selectedNodeId]);
 
-  const fetchPlexData = async (nodeId: string) => {
+  const fetchPlexData = useCallback(async (nodeId: string) => {
     if (!nodeId) return;
     setPlexLoadingData(true);
     setPlexDetection(null);
@@ -95,13 +95,13 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
     } finally {
       setPlexLoadingData(false);
     }
-  };
+  }, [api]);
 
   useEffect(() => {
     if (selectedNodeId) {
       fetchPlexData(selectedNodeId);
     }
-  }, [selectedNodeId]);
+  }, [selectedNodeId, fetchPlexData]);
 
   const handleConnectPlex = async () => {
     setPlexConnecting(true);

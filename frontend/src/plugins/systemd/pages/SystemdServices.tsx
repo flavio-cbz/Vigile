@@ -23,26 +23,25 @@ export const SystemdServices: React.FC<SystemdServicesProps> = ({ api }) => {
   const [stateFilter, setStateFilter] = useState<string>('all');
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
 
-  const fetchServices = async () => {
-    setLoading(true);
-    try {
-      const url = selectedNode === 'all' ? '/services' : `/services?node_id=${selectedNode}`;
-      const data = await api.fetch<{ services: Service[] }>(url);
-      setServices(data?.services || []);
-    } catch (err) {
-      console.error('Failed to fetch systemd services:', err);
-      api.toast(
-        err instanceof Error ? err.message : 'Erreur lors du chargement des services',
-        'error'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchServices();
-  }, [selectedNode]);
+    const doFetch = async () => {
+      setLoading(true);
+      try {
+        const url = selectedNode === 'all' ? '/services' : `/services?node_id=${selectedNode}`;
+        const data = await api.fetch<{ services: Service[] }>(url);
+        setServices(data?.services || []);
+      } catch (err) {
+        console.error('Failed to fetch systemd services:', err);
+        api.toast(
+          err instanceof Error ? err.message : 'Erreur lors du chargement des services',
+          'error'
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+    doFetch();
+  }, [selectedNode, api]);
 
   const handleServiceAction = async (nodeId: string, serviceName: string, action: string) => {
     const key = `${nodeId}-${serviceName}`;

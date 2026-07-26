@@ -16,9 +16,11 @@ os.environ["CORS_ORIGINS"] = "*"
 os.environ["ENFORCE_HTTPS"] = "true"
 
 import master.config
+import master.middleware
 import master.main
 
 importlib.reload(master.config)
+importlib.reload(master.middleware)
 importlib.reload(master.main)
 
 from master.config import settings
@@ -60,12 +62,16 @@ async def test_main_lifespan(temp_dir, monkeypatch):
 
     import master.main
     import master.config
+    import master.lifespan
     monkeypatch.setattr(master.main.settings, "database_path", db_path)
     monkeypatch.setattr(master.main.settings, "master_key_path", key_path)
     monkeypatch.setattr(master.main.settings, "plugins_dir", temp_dir)
     monkeypatch.setattr(master.config.settings, "database_path", db_path)
     monkeypatch.setattr(master.config.settings, "master_key_path", key_path)
     monkeypatch.setattr(master.config.settings, "plugins_dir", temp_dir)
+    monkeypatch.setattr(master.lifespan.settings, "database_path", db_path)
+    monkeypatch.setattr(master.lifespan.settings, "master_key_path", key_path)
+    monkeypatch.setattr(master.lifespan.settings, "plugins_dir", temp_dir)
 
     # Temporarily reset the security manager singleton to allow the lifespan to initialize it
     import master.core.security_manager as sm

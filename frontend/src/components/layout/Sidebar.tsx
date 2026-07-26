@@ -5,7 +5,6 @@ import { useAuthStore } from '../../store/authStore';
 import { usePermission } from '../../hooks/usePermission';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useNodeStore } from '../../store/nodeStore';
-import { useUiStore } from '../../store/uiStore';
 import {
   LayoutDashboard, CheckSquare, Grid, X, ChevronsLeft, ChevronsRight,
   MessageSquareCode, Server, Settings as SettingsIcon, ChevronDown,
@@ -23,7 +22,6 @@ export const Sidebar: React.FC = () => {
   const { isSidebarOpen, isSidebarCollapsed, setSidebarOpen, toggleSidebarCollapse } = useLayoutStore();
   const { nodes } = useNodeStore();
   const location = useLocation();
-  const copilotOpen = useUiStore((state) => state.copilotOpen);
 
   const [isMobile, setIsMobile] = useState(false);
   const pendingCount = useLayoutStore((s) => s.pendingCount);

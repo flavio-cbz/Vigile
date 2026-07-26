@@ -36,13 +36,18 @@ async def client(db):
 
 
 @pytest.fixture(autouse=True)
-def setup_temp_plugins_dir(tmp_path):
+def setup_temp_plugins_dir(tmp_path, client):
+    # app.dependency_overrides is already populated with deps.get_db from the client fixture
     old_plugins_dir = settings.plugins_dir
     saved_loaded = list(plugin_manager._loaded_plugins)
     saved_hooks = dict(plugin_manager._hooks)
     temp_dir = tmp_path / "plugins"
     temp_dir.mkdir()
     settings.plugins_dir = str(temp_dir)
+
+    # Override get_settings in the FastAPI app so endpoints see our patched settings
+    app.dependency_overrides[deps.get_settings] = lambda: settings
+
     try:
         import master.api.admin
 
@@ -56,6 +61,7 @@ def setup_temp_plugins_dir(tmp_path):
     yield temp_dir
 
     settings.plugins_dir = old_plugins_dir
+    app.dependency_overrides.pop(deps.get_settings, None)
     try:
         import master.api.admin
 

@@ -232,14 +232,14 @@ class TestPluginsMigrationIdempotency:
             shutil.rmtree(tmp, ignore_errors=True)
 
     @pytest.mark.asyncio
-    async def test_alembic_version_stamped_008(self) -> None:
+    async def test_alembic_version_stamped_009(self) -> None:
         tmp = tempfile.mkdtemp()
         try:
             conn = await _fresh_db(tmp)
             async with conn.execute("SELECT version_num FROM alembic_version LIMIT 1") as cursor:
                 row = await cursor.fetchone()
                 assert row is not None
-                assert row[0] == "008", f"Expected 008, got {row[0]}"
+                assert row[0] == "009", f"Expected 009, got {row[0]}"
             await close_db()
         finally:
             await reset_db()

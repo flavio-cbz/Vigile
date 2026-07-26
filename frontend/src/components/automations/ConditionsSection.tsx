@@ -1,8 +1,7 @@
 import React from 'react';
 import { Plus, Trash2, Clock } from 'lucide-react';
-import { clsx } from 'clsx';
 import { t } from '../../i18n';
-import { FormRow, Section } from './FormSection';
+import { Section } from './FormSection';
 
 interface Condition {
   type: 'always' | 'time_window';

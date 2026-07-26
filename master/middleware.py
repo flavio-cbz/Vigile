@@ -9,50 +9,109 @@ This module contains the middleware functions and related logic.
 import logging
 
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import MutableHeaders
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from master.config import settings
 
 logger = logging.getLogger(__name__)
 
 
+class CORSEchoOriginMiddleware:
+    """ASGI middleware that echoes Origin as Access-Control-Allow-Origin.
+
+    Replaces Starlette's CORSMiddleware when ``allow_origins=["*"]``.
+    Echoing the specific origin instead of wildcard ``*`` works around the
+    CORS spec incompatibility between ``Access-Control-Allow-Origin: *``
+    and ``Access-Control-Allow-Credentials: true``, which browsers reject.
+    """
+
+    __slots__ = ("app",)
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Read Origin from request headers (lowercased in ASGI scope)
+        origin = next(
+            (v.decode("latin-1") for n, v in scope.get("headers", []) if n == b"origin"),
+            None,
+        )
+        if not origin:
+            await self.app(scope, receive, send)
+            return
+
+        # Handle CORS preflight
+        if scope["method"] == "OPTIONS":
+            headers = {
+                b"access-control-allow-origin": origin.encode("latin-1"),
+                b"access-control-allow-credentials": b"true",
+                b"access-control-allow-methods": b"*",
+                b"access-control-allow-headers": b"*",
+                b"vary": b"Origin",
+            }
+            # Mirror the request's access-control-request-headers
+            for n, v in scope.get("headers", []):
+                if n == b"access-control-request-headers":
+                    headers[b"access-control-allow-headers"] = v
+                    break
+
+            async def preflight_send(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    existing = dict(message.get("headers", []))
+                    existing.update(headers)
+                    message["headers"] = list(existing.items())
+                await send(message)
+
+            await self.app(scope, receive, preflight_send)
+            return
+
+        # Non-preflight: patch send to add ACAO + ACC after inner middleware
+        async def patched_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                h = dict(message.get("headers", []))
+                h[b"access-control-allow-origin"] = origin.encode("latin-1")
+                h[b"access-control-allow-credentials"] = b"true"
+                h[b"vary"] = b"Origin"
+                message["headers"] = list(h.items())
+                logger.debug("CORSEcho patch: ACAO=%s ACC=%s", h.get(b"access-control-allow-origin"), h.get(b"access-control-allow-credentials"))
+            await send(message)
+
+        await self.app(scope, receive, patched_send)
+
+
 def setup_cors_middleware(app):
-    """
-    Configure CORS middleware for the FastAPI application.
-    """
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    """Configure CORS middleware.
 
-
-def setup_cors_echo_origin_middleware(app):
-    """
-    Configure CORS echo origin middleware for wildcard origins.
-    
-    When allow_origins is ["*"], Starlette's CORSMiddleware sends
-    "Access-Control-Allow-Origin: *" which is incompatible with
-    "Access-Control-Allow-Credentials: true" per spec (browsers reject it).
-    
-    We patch this by echoing the request's Origin header when "*" is used.
+    When ``allow_origins`` contains ``*``, registers ``CORSEchoOriginMiddleware``
+    instead of Starlette's ``CORSMiddleware`` because the latter cannot combine
+    wildcard origin with ``allow_credentials=True`` (per CORS spec).
     """
     if "*" in settings.cors_origins:
         logger.warning(
-            "CORS_ORIGINS contains '*': dynamically echoing Origin header "
+            "CORS_ORIGINS contains '*': using CORSEchoOriginMiddleware "
             "to work around wildcard + credentials incompatibility. "
             "Set CORS_ORIGINS to specific origins for production."
         )
+        app.add_middleware(CORSEchoOriginMiddleware)
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
-        @app.middleware("http")
-        async def _cors_echo_origin(request, call_next):
-            response = await call_next(request)
-            origin = request.headers.get("origin")
-            if origin:
-                response.headers["Access-Control-Allow-Origin"] = origin
-            return response
+
+def setup_cors_echo_origin_middleware(app):
+    """No-op: CORS echo is handled inside ``setup_cors_middleware``."""
+    pass
 
 
 def setup_session_middleware(app):

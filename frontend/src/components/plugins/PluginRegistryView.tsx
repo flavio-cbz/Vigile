@@ -1,7 +1,6 @@
 import React from 'react';
 import { Package } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
-import { Spinner } from '../primitives/Spinner';
 import { RegistryPluginCard } from './RegistryPluginCard';
 import type { PluginInfo, RegistryPlugin } from '../../hooks/usePluginsData';
 

@@ -17,7 +17,6 @@ export const ServerConfigModal = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Reset form when pending node changes
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (pending) {
       setName(pending.hostname || pending.name || '');
@@ -30,7 +29,6 @@ export const ServerConfigModal = () => {
     setSubmitting(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending?.id]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!pending) return;

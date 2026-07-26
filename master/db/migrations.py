@@ -173,10 +173,6 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     )
     await db.execute(
         "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
-        ("008",),
-    )
-    await db.execute(
-        "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
         ("009",),
     )
     await db.commit()

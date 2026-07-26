@@ -137,10 +137,26 @@ vigile-worker --key-dir ./vigile-data
 
 ## Dépannage
 
-- **502 Bad Gateway** : le Master ne trouve pas le `manifest.json` sur GitHub Releases.
+### 404 when downloading worker binary for a specific architecture
+
+If the kickstart script fails with a 404 for `GET /api/nodes/binary/{os}/{arch}/worker`:
+
+1. Check the manifest on the server: `curl -s http://<master>:8000/api/nodes/binary/manifest.json | python3 -m json.tool`
+2. If the requested `{os}/{arch}` is **missing from the manifest**, the `data/worker-dist/` directory on the host was not rebuilt for that architecture. Run `./scripts/build_worker.sh` and verify `data/worker-dist/manifest.json` contains the target architecture.
+3. If the manifest has the architecture but serving still 404s, the container's bind mount may not reflect the host files. Run `docker compose down master && docker compose up -d master` (not `--force-recreate`) to fully restart the container with a clean volume mount.
+4. If the issue persists, verify the file is visible inside the container:
+   ```bash
+   CONTAINER=$(docker ps -qf "name=master")
+   docker exec "$CONTAINER" ls -la /var/cache/vigile/worker/linux/arm64/
+   ```
+5. When using `WORKER_BINARY_MANIFEST_URL=file://...` in `docker-compose.yml`, you must **manually rebuild** all binaries every time an architecture is added or updated. This is error-prone.
+
+### 502 Bad Gateway
+- Le Master ne trouve pas le `manifest.json` sur GitHub Releases.
   - Vérifie que le tag a bien déclenché la CI et que la release contient `manifest.json`.
   - Si le dépôt est privé, vérifie que `WORKER_BINARY_GITHUB_TOKEN` est défini et possède le scope `repo`.
-- **Erreur de signature** : vérifie que `WORKER_BINARY_PUBLIC_KEY` correspond bien à la clé utilisée pour signer en CI.
-- **Clé secrète manquante** : vérifie le secret `MINISIGN_SECRET_KEY` dans les paramètres GitHub.
-- **403 Resource not accessible** en CI : vérifie que le workflow a la permission `contents: write` (voir `.github/workflows/release-worker.yml`).
-- **Permission denied sur /etc/vigile** : utilise `--key-dir` pour pointer vers un répertoire accessible en écriture.
+- Erreur de signature : vérifie que `WORKER_BINARY_PUBLIC_KEY` correspond bien à la clé utilisée pour signer en CI.
+- Clé secrète manquante : vérifie le secret `MINISIGN_SECRET_KEY` dans les paramètres GitHub.
+- 403 Resource not accessible en CI : vérifie que le workflow a la permission `contents: write` (voir `.github/workflows/release-worker.yml`).
+- Permission denied sur `/etc/vigile` : utilise `--key-dir` pour pointer vers un répertoire accessible en écriture.
+- Go version mismatch : si le serveur de build a une version de Go < 1.23, la compilation échoue. Vérifie avec `go version` sur le serveur cible.
