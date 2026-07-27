@@ -46,6 +46,25 @@ from master.api.nodes_events import router as nodes_events_router
 from master.api.services import router as services_router
 from master.api.worker_binary import router as worker_binary_router
 from master.config import settings
+from master.logging_config import setup_logging
+from master.logging_config import get_logger
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
+
+from master.api.admin import router as admin_router
+from master.api.audit import router as audit_router
+from master.api.auth import router as auth_router
+from master.api.automations import router as automations_router
+from master.api.chat import router as chat_router
+from master.api.demo import router as demo_router
+from master.api.investigations import router as investigations_router
+from master.api.plugins import router as plugins_router
+from master.api.metrics import render_prometheus
+from master.api.nodes import router as nodes_router
+from master.api.nodes_events import router as nodes_events_router
+from master.api.services import router as services_router
+from master.api.worker_binary import router as worker_binary_router
+from master.config import settings
 from master.core.alert_engine import alert_engine
 from master.core.investigation_manager import investigation_manager
 from master.core.automation_engine import automation_engine
@@ -73,17 +92,9 @@ from master.middleware import (
 )
 from master.endpoints import health_check, metrics, spa_fallback_exception_handler
 
-logging.basicConfig(
-    level=logging.DEBUG if settings.debug else logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-    stream=sys.stdout,
-)
-
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-logging.getLogger("passlib").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
+# ── Structured verbose logging ──
+setup_logging(level=logging.DEBUG if settings.debug else logging.INFO, output_format="json")
+logger = get_logger("main")
 
 
 # ---------------------------------------------------------------------------

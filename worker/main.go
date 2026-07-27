@@ -18,7 +18,7 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,7 +26,6 @@ import (
 )
 
 // Logger for structured output (stdout for journald collection).
-var logger = log.New(os.Stdout, "[vigile-worker] ", log.Ldate|log.Ltime|log.Lmsgprefix)
 
 func main() {
 	// ── CLI flags ────────────────────────────────────────────────────────
@@ -42,7 +41,8 @@ func main() {
 	// ── Resolve master URL ───────────────────────────────────────────────
 	url := getMasterURL(*masterURL)
 	if url == "" {
-		logger.Fatal("MASTER_URL is required. Set --master flag or write to /etc/vigile/master_url")
+		slog.Error("MASTER_URL is required. Set --master flag or write to /etc/vigile/master_url")
+	os.Exit(1)
 	}
 
 	allowInsecure := os.Getenv("ALLOW_INSECURE") == "true"
@@ -61,50 +61,53 @@ func main() {
 	}
 
 	if strings.HasPrefix(url, "http://") && !allowInsecure {
-		logger.Fatal("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set ALLOW_INSECURE=true to bypass.")
+		slog.Error("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set ALLOW_INSECURE=true to bypass.")
+	os.Exit(1)
 	}
 
-	logger.Printf("Vigile Worker starting")
+	slog.Info("Vigile Worker starting")
 	if allowInsecure {
-		logger.Printf("⚠️  WARNING: ALLOW_INSECURE=true is set. Traffic to the Master will not be encrypted. DO NOT USE IN PRODUCTION!")
+		slog.Warn("ALLOW_INSECURE=true is set. Traffic to the Master will not be encrypted. DO NOT USE IN PRODUCTION!")
 	} else {
-		logger.Printf("🔒 Secure transport enforced (HTTPS/WSS)")
+		slog.Info("secure transport enforced (HTTPS/WSS)")
 	}
-	logger.Printf("Master URL: %s", url)
+	slog.Info("Master URL", "url", url)
 
 	// ── Load worker token from disk (for reconnection) ───────────────────
 	workerToken, err := readWorkerToken()
 	if err != nil {
-		logger.Printf("Warning: failed to read worker token: %v", err)
+		slog.Warn("failed to read worker token", "error", err)
 	}
 	if workerToken != "" {
-		logger.Printf("Worker token loaded from disk — reconnecting with existing identity")
+		slog.Info("Worker token loaded from disk — reconnecting with existing identity")
 	}
 
 	// ── Resolve join token (not required if worker token exists) ────────
 	token, err := readJoinToken(*joinToken)
 	if err != nil {
 		if workerToken != "" {
-			logger.Printf("No JOIN_TOKEN (already consumed) — using worker token for reconnect")
+			slog.Info("No JOIN_TOKEN (already consumed) — using worker token for reconnect")
 			token = ""
 		} else {
-			logger.Fatalf("Failed to read JOIN_TOKEN: %v", err)
+			slog.Error("Failed to read JOIN_TOKEN", "error", err)
+		os.Exit(1)
 		}
 	}
 	if token != "" {
-		logger.Printf("JOIN_TOKEN hash: %s", computeTokenHash(token))
+		slog.Info("JOIN_TOKEN hash", "hash", computeTokenHash(token))
 	}
 
 	// ── Load or generate Ed25519 keypair ─────────────────────────────────
 	privKey, pubKey, err := loadOrGenerateKeypair()
 	if err != nil {
-		logger.Fatalf("Failed to load/generate keypair: %v", err)
+		slog.Error("Failed to load/generate keypair", "error", err)
+		os.Exit(1)
 	}
-	logger.Printf("Ed25519 public key loaded (%d bytes)", len(pubKey))
+	slog.Info("Ed25519 public key loaded", "bytes", len(pubKey))
 
 	// ── Collect fingerprint ──────────────────────────────────────────────
 	fp := collectFingerprint()
-	logger.Printf("Fingerprint: hostname=%s arch=%s os=%s", fp.Hostname, fp.Arch, fp.OS)
+	slog.Info("Fingerprint", "hostname", fp.Hostname, "arch", fp.Arch, "os", fp.OS)
 
 	// ── Create lifecycle context (cancelled on SIGINT/SIGTERM) ───────────
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,11 +119,11 @@ func main() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Printf("PANIC in signal handler: %v", r)
+				slog.Error("PANIC in signal handler", "recover", r)
 			}
 		}()
 		sig := <-sigCh
-		logger.Printf("Received signal %v, shutting down...", sig)
+		slog.Info("Received signal", "signal", sig)
 		cancel()
 	}()
 
@@ -128,9 +131,9 @@ func main() {
 	wc := NewWorkerConn(ctx, url, token, workerToken, privKey, pubKey, fp)
 
 	// ── Run (with auto-reconnect backoff) ────────────────────────────────
-	logger.Printf("Starting connection loop...")
-	logger.Printf("Ready. Waiting for enrollment...")
+	slog.Info("Starting connection loop...")
+	slog.Info("Ready. Waiting for enrollment...")
 	wc.RunWithBackoff()
 
-	logger.Printf("Worker shut down complete.")
+	slog.Info("Worker shut down complete.")
 }

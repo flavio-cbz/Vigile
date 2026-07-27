@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,14 +74,14 @@ func loadOrGenerateKeypair() (ed25519.PrivateKey, ed25519.PublicKey, error) {
 	}
 	pubData, err := json.Marshal(pub)
 	if err != nil {
-		logger.Printf("enrollment: marshal public key: %v", err)
+		slog.Warn("enrollment: marshal public key", "error", err)
 		pubData = []byte("{}")
 	}
 	if err := os.WriteFile(publicKeyPath, pubData, 0444); err != nil {
 		return nil, nil, fmt.Errorf("writing public key: %w", err)
 	}
 
-	logger.Printf("Ed25519 keypair generated and saved to %s", keyDir)
+	slog.Info("Ed25519 keypair generated and saved", "dir", keyDir)
 	return priv, pub, nil
 }
 
@@ -144,7 +145,7 @@ func persistWorkerToken(token string) error {
 	if err := os.WriteFile(workerTokenPath, []byte(token), 0600); err != nil {
 		return fmt.Errorf("persisting worker token: %w", err)
 	}
-	logger.Printf("Worker token persisted to %s", workerTokenPath)
+	slog.Info("worker token persisted", "path", workerTokenPath)
 	return nil
 }
 

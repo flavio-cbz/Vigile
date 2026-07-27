@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -217,7 +217,7 @@ func getCPUPercent() float64 {
 		for i, f := range fields[1:] {
 			v, err := strconv.ParseUint(f, 10, 64)
 			if err != nil {
-				logger.Printf("stats: parse cpu field %q: %v", f, err)
+				slog.Warn("stats: parse cpu field", "field", f, "error", err)
 			}
 			total += v
 			if i == 3 || i == 4 { // idle + iowait (fields 4 and 5 in /proc/stat)
@@ -238,7 +238,7 @@ func getCPUPercent() float64 {
 			return 0
 		}
 		pct := math.Round((1-float64(diffIdle)/float64(diffTotal))*1000) / 10
-		log.Printf("[DEBUG CPU] diffIdle: %d, diffTotal: %d, pct: %.1f", diffIdle, diffTotal, pct)
+		slog.Debug("CPU usage", "diffIdle", diffIdle, "diffTotal", diffTotal, "percent", pct)
 		return pct
 	}
 	return 0
@@ -255,7 +255,7 @@ func getLoadAvg(index int) float64 {
 	}
 	v, err := strconv.ParseFloat(fields[index], 64)
 	if err != nil {
-		logger.Printf("stats: parse loadavg: %v", err)
+		slog.Warn("stats: parse loadavg", "error", err)
 	}
 	return v
 }
@@ -277,7 +277,7 @@ func getMemField(field string) int64 {
 			if len(parts) >= 2 {
 				v, err := strconv.ParseInt(parts[1], 10, 64)
 				if err != nil {
-					logger.Printf("stats: parse meminfo %q: %v", field, err)
+					slog.Warn("stats: parse meminfo", "field", field, "error", err)
 				}
 				return v * 1024 // kB → bytes
 			}
@@ -371,11 +371,11 @@ func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
 
 		totalKB, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
-			logger.Printf("stats: parse disk total: %v", err)
+			slog.Warn("stats: parse disk total", "error", err)
 		}
 		usedKB, err := strconv.ParseInt(fields[2], 10, 64)
 		if err != nil {
-			logger.Printf("stats: parse disk used: %v", err)
+			slog.Warn("stats: parse disk used", "error", err)
 		}
 
 		mountTotal := totalKB * 1024
@@ -501,7 +501,7 @@ func getUptime() float64 {
 	}
 	v, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
-		logger.Printf("stats: parse uptime: %v", err)
+		slog.Warn("stats: parse uptime", "error", err)
 	}
 	return v
 }
@@ -576,7 +576,7 @@ func getNetworkStats() (bytesRecv, bytesSent, pktsRecv, pktsSent, errIn, errOut,
 func parseInt64(s string) int64 {
 	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse int64 %q: %v", s, err)
+		slog.Warn("stats: parse int64", "value", s, "error", err)
 	}
 	return v
 }
@@ -743,7 +743,7 @@ func getEntropy() int64 {
 	}
 	v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse entropy: %v", err)
+		slog.Warn("stats: parse entropy", "error", err)
 	}
 	return v
 }
@@ -805,19 +805,19 @@ func parseProcStat(data []byte) (name, state string, utime, stime, starttime uin
 	var err error
 	utime, err = strconv.ParseUint(fields[11], 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse utime: %v", err)
+		slog.Warn("stats: parse utime", "error", err)
 	}
 	stime, err = strconv.ParseUint(fields[12], 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse stime: %v", err)
+		slog.Warn("stats: parse stime", "error", err)
 	}
 	starttime, err = strconv.ParseUint(fields[19], 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse starttime: %v", err)
+		slog.Warn("stats: parse starttime", "error", err)
 	}
 	rssPages, err = strconv.ParseInt(fields[22], 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse rss: %v", err)
+		slog.Warn("stats: parse rss", "error", err)
 	}
 	return
 }
@@ -853,7 +853,7 @@ func getTopProcesses(limit int) []ProcessInfo {
 		}
 		pid, err := strconv.Atoi(pidStr)
 		if err != nil {
-			logger.Printf("stats: parse pid %q: %v", pidStr, err)
+			slog.Warn("stats: parse pid", "pid", pidStr, "error", err)
 			continue
 		}
 
@@ -1045,15 +1045,15 @@ func getDarwinLoadAvg(ctx context.Context) (float64, float64, float64) {
 	}
 	l1, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
-		logger.Printf("stats: parse load1: %v", err)
+		slog.Warn("stats: parse load1", "error", err)
 	}
 	l5, err := strconv.ParseFloat(fields[1], 64)
 	if err != nil {
-		logger.Printf("stats: parse load5: %v", err)
+		slog.Warn("stats: parse load5", "error", err)
 	}
 	l15, err := strconv.ParseFloat(fields[2], 64)
 	if err != nil {
-		logger.Printf("stats: parse load15: %v", err)
+		slog.Warn("stats: parse load15", "error", err)
 	}
 	return l1, l5, l15
 }
@@ -1117,7 +1117,7 @@ func extractVmStatValue(line string) int64 {
 	valStr := strings.TrimSuffix(parts[len(parts)-1], ".")
 	val, err := strconv.ParseInt(valStr, 10, 64)
 	if err != nil {
-		logger.Printf("stats: parse vm_stat value: %v", err)
+		slog.Warn("stats: parse vm_stat value", "error", err)
 	}
 	return val
 }

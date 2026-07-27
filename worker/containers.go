@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -74,7 +74,7 @@ func handleListContainers(ctx context.Context, intent Intent) IntentResult {
 	for _, c := range containers {
 		idVal, ok := c["Id"].(string)
 		if !ok {
-			logger.Printf("Warning: container missing 'Id' field, skipping")
+			slog.Warn("container missing Id field, skipping")
 			continue
 		}
 		id := idVal
@@ -84,26 +84,26 @@ func handleListContainers(ctx context.Context, intent Intent) IntentResult {
 
 		state, ok := c["State"].(string)
 		if !ok {
-			logger.Printf("Warning: container %s missing 'State'", id)
+			slog.Warn("container missing State", "id", id)
 		}
 		status, ok := c["Status"].(string)
 		if !ok {
-			logger.Printf("Warning: container %s missing 'Status'", id)
+			slog.Warn("container missing Status", "id", id)
 		}
 		image, ok := c["Image"].(string)
 		if !ok {
-			logger.Printf("Warning: container %s missing 'Image'", id)
+			slog.Warn("container missing Image", "id", id)
 		}
 
 		names, ok := c["Names"].([]interface{})
 		if !ok {
-			logger.Printf("Warning: container %s missing 'Names'", id)
+			slog.Warn("container missing Names", "id", id)
 		}
 		name := ""
 		if len(names) > 0 {
 			nameStr, ok := names[0].(string)
 			if !ok {
-				logger.Printf("Warning: container %s has non-string name at index 0", id)
+				slog.Warn("container has non-string name at index 0", "id", id)
 			} else {
 				name = strings.TrimPrefix(nameStr, "/")
 			}
@@ -111,25 +111,25 @@ func handleListContainers(ctx context.Context, intent Intent) IntentResult {
 
 		portsRaw, ok := c["Ports"].([]interface{})
 		if !ok {
-			logger.Printf("Warning: container %s missing 'Ports'", id)
+			slog.Warn("container missing Ports", "id", id)
 		}
 		var ports []string
 		for _, p := range portsRaw {
 			pm, ok := p.(map[string]interface{})
 			if !ok {
-				logger.Printf("Warning: container %s has invalid port entry", id)
+				slog.Warn("container has invalid port entry", "id", id)
 				continue
 			}
 			privatePort, ok := pm["PrivatePort"].(float64)
 			if !ok {
-				logger.Printf("Warning: container %s port entry missing 'PrivatePort'", id)
+				slog.Warn("container port entry missing PrivatePort", "id", id)
 				continue
 			}
 			publicPort, hasPublic := pm["PublicPort"]
 			if hasPublic {
 				ip, ok := pm["IP"].(string)
 				if !ok {
-					logger.Printf("Warning: container %s port entry missing 'IP'", id)
+					slog.Warn("container port entry missing IP", "id", id)
 				}
 				ports = append(ports, fmt.Sprintf("%s:%v->%.0f", ip, publicPort, privatePort))
 			} else {
@@ -151,8 +151,13 @@ func handleListContainers(ctx context.Context, intent Intent) IntentResult {
 func handleRestartContainer(ctx context.Context, intent Intent) IntentResult {
 	containerID := getParamString(intent.Params, "container_id", "")
 	approvalID := getParamString(intent.Params, "approval_id", "")
-	log.Printf("executing action action=RESTART_CONTAINER container_id=%s node_id=%s requested_by=%q approval_id=%s intent_id=%s",
-		containerID, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
+	slog.Info("executing action",
+		"action", "RESTART_CONTAINER",
+		"container_id", containerID,
+		"node_id", nodeID,
+		"requested_by", intent.RequestedBy,
+		"approval_id", approvalID,
+		"intent_id", intent.IntentID)
 
 	if containerID == "" {
 		return IntentResult{Success: false, Error: "container_id parameter required"}

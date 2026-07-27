@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"runtime"
@@ -60,7 +60,7 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 
 	// Whitelist check
 	if !ALLOWED_ACTIONS[msg.Action] {
-		log.Printf("SECURITY: action %q is not in whitelist", msg.Action)
+		slog.Warn("security: action not in whitelist", "action", msg.Action)
 		return mustJSON(IntentResult{
 			IntentID: msg.IntentID,
 			Success:  false,
@@ -68,7 +68,7 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 		})
 	}
 
-	log.Printf("Dispatching intent: action=%s id=%s requested_by=%s", msg.Action, msg.IntentID, msg.RequestedBy)
+	slog.Info("dispatching intent", "action", msg.Action, "id", msg.IntentID, "requested_by", msg.RequestedBy)
 
 	var result IntentResult
 	switch msg.Action {
@@ -103,7 +103,7 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 	}
 
 	result.IntentID = msg.IntentID
-	log.Printf("Intent result: id=%s success=%v", result.IntentID, result.Success)
+	slog.Info("intent result", "id", result.IntentID, "success", result.Success)
 	return mustJSON(result)
 }
 
@@ -112,7 +112,7 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 	binaryURL := wc.masterURL + fmt.Sprintf("/api/nodes/binary/%s/%s/worker", runtime.GOOS, runtime.GOARCH)
 	checksumURL := binaryURL + ".sha256"
 
-	log.Printf("Starting self-update. Downloading from: %s", binaryURL)
+	slog.Info("starting self-update", "url", binaryURL)
 
 	// 2. Setup HTTP Client with ALLOW_INSECURE support
 	tr := &http.Transport{}
@@ -201,7 +201,7 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 	_ = os.Remove(backupPath)
 	backupOK := true
 	if err := os.Rename(execPath, backupPath); err != nil {
-		log.Printf("WARNING: backup rename failed (proceeding without backup): %v", err)
+		slog.Warn("backup rename failed (proceeding without backup)", "error", err)
 		backupOK = false
 	}
 
@@ -229,13 +229,13 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 		}
 	}
 
-	log.Printf("Self-update succeeded. Restart scheduled in 1 second...")
+	slog.Info("self-update succeeded — restart scheduled")
 
 	// 7. Schedule exit after sending result
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("PANIC in restart goroutine: %v", r)
+				slog.Error("PANIC in restart goroutine", "recover", r)
 			}
 		}()
 		select {
@@ -265,14 +265,15 @@ func handleTokenRotation(ctx context.Context, wc *WorkerConn, msg Intent) Intent
 	wc.workerToken = newToken
 	wc.mu.Unlock()
 
-	log.Printf("TOKEN_ROTATION: new token received (len=%d)", len(newToken))
+	slog.Info("TOKEN_ROTATION: new token received", "len", len(newToken))
 	return IntentResult{Success: true, Output: "token rotated"}
 }
 
 func mustJSON(v interface{}) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
-		log.Panicf("json marshal failed: %v", err)
+		slog.Error("json marshal failed", "error", err)
+		panic(err)
 	}
 	return data
 }
