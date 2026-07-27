@@ -54,3 +54,39 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "client_addr": client_addr,
             }, exc_info=True)
             raise
+
+
+class WebSocketLoggingMiddleware:
+    """ASGI middleware that logs WebSocket lifecycle events with correlation IDs."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "websocket":
+            await self.app(scope, receive, send)
+            return
+
+        correlation_id = scope.get("query_string", b"").decode()
+        client_addr = scope.get("client", ("unknown", 0))[0] if scope.get("client") else "unknown"
+        ws_path = scope.get("path", "")
+
+        logger.trace(
+            "WebSocket connection opened",
+            extra={"correlation_id": correlation_id, "path": ws_path, "client_addr": client_addr},
+        )
+
+        try:
+            await self.app(scope, receive, send)
+        except Exception as exc:
+            logger.error(
+                "WebSocket error",
+                extra={"correlation_id": correlation_id, "path": ws_path, "client_addr": client_addr},
+                exc_info=True,
+            )
+            raise
+        finally:
+            logger.info(
+                "WebSocket connection closed",
+                extra={"correlation_id": correlation_id, "path": ws_path, "client_addr": client_addr},
+            )
