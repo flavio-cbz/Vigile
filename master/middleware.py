@@ -14,8 +14,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from master.config import settings
+from master.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("middleware")
 
 
 class CORSEchoOriginMiddleware:

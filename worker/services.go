@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 )
@@ -47,7 +47,7 @@ func handleListServices(ctx context.Context, intent Intent) IntentResult {
 
 	outJSON, err := json.Marshal(services)
 	if err != nil {
-		logger.Printf("services: marshal list: %v", err)
+		slog.Warn("services: marshal list", "error", err)
 		return IntentResult{Success: false, Error: fmt.Sprintf("marshal error: %v", err)}
 	}
 	return IntentResult{Success: true, Output: string(outJSON)}
@@ -66,7 +66,7 @@ func handleStatusService(ctx context.Context, intent Intent) IntentResult {
 	cmd := exec.CommandContext(cmdCtx, "systemctl", "is-active", service)
 	active, err := cmd.Output()
 	if err != nil {
-		logger.Printf("services: systemctl is-active %s: %v", service, err)
+		slog.Debug("services: systemctl is-active", "service", service, "error", err)
 	}
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "systemctl is-active timed out"}
@@ -75,7 +75,7 @@ func handleStatusService(ctx context.Context, intent Intent) IntentResult {
 	cmd2 := exec.CommandContext(cmdCtx, "systemctl", "is-enabled", service)
 	enabled, err := cmd2.Output()
 	if err != nil {
-		logger.Printf("services: systemctl is-enabled %s: %v", service, err)
+		slog.Debug("services: systemctl is-enabled", "service", service, "error", err)
 	}
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return IntentResult{Success: false, Error: "systemctl is-enabled timed out"}
@@ -88,7 +88,7 @@ func handleStatusService(ctx context.Context, intent Intent) IntentResult {
 	}
 	out, err := json.Marshal(result)
 	if err != nil {
-		logger.Printf("services: marshal status: %v", err)
+		slog.Warn("services: marshal status", "error", err)
 		return IntentResult{Success: false, Error: fmt.Sprintf("marshal error: %v", err)}
 	}
 	return IntentResult{Success: true, Output: string(out)}
@@ -98,8 +98,13 @@ func handleStatusService(ctx context.Context, intent Intent) IntentResult {
 func handleRestartService(ctx context.Context, intent Intent) IntentResult {
 	service := getParamString(intent.Params, "service", "")
 	approvalID := getParamString(intent.Params, "approval_id", "")
-	log.Printf("executing action action=RESTART_SERVICE service=%s node_id=%s requested_by=%q approval_id=%s intent_id=%s",
-		service, nodeID, intent.RequestedBy, approvalID, intent.IntentID)
+	slog.Info("executing action",
+		"action", "RESTART_SERVICE",
+		"service", service,
+		"node_id", nodeID,
+		"requested_by", intent.RequestedBy,
+		"approval_id", approvalID,
+		"intent_id", intent.IntentID)
 
 	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
