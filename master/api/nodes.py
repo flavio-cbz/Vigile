@@ -133,7 +133,7 @@ KICKSTART_TEMPLATE = """\
 #
 # Requirements: curl, sha256sum (or shasum on macOS), systemd or launchd
 
-set -euo pipefail
+set -eu
 
 # ── Privilege check ─────────────────────────────────────────────────────────
 if [ "$(id -u)" -ne 0 ]; then
@@ -185,13 +185,13 @@ fi
 
 if [ "$UNINSTALL" = true ]; then
     echo "[vigile] Uninstalling Worker..."
-    if command -v systemctl &>/dev/null && (systemctl is-active vigile-worker &>/dev/null || systemctl is-enabled vigile-worker &>/dev/null); then
+    if command -v systemctl >/dev/null 2>&1 && (systemctl is-active vigile-worker >/dev/null 2>&1 || systemctl is-enabled vigile-worker >/dev/null 2>&1); then
         echo "[vigile] Disabling and stopping systemd service..."
         systemctl disable --now vigile-worker || true
         rm -f /etc/systemd/system/vigile-worker.service
         systemctl daemon-reload
     fi
-    if command -v launchctl &>/dev/null; then
+    if command -v launchctl >/dev/null 2>&1; then
         echo "[vigile] Unloading and removing macOS launchd service..."
         launchctl unload -w /Library/LaunchDaemons/com.vigile.worker.plist 2>/dev/null || true
         rm -f /Library/LaunchDaemons/com.vigile.worker.plist
@@ -244,7 +244,7 @@ curl $CURL_CA_OPTS -sSfL "$BINARY_URL" -o "$BINARY_PATH"
 
 echo "[vigile] Verifying SHA256..."
 EXPECTED_HASH="$(curl $CURL_CA_OPTS -sSfL "$HASH_URL" | awk '{print $1}')"
-if command -v sha256sum &>/dev/null; then
+if command -v sha256sum >/dev/null 2>&1; then
     ACTUAL_HASH="$(sha256sum "$BINARY_PATH" | awk '{print $1}')"
 else
     ACTUAL_HASH="$(shasum -a 256 "$BINARY_PATH" | awk '{print $1}')"
@@ -282,7 +282,7 @@ printf '%s' "$MASTER_URL" > "$CONFIG_DIR/master_url"
 chmod 600 "$CONFIG_DIR/master_url"
 
 # ── Systemd service installation ──────────────────────────────────────────────
-if command -v systemctl &>/dev/null; then
+if command -v systemctl >/dev/null 2>&1; then
     cat > /etc/systemd/system/vigile-worker.service <<EOF
 [Unit]
 Description=Vigile — Worker Node
@@ -318,7 +318,7 @@ else
         http://*|ws://*) local_allow_insecure="ALLOW_INSECURE=true" ;;
     esac
 
-    if command -v launchctl &>/dev/null; then
+    if command -v launchctl >/dev/null 2>&1; then
         echo "[vigile] macOS launchd detected. Installing service..."
         PLIST_PATH="/Library/LaunchDaemons/com.vigile.worker.plist"
         cat > "$PLIST_PATH" <<EOF
