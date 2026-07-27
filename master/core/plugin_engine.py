@@ -278,6 +278,19 @@ class PageRegistry:
         return [p for p in self.get_all_pages() if p.get("sidebar")]
 
 
+class _Lifecycle:
+    """Simple plugin lifecycle state tracker.
+
+    Referenced by plugin_manager.py to sync activation/deactivation state.
+    """
+
+    def __init__(self) -> None:
+        self._states: dict[str, str] = {}
+
+    def get_state(self, plugin_id: str) -> str | None:
+        return self._states.get(plugin_id)
+
+
 class PluginEngine:
     """Consolidated pluggable orchestrator (PluginEngine v2)."""
     def __init__(
@@ -307,6 +320,7 @@ class PluginEngine:
         self._loaded_plugins: list[str] = []
         self._hooks: dict = self.hook_bus._hooks
         self._sandbox: bool = True
+        self.lifecycle: _Lifecycle = _Lifecycle()
 
     @property
     def db(self) -> Any | None:
@@ -327,6 +341,19 @@ class PluginEngine:
 
     def set_engine(self, engine: Any) -> None:
         pass
+
+    async def deactivate(self, plugin_id: str) -> None:
+        """Deactivate an active plugin (engine-level cleanup).
+
+        Called by PluginManager.unload_plugin() to sync lifecycle state.
+        Sub-process cleanup (hook_unregister, route_unmount, wrapper_stop)
+        is handled by the caller — this only updates internal state tracking.
+        """
+        if plugin_id in self._loaded_plugins:
+            self._loaded_plugins.remove(plugin_id)
+        self._instances.pop(plugin_id, None)
+        self._wrappers.pop(plugin_id, None)
+        self.lifecycle._states[plugin_id] = STATE_DEACTIVATED
 
     async def initialize(self, db: Any = None, sandbox: bool | None = None) -> None:
         self._explicit_db = db

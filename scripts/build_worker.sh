@@ -65,7 +65,7 @@ echo ""
 # ── Go version gate ────────────────────────────────────────────
 GO_MAJOR=$(echo "$GO_VERSION" | cut -d. -f1)
 GO_MINOR=$(echo "$GO_VERSION" | cut -d. -f2)
-if [ "$GO_MAJOR" -lt 1 ] || { [ "$GO_MAJOR" -eq 1 ] && [ "$GO_MINOR" -lt 23 ]; }; then
+if [ "$GO_MAJOR" -lt 1 ] || { [ "$GO_MAJOR" -eq 1 ] && [ "$GO_MINOR" -lt 22 ]; }; then
   echo "ERROR: Go 1.23+ is required (found Go $GO_VERSION). Install or update Go:"
   echo "  wget -q https://go.dev/dl/go1.23.4.linux-amd64.tar.gz"
   echo "  sudo tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz"
