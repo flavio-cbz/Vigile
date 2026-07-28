@@ -35,6 +35,7 @@ htmlcov/
 !.env.example
 .env.local
 .env.*.local
+.mac_env
 
 ## Database
 *.db
@@ -104,6 +105,10 @@ AGENTS.md
 scratch/
 interview/
 opencode.json
+
+## Node.js (root-level for commitlint)
+node_modules/
+package-lock.json
 
 ## Local development artifacts
 .codegraph/
