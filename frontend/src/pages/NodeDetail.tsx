@@ -211,13 +211,26 @@ export const NodeDetail: React.FC = () => {
           />
         )}
 
-        {activeTab === 'disk' && (
-          <NodeDetailDiskTab
-            nodeId={id}
-            mounts={[]}
-            isAdmin={isAdminOrOperator}
-          />
-        )}
+        {activeTab === 'disk' && (() => {
+          const diskMounts = node?.cached_disks_json
+            ? (() => {
+                try {
+                  return JSON.parse(node.cached_disks_json).map(
+                    (d: { mount_point: string }) => d.mount_point
+                  );
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          return (
+            <NodeDetailDiskTab
+              nodeId={id}
+              mounts={diskMounts}
+              isAdmin={isAdminOrOperator}
+            />
+          );
+        })()}
 
         {activeTab === 'settings' && <NodeSettingsTab node={node} />}
       </div>

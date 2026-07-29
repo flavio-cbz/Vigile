@@ -60,7 +60,11 @@ class CursorProxy:
 
 class DatabaseProxy:
     """
-    Proxies database execute and commit calls back to the parent process.
+    Proxies SELECT-only database queries back to the parent process.
+
+    Since PluginContext.db_query() only allows SELECT statements,
+    there is no commit() method — write operations are not permitted
+    from sandboxed plugins.
     """
 
     def __init__(self, call_id: str, request_fn: Callable):
@@ -70,11 +74,8 @@ class DatabaseProxy:
     async def execute(self, sql: str, params: Any = ()) -> CursorProxy:
         # If params is a tuple, convert it to a list for JSON serialization
         p = list(params) if isinstance(params, (tuple, list)) else params
-        res = await self._request_fn("db_execute", sql=sql, params=p)
+        res = await self._request_fn("db_query", sql=sql, params=p)
         return CursorProxy(res)
-
-    async def commit(self) -> None:
-        await self._request_fn("db_commit")
 
 
 class WorkerPluginManager:

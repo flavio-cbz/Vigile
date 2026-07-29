@@ -74,4 +74,5 @@ export interface NodeRecord {
   disk_percent?: number;
   uptime_seconds?: number;
   version?: string;
+  cached_disks_json: string | null;
 }

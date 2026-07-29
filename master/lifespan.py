@@ -12,7 +12,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI
 
@@ -30,11 +30,25 @@ from master.core.db_auto import DBAuto
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import init_security, load_or_generate_master_key
 from master.db.database import close_db, init_db, transaction
-from master.db.migrations import run_migrations
+from master.db.migrations import run_migrations, run_seeds
 from master.auto_update import auto_update_workers_task
 from master.proposal_expiry import proposal_expiry_task
+from master.core.outbox import outbox
+from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 
 logger = logging.getLogger(__name__)
+
+
+async def _on_node_connected(node_id: str, new_state: str, db: Any) -> None:
+    """Fire a one-shot DISK_SCAN the first time a node goes CONNECTED."""
+    if new_state != NodeState.CONNECTED.value:
+        return
+    try:
+        await node_manager.trigger_disk_scan(node_id, db, force=True)
+    except Exception as exc:
+        logger.warning(
+            "Failed to trigger background disk scan for node %s: %s", node_id, exc
+        )
 
 
 @asynccontextmanager
@@ -99,12 +113,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db = await init_db(settings.database_path, timeout=settings.db_timeout, pool_size=settings.db_pool_size)
     logger.info("Database connection established.")
 
-    # 2. Migrations
+    # 2. Migrations (DDL only)
     await run_migrations(db)
 
-    # Ensure default plugins are always enabled (idempotent upsert)
-    from master.db.migrations import _seed_default_plugins
-    await _seed_default_plugins(db)
+    # 2b. Seeds (admin user, default plugins — idempotent, never overwrites operator config)
+    await run_seeds(db)
 
     # Reset any nodes left in CONNECTED, ENROLLING, or RECONNECTING states to LOST on startup
     async with transaction(db):
@@ -147,10 +160,58 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     import master.core.plugin_manager as _pm
     _pm.plugin_engine = engine
-    _pm.plugin_manager.set_engine(engine)
-    _pm.plugin_manager = engine
     await engine.initialize(db, sandbox=settings.plugin_sandbox)
     logger.info("Plugins loaded: %s", engine.loaded_plugins)
+
+    # ── Startup Reconciliation ──────────────────────────────────────────
+    # Recover from incomplete state after a crash or restart.
+    # All failures are logged but do not block startup.
+
+    # (a) Replay unprocessed outbox entries
+    try:
+        replayed = await outbox.replay_unprocessed(db)
+        if replayed:
+            logger.info("Outbox replay completed: %d entries processed", replayed)
+        else:
+            logger.info("Outbox replay completed — no unprocessed entries.")
+    except Exception:
+        logger.exception("Outbox replay failed during startup reconciliation")
+
+    # (b) Dispatch APPROVED proposals that were never dispatched
+    try:
+        async with transaction(db):
+            cursor = await db.execute(
+                "SELECT id, node_id FROM action_proposals WHERE status = 'APPROVED' AND dispatch_id IS NULL"
+            )
+            pending = await cursor.fetchall()
+        if pending:
+            dispatcher = ApprovedProposalDispatcher(node_manager)
+            for row in pending:
+                try:
+                    await dispatcher.dispatch_approved(row["id"], db, intent_timeout=30.0)
+                    logger.info(
+                        "Reconciled approved proposal %s for node %s",
+                        row["id"], row["node_id"],
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to dispatch approved proposal %s for node %s",
+                        row["id"], row["node_id"],
+                    )
+        else:
+            logger.info("No pending approved proposals to reconcile.")
+    except Exception:
+        logger.exception("Approved proposals reconciliation failed during startup")
+
+    # (c) Reset plugins stuck in LOADING or STOPPING states
+    try:
+        async with transaction(db):
+            await db.execute(
+                "UPDATE plugins SET status = 'DISABLED', enabled = 0 WHERE status IN ('LOADING', 'STOPPING')"
+            )
+        logger.info("Plugin state reconciliation completed (LOADING/STOPPING → DISABLED).")
+    except Exception:
+        logger.exception("Plugin state reconciliation failed during startup")
 
     # 6. Node Manager
     await node_manager.start(
@@ -160,6 +221,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         default_intent_max_age=settings.default_intent_max_age,
         cache_update_interval=settings.cache_update_interval,
     )
+
+    # 6b. Disk Scan — background trigger on first CONNECTED + 12h periodic via _cache_updater.
+    node_manager.register_state_change_callback(_on_node_connected)
+    logger.info("Disk scan background trigger registered for CONNECTED state changes.")
 
     # 7. Automation Engine
     await automation_engine.initialize(db)

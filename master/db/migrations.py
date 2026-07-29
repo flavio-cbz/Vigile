@@ -8,6 +8,7 @@ Creates all tables if not exists, then seeds the default admin user.
 """
 
 import logging
+import re
 import time
 import uuid
 
@@ -16,7 +17,17 @@ from passlib.context import CryptContext
 
 from master.config import settings
 from master.core.audit import GENESIS_HASH, compute_entry_hash
-from master.db.models import ALL_TABLES, CREATE_INDEXES, CREATE_INVESTIGATIONS
+from master.db.models import ALL_TABLES, CREATE_INDEXES, CREATE_INVESTIGATIONS, CREATE_OUTBOX
+
+# Safe identifier pattern for DDL generation
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _safe_ddl_identifier(name: str) -> str:
+    """Validate that *name* is a safe SQL identifier. Returns it unchanged."""
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(f"Unsafe DDL identifier: {name!r}")
+    return name
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +89,9 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "cached_disk_scan_at" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_disk_scan_at REAL DEFAULT NULL")
         mutated = True
+    if "cached_disks_json" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN cached_disks_json TEXT DEFAULT NULL")
+        mutated = True
 
     async with db.execute("PRAGMA table_info(metrics_snapshots)") as cursor:
         metrics_columns = [row["name"] for row in await cursor.fetchall()]
@@ -106,15 +120,18 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         ("cpu_throttled_count", "INTEGER"),
     ]:
         if col not in metrics_columns:
+            _safe_ddl_identifier(col)
+            _safe_ddl_identifier(ctype)
             await db.execute(
-                f"ALTER TABLE metrics_snapshots ADD COLUMN {col} {ctype} DEFAULT NULL"
+                "ALTER TABLE metrics_snapshots ADD COLUMN "
+                + col + " " + ctype + " DEFAULT NULL"
             )
             mutated = True
 
     if mutated:
         await db.commit()
         logger.info(
-            "Added insights/caching/group/disabled/version/worker_version/disks_json/top_processes columns."
+            "Added insights/caching/group/disabled/version/worker_version/disks_json/top_processes/cached_disks columns."
         )
 
     # Migration: add trust_level column to automation_rules (Sprint 9)
@@ -176,11 +193,20 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         ("009",),
     )
     await db.commit()
+    logger.info("Migrations complete.")
 
-    # Seed data
+
+async def run_seeds(db: aiosqlite.Connection) -> None:
+    """
+    Seed initial application data (admin user, default plugins).
+
+    Called separately from ``run_migrations`` so that DDL changes can be
+    applied without touching operator-configured data.  Seeds are fully
+    idempotent — existing rows are never overwritten (resolves 🟠7, 🟡23).
+    """
     await _seed_default_admin(db)
     await _seed_default_plugins(db)
-    logger.info("Migrations complete.")
+    logger.info("Seeds complete.")
 
 
 async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
@@ -216,21 +242,25 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
 async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
     """
     Seed default plugins in the plugins table if not present.
-    Each default plugin is seeded at version 1.0.0 with status RUNNING.
-    Uses upsert to re-enable any plugin that was incorrectly disabled.
+
+    Seeds ``metrics``, ``systemd``, and ``docker`` at version 1.0.0 with
+    status ``RUNNING`` and ``enabled=1`` **only for new rows**.  Existing
+    rows are **never overwritten** — ``enabled`` and ``status`` are preserved
+    exactly as the operator left them (resolves 🟠7: forced re-activation on
+    every restart).
     """
-    defaults = [("metrics", 1, "1.0.0", "RUNNING"), ("systemd", 1, "1.0.0", "RUNNING"), ("docker", 1, "1.0.0", "RUNNING")]
-    for plugin_id, enabled, version, status in defaults:
+    defaults = [("metrics", "1.0.0"), ("systemd", "1.0.0"), ("docker", "1.0.0")]
+    for plugin_id, version in defaults:
         await db.execute(
             """
             INSERT INTO plugins (id, version, enabled, status, config_json)
-            VALUES (?, ?, ?, ?, '{}')
+            VALUES (?, ?, 1, 'RUNNING', '{}')
             ON CONFLICT(id) DO UPDATE SET
-                enabled = excluded.enabled,
-                status = excluded.status,
-                version = excluded.version
+                version = CASE WHEN plugins.version IS NULL OR plugins.version = ''
+                               THEN excluded.version
+                               ELSE plugins.version END
             """,
-            (plugin_id, version, enabled, status),
+            (plugin_id, version),
         )
     await db.commit()
 
@@ -282,17 +312,34 @@ async def _migrate_plugin_configs_to_plugins(db: aiosqlite.Connection) -> None:
 async def _seed_default_admin(db: aiosqlite.Connection) -> None:
     """
     Creates the default admin user if no users exist.
-    Credentials: admin / admin — dev convenience account, not for production.
-    Set TESTING=true to force a password change on first login.
+
+    Credentials: ``admin / admin`` — dev/test convenience account only.
+
+    In production (``settings.env == "production"``) the bootstrap is
+    **refused** unless ``settings.bootstrap_admin_password`` is explicitly
+    set, preventing the insecure ``admin/admin`` default from leaking into
+    production deployments (resolves 🟡23).
     """
     async with db.execute("SELECT COUNT(*) FROM users") as cursor:
         row = await cursor.fetchone()
         if row is None or row[0] > 0:
             return
 
+    # Production guard: refuse admin/admin unless an explicit bootstrap password is configured
+    if getattr(settings, "env", "dev") == "production":
+        bootstrap_pw = getattr(settings, "bootstrap_admin_password", None)
+        if not bootstrap_pw:
+            logger.warning(
+                "Production environment detected but bootstrap_admin_password is not set. "
+                "Skipping default admin creation — set bootstrap_admin_password to provision."
+            )
+            return
+        password_hash = _pwd_context.hash(bootstrap_pw)
+    else:
+        password_hash = _pwd_context.hash("admin")
+
     now = time.time()
     user_id = str(uuid.uuid4())
-    password_hash = _pwd_context.hash("admin")
     must_change = 1 if settings.testing else 0
 
     await db.execute(

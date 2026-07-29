@@ -705,6 +705,57 @@ async def _run_operational(
         elif msg_type == "INTENT_RESULT":
             intent_id = msg.get("intent_id", "?")
             success = msg.get("success", False)
+            dispatch_id = msg.get("dispatch_id")  # Optional — present if the dispatcher set it
+
+            # ── INTENT_RESULT correlation validation ────────────────────────────────
+            # Security: Reject INTENT_RESULT messages that do not correlate with a
+            # pending intent dispatched to this node. This prevents forged INTENT_RESULT
+            # attacks where a malicious or compromised worker claims credit for an
+            # intent it was not the intended recipient of, or replays a stale result.
+            #
+            # Validation steps:
+            #   1. intent_id must exist in the pending-intent registry
+            #   2. The node sending the result must match the intended recipient node
+            #   3. If dispatch_id is present, it must match the action_proposals record
+
+            # Validate 1 + 2: intent_id corresponds to a pending dispatch for this node
+            expected_node_id = node_manager._intent_nodes.get(intent_id)
+            if expected_node_id is None:
+                logger.warning(
+                    "Node %s: INTENT_RESULT for unknown intent_id=%s — rejecting "
+                    "(possible forged INTENT_RESULT attack)",
+                    node_id, intent_id,
+                )
+                continue
+            if expected_node_id != node_id:
+                logger.warning(
+                    "Node %s: INTENT_RESULT for intent_id=%s originated from node %s, "
+                    "but intent was dispatched to node %s — rejecting "
+                    "(possible forged INTENT_RESULT attack)",
+                    node_id, intent_id, node_id, expected_node_id,
+                )
+                continue
+
+            # Validate 3: optional dispatch_id must match the stored proposal record
+            if dispatch_id is not None:
+                async with db.execute(
+                    "SELECT dispatch_id FROM action_proposals WHERE intent_id = ?",
+                    (intent_id,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                stored_dispatch = row["dispatch_id"] if row else None
+                if stored_dispatch != dispatch_id:
+                    logger.warning(
+                        "Node %s: INTENT_RESULT dispatch_id mismatch for intent_id=%s "
+                        "(provided=%s, expected=%s) — rejecting "
+                        "(possible replay or forged INTENT_RESULT)",
+                        node_id,
+                        intent_id,
+                        dispatch_id,
+                        stored_dispatch or "N/A",
+                    )
+                    continue
+
             logger.info(
                 "Node %s INTENT_RESULT: id=%s success=%s",
                 node_id,

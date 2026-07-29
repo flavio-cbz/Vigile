@@ -24,6 +24,7 @@ class Settings(BaseModel):
     port: int = int(os.getenv("PORT", "8000"))
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
     testing: bool = os.getenv("TESTING", "false").lower() == "true"
+    env: str = os.getenv("ENV", "dev")
 
     # --- Database ---
     database_path: str = os.getenv("DATABASE_PATH", "./data/vigile.db")
@@ -146,6 +147,7 @@ class Settings(BaseModel):
     auto_update_workers: bool = os.getenv("AUTO_UPDATE_WORKERS", "false").lower() in ("true", "1")
     offline_mode: bool = os.getenv("OFFLINE_MODE", "false").lower() == "true"
     worker_binary_local_dir: str = os.getenv("WORKER_BINARY_LOCAL_DIR", "/var/cache/vigile/worker")
+    bootstrap_admin_password: str = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

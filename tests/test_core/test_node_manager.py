@@ -124,7 +124,7 @@ async def test_node_manager_intents(node_manager: NodeManager):
     intent = {"action": "TEST", "params": {"x": 1}}
 
     # Run send_intent in background
-    task = asyncio.create_task(node_manager.send_intent(node_id, intent, timeout=1.0))
+    task = asyncio.create_task(node_manager._send_intent(node_id, intent, timeout=1.0))
     await asyncio.sleep(0.05)  # Let it send
 
     assert len(ws.sent_messages) == 1
@@ -140,12 +140,12 @@ async def test_node_manager_intents(node_manager: NodeManager):
 
     # Test send_intent on disconnected node
     with pytest.raises(RuntimeError):
-        await node_manager.send_intent("missing-node", {"action": "TEST"})
+        await node_manager._send_intent("missing-node", {"action": "TEST"})
 
     # Test send_intent timeout
     await node_manager.register_connection(node_id, ws)
     with pytest.raises(TimeoutError):
-        await node_manager.send_intent(node_id, {"action": "TEST"}, timeout=0.01)
+        await node_manager._send_intent(node_id, {"action": "TEST"}, timeout=0.01)
 
 
 @pytest.mark.asyncio
@@ -338,7 +338,7 @@ async def test_node_manager_unregister_cancels_pending_intents(node_manager: Nod
     await node_manager.register_connection(node_id, ws)
 
     intent = {"action": "TEST"}
-    task = asyncio.create_task(node_manager.send_intent(node_id, intent, timeout=10.0))
+    task = asyncio.create_task(node_manager._send_intent(node_id, intent, timeout=10.0))
     await asyncio.sleep(0.01)
 
     # Now unregister connection, which should cancel the pending intent future
@@ -470,7 +470,7 @@ async def test_send_intent_finally_cleanup_on_cancel(node_manager: NodeManager):
     await node_manager.register_connection(node_id, ws)
 
     intent = {"action": "TEST"}
-    task = asyncio.create_task(node_manager.send_intent(node_id, intent, timeout=10.0))
+    task = asyncio.create_task(node_manager._send_intent(node_id, intent, timeout=10.0))
     await asyncio.sleep(0.01)
 
     # Assert intent is registered

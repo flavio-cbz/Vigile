@@ -158,7 +158,7 @@ class PluginProcessWrapper:
                             fut.set_exception(RuntimeError(msg.get("error")))
                     continue
 
-                if msg_type in ("db_execute", "db_commit"):
+                if msg_type in ("db_query",):
                     asyncio.create_task(self._handle_db_request(msg))
                     continue
 
@@ -201,7 +201,7 @@ class PluginProcessWrapper:
             return
 
         try:
-            if msg_type == "db_execute":
+            if msg_type == "db_query":
                 sql = msg["sql"]
                 params = msg.get("params", [])
                 cursor = await db.execute(sql, params)
@@ -217,16 +217,6 @@ class PluginProcessWrapper:
                             "lastrowid": cursor.lastrowid,
                             "rows": serializable_rows,
                         },
-                    }
-                )
-            elif msg_type == "db_commit":
-                await db.commit()
-                await self._send_to_child(
-                    {
-                        "type": "db_result",
-                        "db_call_id": db_call_id,
-                        "status": "success",
-                        "result": {},
                     }
                 )
         except Exception as e:
@@ -516,8 +506,7 @@ class PluginManager:
                 if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
                     self._disabled_plugins.remove(plugin_id)
                 if self._engine is not None:
-                    from master.core.plugin_engine import STATE_ACTIVE
-                    self._engine.lifecycle._states[plugin_id] = STATE_ACTIVE
+                    self._engine.lifecycle._set_runtime(plugin_id, "ACTIVE")
                 logger.info("Plugin loaded in isolated subprocess: %s", plugin_id)
                 return True
             except Exception:
@@ -548,8 +537,7 @@ class PluginManager:
                 if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
                     self._disabled_plugins.remove(plugin_id)
                 if self._engine is not None:
-                    from master.core.plugin_engine import STATE_ACTIVE
-                    self._engine.lifecycle._states[plugin_id] = STATE_ACTIVE
+                    self._engine.lifecycle._set_runtime(plugin_id, "ACTIVE")
                 logger.info("Plugin loaded in-process: %s", plugin_id)
                 return True
             except Exception:
@@ -580,7 +568,8 @@ class PluginManager:
         # Deactivate via engine if available to clean up hooks, scheduler, routes
         if self._engine is not None:
             try:
-                if self._engine.lifecycle.get_state(plugin_id) == "ACTIVE":
+                runtime = await self._engine.lifecycle.get_runtime_state(plugin_id)
+                if runtime == "ACTIVE":
                     await self._engine.deactivate(plugin_id)
             except Exception as e:
                 logger.error("Failed to deactivate plugin '%s' via engine: %s", plugin_id, e)
@@ -615,7 +604,7 @@ class PluginManager:
         if self._disabled_plugins is not None:
             self._disabled_plugins.add(plugin_id)
         if self._engine is not None:
-            self._engine.lifecycle._states.pop(plugin_id, None)
+            self._engine.lifecycle._remove(plugin_id)
 
         module_name = f"vigile.plugins.{module_stem}"
         import sys

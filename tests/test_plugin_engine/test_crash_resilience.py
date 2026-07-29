@@ -22,7 +22,10 @@ class TestCrashResilience:
         bus.register("test", suicide, plugin_name="suicide")
         bus.register("test", survivor, plugin_name="survivor")
         results = await bus.async_call("test")
-        assert results == ["ok"]
+        assert len(results) == 2
+        succeeded = [r for r in results if r["success"]]
+        assert len(succeeded) == 1
+        assert succeeded[0]["result"] == "ok"
 
     @pytest.mark.asyncio
     async def test_keyboardinterrupt_in_async_call(self):
@@ -37,7 +40,10 @@ class TestCrashResilience:
         bus.register("test", interrupter, plugin_name="interrupter")
         bus.register("test", survivor, plugin_name="survivor")
         results = await bus.async_call("test")
-        assert results == ["ok"]
+        assert len(results) == 2
+        succeeded = [r for r in results if r["success"]]
+        assert len(succeeded) == 1
+        assert succeeded[0]["result"] == "ok"
 
     @pytest.mark.asyncio
     async def test_hook_timeout_does_not_block_others(self):
@@ -54,7 +60,10 @@ class TestCrashResilience:
         results = await asyncio.wait_for(
             bus.async_call("test"), timeout=35.0
         )
-        assert results == ["done"]
+        assert len(results) == 2
+        succeeded = [r for r in results if r["success"]]
+        assert len(succeeded) == 1
+        assert succeeded[0]["result"] == "done"
 
     def test_exception_in_call_isolation(self):
         bus = HookBus()
@@ -99,7 +108,10 @@ class TestCrashResilience:
         bus.register("test", custom_raise, plugin_name="custom")
         bus.register("test", ok, plugin_name="ok")
         results = await bus.async_call("test")
-        assert results == ["ok"]
+        assert len(results) == 2
+        succeeded = [r for r in results if r["success"]]
+        assert len(succeeded) == 1
+        assert succeeded[0]["result"] == "ok"
 
     @pytest.mark.asyncio
     async def test_concurrent_calls_dont_interfere(self):

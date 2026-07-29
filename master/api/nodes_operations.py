@@ -17,7 +17,11 @@ from master.api.nodes_router import router
 from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
 from master.core.node_manager import NodeManager
-from master.db.disk_scan_cache import get_cached_disk_scan, set_cached_disk_scan
+from master.db.disk_scan_cache import (
+    get_cached_disk_scan,
+    get_node_disk_mounts,
+    set_cached_disk_scan,
+)
 from master.schemas.disk_scan import DiskScanResult
 
 logger = logging.getLogger(__name__)
@@ -136,18 +140,23 @@ async def get_disk_scan(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    mounts = ["/"]
-    try:
-        stats_result = await nm.send_intent(
-            node_id, {"action": "GET_STATS"}, timeout=10.0
-        )
-        if stats_result.get("success"):
-            disks = stats_result.get("disks", [])
-            extracted = [d["mount_point"] for d in disks if d.get("mount_point")]
-            if extracted:
-                mounts = extracted
-    except Exception as exc:
-        logger.warning("Node %s: GET_STATS failed for disk-scan mounts: %s", node_id, exc)
+    # Use cached disk mounts (populated by the periodic cache updater).
+    # Fall back to a live GET_STATS only when no cache exists yet.
+    mounts = await get_node_disk_mounts(db, node_id)
+    if not mounts:
+        try:
+            stats_result = await nm.send_intent(
+                node_id, {"action": "GET_STATS"}, timeout=10.0
+            )
+            if stats_result.get("success"):
+                disks = stats_result.get("disks", [])
+                extracted = [d["mount_point"] for d in disks if d.get("mount_point")]
+                if extracted:
+                    mounts = extracted
+        except Exception as exc:
+            logger.warning("Node %s: GET_STATS failed for disk-scan mounts: %s", node_id, exc)
+        if not mounts:
+            mounts = ["/"]
 
     try:
         result = await nm.send_intent(

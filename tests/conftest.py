@@ -19,7 +19,7 @@ from master.core.node_manager import NodeManager
 from master.core.plugin_manager import PluginManager
 from master.core.security_manager import SecurityManager
 from master.db.database import close_db, init_db, reset_db
-from master.db.migrations import run_migrations
+from master.db.migrations import run_migrations, run_seeds
 
 
 @pytest.fixture
@@ -37,6 +37,7 @@ async def db(temp_dir):
     await reset_db()
     conn = await init_db(db_path)
     await run_migrations(conn)
+    await run_seeds(conn)
     # Seed the test-user to satisfy is_active checks in deps.py
     await conn.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash, role, is_active, must_change_password, created_at, updated_at) "

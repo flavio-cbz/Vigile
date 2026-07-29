@@ -31,11 +31,12 @@ node is hard-deleted from the nodes table.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Generator
 
 import aiosqlite
 from fastapi import WebSocket
@@ -46,8 +47,22 @@ from master.core.audit import AuditAction, log_action
 from master.core.enums import NodeState
 from master.core.lock import LoopBoundLock
 from master.db.database import get_db_conn
+from master.db.disk_scan_cache import (
+    get_cached_disk_scan,
+    set_cached_disk_scan,
+    set_node_disk_mounts,
+)
+from master.schemas.disk_scan import DiskNode, DiskScanResult
 
 logger = logging.getLogger(__name__)
+
+
+def _flatten_disk_nodes(node: DiskNode) -> Generator[DiskNode, None, None]:
+    """Yield all descendant DiskNodes recursively."""
+    if node.children:
+        for child in node.children:
+            yield child
+            yield from _flatten_disk_nodes(child)
 
 
 # NodeState is imported from master.core.enums for canonical definition
@@ -143,6 +158,10 @@ class NodeManager:
         self._cache_task: asyncio.Task | None = None
         # Callbacks invoked after every successful state transition (e.g. automation engine)
         self._state_change_callbacks: list = []
+        # In-flight disk scan tracking (prevents concurrent scans per node)
+        self._disk_scan_inflight: set[str] = set()
+        # Per-node last disk-scan trigger time (for 12h periodic scheduling)
+        self._disk_scan_last_run: dict[str, float] = {}
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -231,7 +250,7 @@ class NodeManager:
                 # 1. Get services
                 services_json = None
                 try:
-                    result = await self.send_intent(nid, {"action": "LIST_SERVICES"}, timeout=10.0)
+                    result = await self._send_intent(nid, {"action": "LIST_SERVICES"}, timeout=10.0)
                     if result.get("success"):
                         parsed = parse_worker_list(result.get("output", ""), ServiceInfo)
                         if parsed is not None:
@@ -242,7 +261,7 @@ class NodeManager:
                 # 2. Get containers
                 containers_json = None
                 try:
-                    result = await self.send_intent(
+                    result = await self._send_intent(
                         nid, {"action": "LIST_CONTAINERS"}, timeout=10.0
                     )
                     if result.get("success"):
@@ -299,7 +318,37 @@ class NodeManager:
             except Exception as ex:
                 logger.error("Cache updater: transaction failed: %s", ex)
 
-        # 4. Check profile expiration and new container detection for auto-regeneration
+        # 4. Persist disk mount list from latest metrics snapshot (for mount selector).
+        for nid in connected:
+            try:
+                async with db.execute(
+                    "SELECT disks_json FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
+                    (nid,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row and row["disks_json"]:
+                    try:
+                        disks = json.loads(row["disks_json"])
+                        mounts = [d["mount_point"] for d in disks if d.get("mount_point")]
+                        if mounts:
+                            await set_node_disk_mounts(db, nid, mounts)
+                    except Exception:
+                        pass
+            except Exception as ex:
+                logger.warning(
+                    "Cache updater: failed to persist disk mounts for node %s: %s", nid, ex
+                )
+
+        # 5. Check 12h periodic disk-scan TTL and trigger background scans.
+        for nid in connected:
+            try:
+                await self.trigger_disk_scan(nid, db)
+            except Exception as ex:
+                logger.warning(
+                    "Cache updater: background disk-scan check failed for node %s: %s", nid, ex
+                )
+
+        # 6. Check profile expiration and new container detection for auto-regeneration
         containers_by_node = {nid: containers_json for nid, _, containers_json in node_updates}
         for nid in connected:
             try:
@@ -800,7 +849,7 @@ class NodeManager:
     # Intent dispatch
     # -----------------------------------------------------------------------
 
-    async def send_intent(
+    async def _send_intent(
         self,
         node_id: str,
         intent: dict[str, Any],
@@ -863,6 +912,20 @@ class NodeManager:
             self._intent_nodes.pop(intent_id, None)
             self._intent_created_at.pop(intent_id, None)
             self._pending_intents.pop(intent_id, None)
+
+    async def send_intent(
+        self,
+        node_id: str,
+        intent: dict[str, Any],
+        *,
+        timeout: float | None = None,
+        intent_max_age: float | None = None,
+    ) -> dict[str, Any]:
+        """Deprecated — use the correct port instead."""
+        raise RuntimeError(
+            "send_intent() is now private (_send_intent). "
+            "Use ApprovedProposalDispatcher for mutations or WorkerQueryPort for read-only queries."
+        )
 
     # -----------------------------------------------------------------------
     # Background heartbeat monitor
@@ -970,6 +1033,123 @@ class NodeManager:
                         logger.warning("Node %s marked STALE (offline %.0fh)", node_id, age / 3600)
                     except Exception:
                         logger.exception("Failed to transition node %s to STALE", node_id)
+
+    # -----------------------------------------------------------------------
+    # Disk scan trigger (background / scheduled / first-connect)
+    # -----------------------------------------------------------------------
+
+    async def trigger_disk_scan(
+        self,
+        node_id: str,
+        db: aiosqlite.Connection,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Trigger a DISK_SCAN intent on a connected worker.
+
+        Guarded by an in-flight lock so concurrent calls (first-connect +
+        12h periodic) cannot overlap on the same node.  When ``force=False``
+        the 12-hour TTL (with per-node stagger) is respected; ``force=True``
+        bypasses the TTL but is still blocked while another scan is in flight.
+        """
+        async with self._lock:
+            if node_id in self._disk_scan_inflight:
+                return
+            conn = self._connections.get(node_id)
+            if conn is None:
+                return
+            self._disk_scan_inflight.add(node_id)
+
+        # Respect 12h TTL unless forced.
+        if not force:
+            last = self._disk_scan_last_run.get(node_id, 0.0)
+            # Deterministic ±30 min stagger derived from node_id so the
+            # fleet doesn't all scan in the same minute.
+            stagger = (int(hashlib.md5(node_id.encode()).hexdigest(), 16) % 60) - 30
+            if time.time() - last < 12 * 3600 + stagger:
+                async with self._lock:
+                    self._disk_scan_inflight.discard(node_id)
+                return
+
+        logger.info("Node %s: triggered background disk scan (force=%s)", node_id, force)
+        try:
+            result = await self._send_intent(
+                node_id,
+                {
+                    "action": "DISK_SCAN",
+                    "params": {
+                        "path": "/",
+                        "max_depth": 4,
+                        "min_size_bytes": 10 * 1024 * 1024,
+                        "mounts": ["/"],
+                    },
+                },
+                timeout=45.0,
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            logger.warning(
+                "Node %s: background disk scan failed: %s", node_id, exc
+            )
+            async with self._lock:
+                self._disk_scan_inflight.discard(node_id)
+            return
+
+        if not result.get("success"):
+            logger.warning(
+                "Node %s: background disk scan worker reported error: %s",
+                node_id,
+                result.get("error"),
+            )
+            async with self._lock:
+                self._disk_scan_inflight.discard(node_id)
+            return
+
+        try:
+            parsed = DiskScanResult.model_validate_json(result["output"])
+        except Exception:
+            logger.warning(
+                "Node %s: background disk scan invalid result schema", node_id
+            )
+            async with self._lock:
+                self._disk_scan_inflight.discard(node_id)
+            return
+
+        try:
+            await set_cached_disk_scan(db, node_id, result["output"], time.time())
+        except Exception as exc:
+            logger.warning(
+                "Node %s: failed to cache background disk-scan result: %s", node_id, exc
+            )
+
+        # Extract mount list from the worker's own disk report and persist it.
+        try:
+            all_nodes = [parsed.root] + list(_flatten_disk_nodes(parsed.root))
+            mounts = list({d.path for d in all_nodes if d.path})
+        except Exception:
+            mounts = []
+        if mounts:
+            try:
+                await set_node_disk_mounts(db, node_id, mounts)
+            except Exception as exc:
+                logger.warning(
+                    "Node %s: failed to persist disk mounts: %s", node_id, exc
+                )
+
+        try:
+            await log_action(
+                db,
+                user_id="system",
+                action=AuditAction.DISK_SCAN,
+                node_id=node_id,
+                details={"background": True, "path": "/", "max_depth": 4},
+            )
+        except Exception:
+            pass
+
+        async with self._lock:
+            self._disk_scan_last_run[node_id] = time.time()
+            self._disk_scan_inflight.discard(node_id)
+        logger.info("Node %s: background disk scan complete", node_id)
 
     # -----------------------------------------------------------------------
     # Query helpers

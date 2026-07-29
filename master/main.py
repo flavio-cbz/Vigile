@@ -48,23 +48,6 @@ from master.api.worker_binary import router as worker_binary_router
 from master.config import settings
 from master.logging_config import setup_logging
 from master.logging_config import get_logger
-from fastapi.staticfiles import StaticFiles
-from starlette.middleware.sessions import SessionMiddleware
-
-from master.api.admin import router as admin_router
-from master.api.audit import router as audit_router
-from master.api.auth import router as auth_router
-from master.api.automations import router as automations_router
-from master.api.chat import router as chat_router
-from master.api.demo import router as demo_router
-from master.api.investigations import router as investigations_router
-from master.api.plugins import router as plugins_router
-from master.api.metrics import render_prometheus
-from master.api.nodes import router as nodes_router
-from master.api.nodes_events import router as nodes_events_router
-from master.api.services import router as services_router
-from master.api.worker_binary import router as worker_binary_router
-from master.config import settings
 from master.core.alert_engine import alert_engine
 from master.core.investigation_manager import investigation_manager
 from master.core.automation_engine import automation_engine
@@ -173,55 +156,19 @@ async def ws_worker_join(websocket: WebSocket) -> None:
 # System endpoints
 # ---------------------------------------------------------------------------
 
-
-@app.get("/health", tags=["system"], summary="Health check")
-async def health_check() -> JSONResponse:
-    """
-    Basic health check endpoint.
-    Returns uptime, connected node count, and version.
-    """
-    uptime = time.time() - getattr(app.state, "startup_time", time.time())
-    return JSONResponse(
-        {
-            "status": "ok",
-            "version": "0.7.0",
-            "uptime_seconds": round(uptime, 1),
-            "connected_nodes": len(node_manager.connected_node_ids()),
-        }
-    )
-
-
-@app.get("/metrics", tags=["system"], summary="Prometheus metrics")
-async def metrics() -> PlainTextResponse:
-    """
-    Expose Prometheus-format metrics for scraping.
-    Returns text/plain content compatible with the Prometheus exposition format.
-    """
-    connected_count = len(node_manager.connected_node_ids())
-    startup_time = getattr(app.state, "startup_time", time.time())
-    version = "0.7.0"
-    body = await render_prometheus(connected_count, startup_time, version)
-    return PlainTextResponse(content=body, media_type="text/plain; version=0.0.4")
+app.get("/health", tags=["system"], summary="Health check")(health_check)
+app.get("/metrics", tags=["system"], summary="Prometheus metrics")(metrics)
 
 
 # ---------------------------------------------------------------------------
 # Static Files (mounted last so API/WS/health routes take precedence)
 # ---------------------------------------------------------------------------
 
-os.makedirs("master/static", exist_ok=True)
-app.mount("/", StaticFiles(directory="master/static", html=True), name="static")
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if not str(STATIC_DIR.resolve()).startswith(str(PROJECT_ROOT.resolve())):
+    raise RuntimeError(f"Static directory {STATIC_DIR} escapes project root {PROJECT_ROOT}")
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
-
-@app.exception_handler(404)
-async def spa_fallback_exception_handler(request: Request, exc: HTTPException) -> Response:
-    """Exclude API/WebSocket endpoints; fall back to SPA index.html for client-side routing."""
-    path = request.url.path.lstrip("/")
-
-    if path.startswith("api/") or path.startswith("ws/") or path == "health":
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-    index_path = Path("master/static/index.html")
-    if index_path.exists():
-        return FileResponse(index_path)
-
-    return JSONResponse(status_code=404, content={"detail": "Not Found"})
+app.exception_handler(404)(spa_fallback_exception_handler)

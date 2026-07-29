@@ -19,7 +19,7 @@ Three concerns live here:
    the plugin declared.
 
 3. **PluginContext** — a restricted, slotted proxy handed to each plugin
-   instance. It exposes a minimal, audited surface (``db_execute``,
+   instance. It exposes a minimal, audited surface (``db_query``,
    ``emit_event``, ``create_proposal``, ``get_config``) and never a raw
    reference to the engine, the DB connection, or the hook bus. SQL is
    tokenized and verified against the plugin's prefix (`<plugin_id>_`) and
@@ -29,10 +29,61 @@ Three concerns live here:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 import uuid
 from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Log redaction — masks secrets/tokens in log output
+# ---------------------------------------------------------------------------
+
+_REDACT_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Bearer tokens / Authorization headers
+    (re.compile(r'(?i)(authorization|bearer|token|api[_-]?key|secret)\s*[:=]\s*["\']?\S+["\']?'), r'\1=***REDACTED***'),
+    # JWT-like sequences (base64url triplets)
+    (re.compile(r'\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b'), '***JWT_REDACTED***'),
+    # Hex token patterns (32+ hex chars)
+    (re.compile(r'\b[0-9a-fA-F]{32,}\b'), '***HEX_REDACTED***'),
+    # Password-like entries
+    (re.compile(r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"]?\S+['\"]?"), r'\1=***REDACTED***'),
+    # Private keys
+    (re.compile(r'-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----'), '***PRIVATE_KEY_REDACTED***'),
+    # Join tokens (format: vgl_...)
+    (re.compile(r'\bvgl_[a-zA-Z0-9_-]{10,}\b'), '***JOIN_TOKEN_REDACTED***'),
+]
+
+
+def redact_sensitive(text: str) -> str:
+    """Mask secrets, tokens, and credentials in a log message.
+
+    Returns the redacted string with matched patterns replaced.
+    """
+    result = str(text)
+    for pattern, replacement in _REDACT_PATTERNS:
+        result = pattern.sub(replacement, result)
+    return result
+
+
+class RedactingAdapter(logging.LoggerAdapter):
+    """Logger adapter that automatically redacts sensitive data.
+
+    Redacts both the format string and any positional arguments
+    before forwarding to the underlying logger.
+    """
+
+    def process(self, msg: Any, kwargs: Any) -> tuple[Any, Any]:
+        if isinstance(msg, str):
+            msg = redact_sensitive(msg)
+        args = kwargs.get("args", ())
+        if args:
+            kwargs["args"] = tuple(
+                redact_sensitive(str(a)) if isinstance(a, str) else a
+                for a in args
+            )
+        return msg, kwargs
 
 try:
     import aiosqlite  # Lazy import: optional dependency for plugin sandbox isolation
@@ -294,16 +345,28 @@ class PluginContext:
         return self._config.get(key, default)
 
     # ------------------------------------------------------------------
-    # SQL (validated)
+    # SQL (SELECT-only, whitelisted tables)
     # ------------------------------------------------------------------
 
-    async def db_execute(self, sql: str, params: Any = ()) -> Any:
-        self._validate_sql(sql)
+    _SELECT_RE = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
+
+    async def db_query(self, sql: str, params: Any = ()) -> Any:
+        """Execute a SELECT-only query against whitelisted tables.
+
+        Only SELECT statements are allowed. Referenced tables must either
+        start with ``<plugin_id>_`` or be in the shared read whitelist.
+        Returns the cursor for result fetching.
+        """
+        if not self._SELECT_RE.match(sql):
+            raise PermissionError(
+                f"Plugin '{self._plugin_id}': only SELECT statements are allowed via db_query"
+            )
+        self._validate_select(sql)
         if self._db is None:
-            raise RuntimeError("PluginContext.db_execute: no database connection configured")
+            raise RuntimeError("PluginContext.db_query: no database connection configured")
         return await self._db.execute(sql, params)
 
-    def _validate_sql(self, sql: str) -> None:
+    def _validate_select(self, sql: str) -> None:
         for pattern in _BLOCKED_PATTERNS:
             if pattern.search(sql):
                 raise PermissionError(
@@ -319,15 +382,14 @@ class PluginContext:
         tables = _extract_table_identifiers(sql)
         prefix = f"{self._plugin_id}_"
         read_set = self._shared.get("read", set())
-        write_set = self._shared.get("write", set())
         for table in tables:
-            if table in read_set or table in write_set:
+            if table in read_set:
                 continue
             if table.startswith(prefix):
                 continue
             raise PermissionError(
-                f"Access to table '{table}' denied: must start with '{prefix}' "
-                f"or be in shared whitelist"
+                f"SELECT access to table '{table}' denied: must start with '{prefix}' "
+                f"or be in shared read whitelist"
             )
 
     # ------------------------------------------------------------------

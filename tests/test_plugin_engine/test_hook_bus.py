@@ -116,7 +116,11 @@ class TestHookBusAsync:
 
         bus.register("test", handler)
         results = await bus.async_call("test")
-        assert results == [42]
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert results[0]["result"] == 42
+        assert results[0]["error"] is None
+        assert results[0]["plugin_name"] == "anonymous"
 
     @pytest.mark.asyncio
     async def test_async_call_sync_hook(self):
@@ -127,7 +131,10 @@ class TestHookBusAsync:
 
         bus.register("test", handler)
         results = await bus.async_call("test")
-        assert results == ["sync_val"]
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert results[0]["result"] == "sync_val"
+        assert results[0]["error"] is None
 
     @pytest.mark.asyncio
     async def test_async_call_collects_all(self):
@@ -142,7 +149,8 @@ class TestHookBusAsync:
         bus.register("test", a)
         bus.register("test", b)
         results = await bus.async_call("test")
-        assert sorted(results) == [1, 2]
+        assert len(results) == 2
+        assert {r["result"] for r in results if r["success"]} == {1, 2}
 
     @pytest.mark.asyncio
     async def test_async_call_exception_isolation(self):
@@ -157,7 +165,14 @@ class TestHookBusAsync:
         bus.register("test", failing)
         bus.register("test", working)
         results = await bus.async_call("test")
-        assert results == ["ok"]
+        # Both hooks are present in results — one failed, one succeeded
+        assert len(results) == 2
+        failed = [r for r in results if not r["success"]]
+        succeeded = [r for r in results if r["success"]]
+        assert len(failed) == 1
+        assert "boom" in failed[0]["error"]
+        assert len(succeeded) == 1
+        assert succeeded[0]["result"] == "ok"
 
     @pytest.mark.asyncio
     async def test_async_call_first(self):
@@ -192,7 +207,12 @@ class TestHookBusAsync:
         bus.register("test", suicide)
         bus.register("test", survivor)
         results = await bus.async_call("test")
-        assert results == ["alive"]
+        assert len(results) == 2
+        failed = [r for r in results if not r["success"]]
+        succeeded = [r for r in results if r["success"]]
+        assert len(failed) == 1
+        assert len(succeeded) == 1
+        assert succeeded[0]["result"] == "alive"
 
 
 class TestHookBusRegistration:
