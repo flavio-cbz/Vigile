@@ -147,28 +147,30 @@ class InsightsManager:
         if node.get("online"):
             if not services:
                 try:
-                    from master.core.plugin_helpers import parse_service_list
+                    from master.core.plugin_utils import parse_worker_list
+                    from master.plugins.systemd_plugin import ServiceInfo
 
                     result = await self._auto_profiling_intent(
                         node_id, "LIST_SERVICES", {}, nm, db, timeout=8.0
                     )
                     if result.get("success"):
-                        parsed = parse_service_list(result.get("output", ""))
-                        if parsed:
+                        parsed = parse_worker_list(result.get("output", ""), ServiceInfo)
+                        if parsed is not None:
                             services = parsed
                 except Exception as e:
                     logger.warning("Profile gen: failed live services query: %s", e)
 
             if not containers:
                 try:
-                    from master.core.plugin_helpers import parse_container_list
+                    from master.core.plugin_utils import parse_worker_list
+                    from master.plugins.docker_plugin import ContainerSummary
 
                     result = await self._auto_profiling_intent(
                         node_id, "LIST_CONTAINERS", {}, nm, db, timeout=8.0
                     )
                     if result.get("success"):
-                        parsed = parse_container_list(result.get("output", ""))
-                        if parsed:
+                        parsed = parse_worker_list(result.get("output", ""), ContainerSummary)
+                        if parsed is not None:
                             containers = parsed
                 except Exception as e:
                     logger.warning("Profile gen: failed live containers query: %s", e)
@@ -565,21 +567,13 @@ class InsightsManager:
         ram_insight = self._calculate_ram_insight(latest_snap, profile, locale=locale)
         if ram_insight:
             insights.append(ram_insight)
-
-        return {
-            "node_id": node_id,
-            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "insights": insights,
-            "profile_confidence": "high" if node.get("online") else "medium",
-        }
-
     async def _calculate_disk_insight(
         self,
         node_id: str,
         db: aiosqlite.Connection,
         latest_snap: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Calculate linear regression slope of disk usage and return insight."""
+        """Calculate linear regression slope of disk usage and return insight according to decision rules."""
         disk_total = latest_snap.get("disk_total_bytes", 0)
         disk_used = latest_snap.get("disk_used_bytes", 0)
         disk_percent = latest_snap.get("disk_percent", 0.0)
@@ -603,88 +597,144 @@ class InsightsManager:
             (node_id, limit_time),
         ) as cursor:
             async for r in cursor:
-                snapshots.append(dict(r))
+                if isinstance(r, (tuple, list)):
+                    snapshots.append({"collected_at": r[0], "disk_used_bytes": r[1]})
+                else:
+                    snapshots.append(dict(r))
 
         free_bytes = disk_total - disk_used
         free_gb = free_bytes / (1024**3)
         used_percent = round(disk_percent, 1)
 
-        # Calculate slope only with enough snapshots AND sufficient time span.
-        # With fewer points (or a very short window), filesystem noise yields
-        # absurd extrapolations (e.g. +39000 GB/day from a 60s delta).
-        slope = 0.0  # GB per day
-        min_snapshots = 5
-        min_timespan_seconds = 1800  # 30 minutes
         timespan = (
             (snapshots[-1]["collected_at"] - snapshots[0]["collected_at"])
             if len(snapshots) >= 2
             else 0
         )
-        if len(snapshots) >= min_snapshots and timespan >= min_timespan_seconds:
-            t0 = snapshots[0]["collected_at"]
-            # Convert collected_at to days relative to first snapshot to avoid floating overflow
-            x = [(s["collected_at"] - t0) / 86400.0 for s in snapshots]
-            y = [s["disk_used_bytes"] / (1024**3) for s in snapshots]
+        hours_collected = int(timespan / 3600)
 
-            n = len(snapshots)
-            sum_x = sum(x)
-            sum_y = sum(y)
-            sum_xx = sum(xi * xi for xi in x)
-            sum_xy = sum(xi * yi for xi, yi in zip(x, y))
+        # Default values
+        safety_margin_days = 2
+        confidence = "none"
 
-            denominator = n * sum_xx - sum_x * sum_x
-            if abs(denominator) > 1e-6:
-                slope = (n * sum_xy - sum_x * sum_y) / denominator
-                if slope < 0.0:
-                    slope = 0.0  # Ignore shrinking disk for the "full in" prediction
-            else:
+        # Case 1: < 6 hours of history -> Collecte en cours
+        if timespan < 21600 or len(snapshots) < 4:
+            return {
+                "type": "disk",
+                "severity": "ok",
+                "icon": "🔄",
+                "headline": "Collecte en cours",
+                "detail": f"Données collectées depuis {max(1, hours_collected)}h — historisation en cours",
+                "confidence": "none",
+                "raw": {
+                    "used_percent": used_percent,
+                    "free_gb": round(free_gb, 1),
+                    "growth_gb_per_day": 0.0,
+                    "hours_collected": hours_collected,
+                },
+            }
+
+        # Calculate slope (GB per day)
+        t0 = snapshots[0]["collected_at"]
+        x = [(s["collected_at"] - t0) / 86400.0 for s in snapshots]
+        y = [s["disk_used_bytes"] / (1024**3) for s in snapshots]
+
+        n = len(snapshots)
+        sum_x = sum(x)
+        sum_y = sum(y)
+        sum_xx = sum(xi * xi for xi in x)
+        sum_xy = sum(xi * yi for xi, yi in zip(x, y))
+
+        denominator = n * sum_xx - sum_x * sum_x
+        slope = 0.0
+        if abs(denominator) > 1e-6:
+            slope = (n * sum_xy - sum_x * sum_y) / denominator
+            if slope < 0.0:
                 slope = 0.0
 
-        if slope > 0.01:  # Growth rate of at least 10 MB per day
-            days_left = free_gb / slope
+        # Check stability / trend
+        if slope <= 0.01:
+            return {
+                "type": "disk",
+                "severity": "ok",
+                "icon": "✅",
+                "headline": "Disque stable",
+                "detail": "Plus de 6 mois d'autonomie restants",
+                "confidence": "high" if timespan >= 86400 else "medium",
+                "raw": {
+                    "used_percent": used_percent,
+                    "free_gb": round(free_gb, 1),
+                    "growth_gb_per_day": round(slope, 3),
+                },
+            }
 
-            if days_left < 14:
-                severity = "critical"
-                icon = "🚨"
-            elif days_left < 60:
-                severity = "warning"
-                icon = "⚠️"
-            else:
-                severity = "ok"
-                icon = "✅"
+        days_left = free_gb / slope
 
-            # Human friendly time estimation
-            if days_left < 1:
-                headline = "Disque plein dans moins d'un jour !"
-            elif days_left < 7:
-                headline = f"Disque plein dans ~{round(days_left)} jours"
-            else:
-                weeks = int(days_left / 7)
-                days = int(days_left % 7)
-                if weeks < 5:
-                    day_str = f" et {days}j" if days > 0 else ""
-                    headline = f"Disque plein dans {weeks} sem{day_str}"
-                else:
-                    months = int(days_left / 30)
-                    headline = f"Disque plein dans ~{months} mois"
+        # Case 2: Early estimation (6h to < 24h)
+        if timespan < 86400:
+            confidence = "medium"
+            # Priority Exception Rule: If early estimation predicts saturation within 24h (< 1 day)
+            if days_left < 1.0:
+                growth_gb_h = slope / 24.0
+                return {
+                    "type": "disk",
+                    "severity": "critical",
+                    "icon": "🚨",
+                    "headline": "Risque de saturation aujourd’hui — estimation à confirmer",
+                    "detail": f"Données collectées depuis {hours_collected} h, croissance actuelle : +{growth_gb_h:.2f} Go/h",
+                    "confidence": "medium",
+                    "raw": {
+                        "used_percent": used_percent,
+                        "free_gb": round(free_gb, 1),
+                        "growth_gb_per_day": round(slope, 3),
+                        "days_left": round(days_left, 1),
+                        "hours_collected": hours_collected,
+                    },
+                }
 
-            detail = f"Taux de croissance de +{slope:.2f} Go / jour"
-        else:
-            severity = "ok"
-            icon = "✅"
-            headline = "Disque stable"
-            detail = "Plus de 6 mois d'autonomie restants"
+            # Normal early estimation
+            days_int = max(1, round(days_left))
+            action_before = max(1, days_int - safety_margin_days)
+            severity = "critical" if days_left < 14 else ("warning" if days_left < 60 else "ok")
+            icon = "🚨" if severity == "critical" else ("⚠️" if severity == "warning" else "✅")
+            return {
+                "type": "disk",
+                "severity": severity,
+                "icon": icon,
+                "headline": f"Environ {days_int} jours — confiance moyenne",
+                "detail": f"Taux de croissance de +{slope:.2f} Go/jour · À prévoir avant : dans {action_before} jours",
+                "confidence": "medium",
+                "raw": {
+                    "used_percent": used_percent,
+                    "free_gb": round(free_gb, 1),
+                    "growth_gb_per_day": round(slope, 3),
+                    "days_left": days_int,
+                    "action_before_days": action_before,
+                    "hours_collected": hours_collected,
+                },
+            }
+
+        # Case 3: Reliable estimation (>= 24h)
+        confidence = "high"
+        days_int = max(1, round(days_left))
+        action_before = max(1, days_int - safety_margin_days)
+        severity = "critical" if days_left < 14 else ("warning" if days_left < 60 else "ok")
+        icon = "🚨" if severity == "critical" else ("⚠️" if severity == "warning" else "✅")
 
         return {
             "type": "disk",
             "severity": severity,
             "icon": icon,
-            "headline": headline,
-            "detail": detail,
+            "headline": f"Saturation estimée dans {days_int} jours",
+            "detail": f"Taux de croissance de +{slope:.2f} Go/jour · À prévoir avant : dans {action_before} jours",
+            "confidence": "high",
             "raw": {
                 "used_percent": used_percent,
                 "free_gb": round(free_gb, 1),
                 "growth_gb_per_day": round(slope, 3),
+                "days_left": days_int,
+                "action_before_days": action_before,
+                "hours_collected": hours_collected,
             },
         }
 

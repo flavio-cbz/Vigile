@@ -32,6 +32,10 @@ from master.api.rate_limits import WORKER_CONTROL_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
 from master.core.rate_limiter import rate_limiter
+from master.core.plugin_utils import (
+    parse_worker_list,
+    parse_worker_object,
+)
 from master.core.plugin_helpers import (
     parse_container_list,
     parse_service_list,

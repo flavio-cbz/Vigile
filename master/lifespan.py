@@ -102,6 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Migrations
     await run_migrations(db)
 
+    # Ensure default plugins are always enabled (idempotent upsert)
+    from master.db.migrations import _seed_default_plugins
+    await _seed_default_plugins(db)
+
     # Reset any nodes left in CONNECTED, ENROLLING, or RECONNECTING states to LOST on startup
     async with transaction(db):
         await db.execute(

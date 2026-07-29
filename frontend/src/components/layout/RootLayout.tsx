@@ -6,6 +6,7 @@ import { CopilotPanel } from '../copilot/CopilotPanel';
 import { ToastContainer } from '../ui/ToastContainer';
 import { CommandPalette } from '../ui/CommandPalette';
 import { AddNodeModal } from '../modals/AddNodeModal';
+import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useAuthStore } from '../../store/authStore';
 import { api } from '../../hooks/useApi';
@@ -46,7 +47,9 @@ export const RootLayout: React.FC = () => {
         </main>
       </div>
 
-      <CopilotPanel />
+      <ErrorBoundary>
+        <CopilotPanel />
+      </ErrorBoundary>
       <ToastContainer />
       <CommandPalette />
 

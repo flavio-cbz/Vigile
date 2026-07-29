@@ -95,20 +95,35 @@ export const MetricChart: React.FC<MetricChartProps> = ({
   const Icon = cfg.icon;
   const isDisk = metric === 'disk';
 
+  const values = mappedHistory.map((p) => (metric === 'cpu' ? p.cpu : metric === 'ram' ? p.ram : p.disk));
+  const maxVal = values.length > 0 ? Math.max(...values).toFixed(1) : '0.0';
+  const avgVal = values.length > 0 ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1) : '0.0';
+  const firstVal = values.length > 0 ? values[0] : 0;
+  const lastVal = values.length > 0 ? values[values.length - 1] : 0;
+  const delta = lastVal - firstVal;
+  const deltaStr = Math.abs(delta).toFixed(1);
+  const trendText = delta > 1.0 ? `hausse de ${deltaStr} points` : delta < -1.0 ? `baisse de ${deltaStr} points` : 'stable';
+  const summaryPhrase = `Pic à ${maxVal}%, moyenne ${avgVal}%, ${trendText}`;
+
   return (
     <div className="p-5 border border-border rounded-2xl bg-surface/30 flex flex-col gap-4 backdrop-blur-sm relative overflow-hidden">
       <div className={`absolute top-0 left-0 w-full h-[3px] ${cfg.borderColor}`} />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className={`w-4 h-4 ${cfg.iconColor}`} />
-          <span className="font-interface font-black text-xs uppercase tracking-widest text-text-1">
-            {localT(cfg.titleFr, cfg.titleEn)}
-          </span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon className={`w-4 h-4 ${cfg.iconColor}`} />
+            <span className="font-interface font-black text-xs uppercase tracking-widest text-text-1">
+              {localT(cfg.titleFr, cfg.titleEn)}
+            </span>
+          </div>
+          <p className="text-[11px] font-mono text-text-3 mt-1">
+            {summaryPhrase}
+          </p>
         </div>
         {focusedMetric === metric && (
           <button
             onClick={() => onSetFocusedMetric('all')}
-            className="px-2 py-1 text-[9px] font-interface font-bold border border-border hover:border-accent hover:text-accent rounded transition-all cursor-pointer"
+            className="px-2 py-1 text-[9px] font-interface font-bold border border-border hover:border-accent hover:text-accent rounded transition-all cursor-pointer self-start sm:self-auto"
           >
             {localT('RETOUR AUX AUTRES', 'BACK TO OVERVIEW')}
           </button>

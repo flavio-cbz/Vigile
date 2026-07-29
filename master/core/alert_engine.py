@@ -25,6 +25,9 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
+from master.core.lock import LoopBoundLock
+from master.db.database import transaction
+
 logger = logging.getLogger(__name__)
 
 
@@ -193,11 +196,17 @@ class AlertEngine:
         # Dernière métrique connue par nœud (pour les dérivées)
         self._last_snapshot: dict[str, dict[str, Any]] = {}
         # Compteur d'échecs d'intents par nœud (rolling window)
-        self._intent_failures: dict[str, list[float]] = defaultdict(list)
+        self._intent_failures: dict[str, list[tuple[float, bool]]] = defaultdict(list)
         # Compteur de reconnexions pour le flapping
         self._reconnect_counts: dict[str, list[float]] = defaultdict(list)
         # Verrou pour les accès concurrents
-        self._lock = asyncio.Lock()
+        self._lock = LoopBoundLock()
+        # Background task supervision
+        self._background_tasks: set[asyncio.Task] = set()
+        # Rate limiting for alert firing (sliding window per node_id:alert_name)
+        self._alert_rate_limiter: dict[str, list[float]] = defaultdict(list)
+        self._alert_rate_limit_window: float = 60.0
+        self._alert_rate_limit_max: int = 10
 
     async def initialize(self, db: Any) -> None:
         """Charge les alertes non résolues depuis la base au démarrage."""
@@ -436,17 +445,16 @@ class AlertEngine:
         cutoff = now - 3600
 
         async with self._lock:
-            self._intent_failures[node_id].append(now if not success else (-now))
+            self._intent_failures[node_id].append((now, success))
             # Nettoyage de la fenêtre glissante
             self._intent_failures[node_id] = [
-                t for t in self._intent_failures[node_id]
-                if abs(t) > cutoff
+                (t, s) for t, s in self._intent_failures[node_id] if t > cutoff
             ]
 
             total = len(self._intent_failures[node_id])
             if total == 0:
                 return
-            failed = sum(1 for t in self._intent_failures[node_id] if t > 0)
+            failed = sum(1 for _, s in self._intent_failures[node_id] if not s)
             rate = failed / total
 
             if rate > 0.20 and total >= 5:
@@ -484,24 +492,31 @@ class AlertEngine:
             logger.warning("AlertEngine: no DB — cannot fire alert '%s'", alert_name)
             return None
 
+        # Rate limiting: prevent alert storms
+        if self._is_rate_limited(node_id, alert_name):
+            logger.debug(
+                "AlertEngine: rate-limited alert '%s' for node %s", alert_name, node_id
+            )
+            return None
+
         alert_id = str(uuid.uuid4())
         now = time.time()
         details_json = json.dumps(details or {})
 
         try:
-            await db.execute(
-                """INSERT INTO alerts
-                   (id, node_id, alert_name, severity, status, message,
-                    metric_value, threshold, details_json,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, 'firing', ?, ?, ?, ?, ?, ?)""",
-                (
-                    alert_id, node_id, alert_name, severity, message,
-                    metric_value, threshold, details_json,
-                    now, now,
-                ),
-            )
-            await db.commit()
+            async with transaction(db) as tx_db:
+                await tx_db.execute(
+                    """INSERT INTO alerts
+                       (id, node_id, alert_name, severity, status, message,
+                        metric_value, threshold, details_json,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'firing', ?, ?, ?, ?, ?, ?)""",
+                    (
+                        alert_id, node_id, alert_name, severity, message,
+                        metric_value, threshold, details_json,
+                        now, now,
+                    ),
+                )
         except Exception as exc:
             logger.error("AlertEngine: failed to persist alert '%s': %s", alert_name, exc)
             return None
@@ -518,9 +533,9 @@ class AlertEngine:
             alert_name.upper(), severity.upper(), node_id[:12], message,
         )
 
-        # Notify investigation manager (fire-and-forget)
+        # Notify investigation manager (supervised task)
         if self.on_alert_fired_callback is not None:
-            asyncio.create_task(
+            self._spawn_task(
                 self.on_alert_fired_callback(
                     node_id=node_id,
                     alert_name=alert_name,
@@ -533,9 +548,9 @@ class AlertEngine:
                 name=f"investigation:{alert_name}:{alert_id[:12]}",
             )
 
-        # Notify automation engine for alert-based rules
+        # Notify automation engine for alert-based rules (supervised task)
         if self.on_automation_alert_callback is not None:
-            asyncio.create_task(
+            self._spawn_task(
                 self.on_automation_alert_callback(
                     node_id=node_id,
                     alert_name=alert_name,
@@ -564,12 +579,12 @@ class AlertEngine:
 
         now = time.time()
         try:
-            await db.execute(
-                "UPDATE alerts SET status = 'resolved', resolved_at = ?, updated_at = ? "
-                "WHERE id = ? AND status = 'firing'",
-                (now, now, current["id"]),
-            )
-            await db.commit()
+            async with transaction(db) as tx_db:
+                await tx_db.execute(
+                    "UPDATE alerts SET status = 'resolved', resolved_at = ?, updated_at = ? "
+                    "WHERE id = ? AND status = 'firing'",
+                    (now, now, current["id"]),
+                )
         except Exception as exc:
             logger.error("AlertEngine: failed to resolve alert '%s': %s", alert_name, exc)
             return
@@ -583,6 +598,92 @@ class AlertEngine:
         )
 
     # -------------------------------------------------------------------
+    # Rate limiting
+    # -------------------------------------------------------------------
+
+    def _is_rate_limited(self, node_id: str, alert_name: str) -> bool:
+        """Check if alert firing is rate-limited for this node+alert combo."""
+        key = f"{node_id}:{alert_name}"
+        now = time.time()
+        timestamps = self._alert_rate_limiter[key]
+        self._alert_rate_limiter[key] = [
+            t for t in timestamps if now - t < self._alert_rate_limit_window
+        ]
+        if len(self._alert_rate_limiter[key]) >= self._alert_rate_limit_max:
+            return True
+        self._alert_rate_limiter[key].append(now)
+        return False
+
+    # -------------------------------------------------------------------
+    # Task supervision
+    # -------------------------------------------------------------------
+
+    def _spawn_task(self, coro: Any, name: str) -> asyncio.Task:
+        """Spawn a supervised background task tracked for graceful shutdown."""
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def ensure_tasks_complete(self, timeout: float = 30.0) -> None:
+        """Wait for all background tasks to complete (graceful shutdown)."""
+        if not self._background_tasks:
+            return
+        done, pending = await asyncio.wait(
+            self._background_tasks, timeout=timeout
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=5.0)
+        self._background_tasks.clear()
+        logger.info("AlertEngine: %d background task(s) completed.", len(done))
+
+    # -------------------------------------------------------------------
+    # Orphan cleanup
+    # -------------------------------------------------------------------
+
+    async def cleanup_orphaned_alerts(self, db: Any = None) -> int:
+        """Remove alerts and in-memory state for nodes that no longer exist."""
+        db = db or self._db
+        if db is None:
+            return 0
+        try:
+            async with transaction(db) as tx_db:
+                cursor = await tx_db.execute(
+                    "DELETE FROM alerts WHERE node_id NOT IN (SELECT id FROM nodes)"
+                )
+                deleted = cursor.rowcount or 0
+        except Exception as exc:
+            logger.error("AlertEngine: orphan cleanup failed: %s", exc)
+            return 0
+
+        # Clean in-memory state
+        async with self._lock:
+            valid_node_ids: set[str] = set()
+            try:
+                async with db.execute("SELECT id FROM nodes") as cursor:
+                    valid_node_ids = {row["id"] for row in await cursor.fetchall()}
+            except Exception:
+                pass
+            orphaned = [
+                nid for nid in list(self._active_alerts.keys())
+                if nid not in valid_node_ids
+            ]
+            for nid in orphaned:
+                del self._active_alerts[nid]
+            # Also clean rate limiter and intent failures
+            for nid in orphaned:
+                self._alert_rate_limiter.pop(nid, None)
+                self._intent_failures.pop(nid, None)
+                self._reconnect_counts.pop(nid, None)
+                self._last_snapshot.pop(nid, None)
+
+        if deleted:
+            logger.info("AlertEngine: purged %d orphaned alert(s).", deleted)
+        return deleted
+
+    # -------------------------------------------------------------------
     # Nettoyage périodique
     # -------------------------------------------------------------------
 
@@ -593,12 +694,12 @@ class AlertEngine:
             return 0
         cutoff = time.time() - 7 * 86400
         try:
-            cursor = await db.execute(
-                "DELETE FROM alerts WHERE status = 'resolved' AND resolved_at < ?",
-                (cutoff,),
-            )
-            await db.commit()
-            deleted = cursor.rowcount or 0
+            async with transaction(db) as tx_db:
+                cursor = await tx_db.execute(
+                    "DELETE FROM alerts WHERE status = 'resolved' AND resolved_at < ?",
+                    (cutoff,),
+                )
+                deleted = cursor.rowcount or 0
             if deleted:
                 logger.info("AlertEngine: purged %d old resolved alert(s).", deleted)
             return deleted

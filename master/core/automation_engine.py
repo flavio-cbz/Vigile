@@ -22,19 +22,24 @@ Action types:
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import aiosqlite
 import httpx
 
 from master.core.action_proposal import ActionProposal
 from master.core.audit import AuditAction, log_action
+from master.core.lock import LoopBoundLock
 from master.core.node_manager import node_manager
+from master.db.database import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +105,16 @@ class AutomationEngine:
     def __init__(self) -> None:
         # List of active rule dicts loaded from DB
         self._rules: list[dict[str, Any]] = []
-        self._lock = asyncio.Lock()
+        self._lock = LoopBoundLock()
         # In-memory cooldown tracking: "{rule_id}:{node_id}" -> last_triggered_at
         self._cooldowns: dict[str, float] = {}
+        # Background task supervision
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def initialize(self, db: aiosqlite.Connection) -> None:
         """Load all enabled rules from DB into memory. Called at startup."""
         await self.reload_rules(db)
+        await self._load_cooldowns(db)
         logger.info("AutomationEngine initialized with %d rule(s).", len(self._rules))
 
     async def reload_rules(self, db: aiosqlite.Connection) -> None:
@@ -131,6 +139,79 @@ class AutomationEngine:
             self._rules = rules
 
         logger.debug("AutomationEngine: loaded %d rule(s).", len(rules))
+
+    # -----------------------------------------------------------------------
+    # Cooldown persistence
+    # -----------------------------------------------------------------------
+
+    async def _load_cooldowns(self, db: aiosqlite.Connection) -> None:
+        """Load persisted cooldown state from DB on startup."""
+        try:
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS automation_cooldowns ("
+                "  rule_id TEXT NOT NULL,"
+                "  node_id TEXT NOT NULL,"
+                "  last_triggered_at REAL NOT NULL,"
+                "  PRIMARY KEY (rule_id, node_id)"
+                ")"
+            )
+            await db.commit()
+
+            async with db.execute(
+                "SELECT rule_id, node_id, last_triggered_at FROM automation_cooldowns"
+            ) as cursor:
+                rows = list(await cursor.fetchall())
+            for row in rows:
+                key = f"{row['rule_id']}:{row['node_id']}"
+                self._cooldowns[key] = row["last_triggered_at"]
+            if rows:
+                logger.debug(
+                    "AutomationEngine: restored %d cooldown state(s) from DB.", len(rows)
+                )
+        except Exception:
+            logger.exception("Failed to load cooldowns from DB")
+
+    async def _persist_cooldown(
+        self, rule_id: str, node_id: str, db: aiosqlite.Connection
+    ) -> None:
+        """Persist cooldown state to DB using upsert."""
+        now = time.time()
+        try:
+            async with transaction(db) as tx_db:
+                await tx_db.execute(
+                    "INSERT INTO automation_cooldowns "
+                    "(rule_id, node_id, last_triggered_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(rule_id, node_id) DO UPDATE SET "
+                    "last_triggered_at = ?",
+                    (rule_id, node_id, now, now),
+                )
+        except Exception:
+            logger.exception("Failed to persist cooldown for rule %s", rule_id)
+
+    # -----------------------------------------------------------------------
+    # Task supervision
+    # -----------------------------------------------------------------------
+
+    def _spawn_task(self, coro: Any, name: str) -> asyncio.Task:
+        """Spawn a supervised background task tracked for graceful shutdown."""
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def ensure_tasks_complete(self, timeout: float = 30.0) -> None:
+        """Wait for all background tasks to complete (graceful shutdown)."""
+        if not self._background_tasks:
+            return
+        done, pending = await asyncio.wait(
+            self._background_tasks, timeout=timeout
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=5.0)
+        self._background_tasks.clear()
+        logger.info("AutomationEngine: %d background task(s) completed.", len(done))
 
     # -----------------------------------------------------------------------
     # Trigger evaluation — hooked via plugin_manager "on_status_report"
@@ -158,7 +239,7 @@ class AutomationEngine:
             if not self._evaluate_metric_trigger_config(rule["trigger_config"], snapshot):
                 continue
             # Fire asynchronously to not block the status report path
-            asyncio.create_task(
+            self._spawn_task(
                 self._fire_rule(rule, node_id, {"snapshot": snapshot}, db),
                 name=f"automation:{rule['id']}",
             )
@@ -186,7 +267,7 @@ class AutomationEngine:
                 continue
             if not self._matches_node_scope(rule, node_id, {}):
                 continue
-            asyncio.create_task(
+            self._spawn_task(
                 self._fire_rule(rule, node_id, {"new_state": state_value}, db),
                 name=f"automation:{rule['id']}",
             )
@@ -250,7 +331,7 @@ class AutomationEngine:
                 "window_seconds": window,
             }
             if self._evaluate_intent_failure(rule, context):
-                asyncio.create_task(
+                self._spawn_task(
                     self._fire_rule(rule, node_id, context, db),
                     name=f"automation:{rule['id']}",
                 )
@@ -276,7 +357,7 @@ class AutomationEngine:
 
             context = {"event": event, "node_id": node_id}
             if self._evaluate_node_health(rule, context):
-                asyncio.create_task(
+                self._spawn_task(
                     self._fire_rule(rule, node_id, context, db),
                     name=f"automation:{rule['id']}",
                 )
@@ -302,7 +383,7 @@ class AutomationEngine:
 
             context = {"action": action, "node_id": node_id}
             if self._evaluate_audit_alert(rule, context):
-                asyncio.create_task(
+                self._spawn_task(
                     self._fire_rule(rule, node_id or "", context, db),
                     name=f"automation:{rule['id']}",
                 )
@@ -336,7 +417,7 @@ class AutomationEngine:
                 "severity": severity,
                 "node_id": node_id,
             }
-            asyncio.create_task(
+            self._spawn_task(
                 self._fire_rule(rule, node_id, context, db),
                 name=f"automation:{rule['id']}",
             )
@@ -504,6 +585,7 @@ class AutomationEngine:
 
         # --- Mark cooldown before executing to prevent parallel fires ---
         self._set_cooldown(rule_id, node_id)
+        await self._persist_cooldown(rule_id, node_id, db)
 
         logger.info(
             "Automation rule '%s' (%s) triggered on node %s.",
@@ -563,6 +645,23 @@ class AutomationEngine:
         else:
             raise ValueError(f"Unknown action type: {atype!r}")
 
+    async def _persist_proposal_update(
+        self, proposal: ActionProposal, db: aiosqlite.Connection
+    ) -> None:
+        """Persist proposal state update using transaction context."""
+        db_data = proposal.to_db_dict()
+        async with transaction(db) as tx_db:
+            await tx_db.execute(
+                """UPDATE action_proposals SET
+                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
+                   WHERE id = ?""",
+                (
+                    db_data["status"], db_data["updated_at"],
+                    db_data["executed_at"], db_data["result_json"],
+                    proposal.id,
+                ),
+            )
+
     async def _execute_send_intent(
         self, action: dict, node_id: str, db: aiosqlite.Connection,
         trust_level: str = "auto",
@@ -594,32 +693,31 @@ class AutomationEngine:
             )
 
             data = proposal.to_db_dict()
-            await db.execute(
-                """INSERT INTO action_proposals
-                   (id, node_id, action, params_json, reasoning, risk_level,
-                    status, created_by, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    data["id"], data["node_id"], data["action"], data["params_json"],
-                    data["reasoning"], data["risk_level"],
-                    data["status"], data["created_by"],
-                    data["created_at"], data["updated_at"],
-                ),
-            )
-            await db.commit()
-
-            await log_action(
-                db,
-                user_id="system",
-                action=AuditAction.AUTOMATION_TRIGGERED,
-                node_id=node_id,
-                details={
-                    "proposal_id": proposal.id,
-                    "action": intent_action,
-                    "trust_level": trust_level,
-                    "status": "PENDING_APPROVAL",
-                },
-            )
+            async with transaction(db) as tx_db:
+                await tx_db.execute(
+                    """INSERT INTO action_proposals
+                       (id, node_id, action, params_json, reasoning, risk_level,
+                        status, created_by, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        data["id"], data["node_id"], data["action"], data["params_json"],
+                        data["reasoning"], data["risk_level"],
+                        data["status"], data["created_by"],
+                        data["created_at"], data["updated_at"],
+                    ),
+                )
+                await log_action(
+                    tx_db,
+                    user_id="system",
+                    action=AuditAction.AUTOMATION_TRIGGERED,
+                    node_id=node_id,
+                    details={
+                        "proposal_id": proposal.id,
+                        "action": intent_action,
+                        "trust_level": trust_level,
+                        "status": "PENDING_APPROVAL",
+                    },
+                )
 
             return {"status": "pending_approval", "proposal_id": proposal.id}
 
@@ -635,19 +733,19 @@ class AutomationEngine:
         )
 
         data = proposal.to_db_dict()
-        await db.execute(
-            """INSERT INTO action_proposals
-               (id, node_id, action, params_json, reasoning, risk_level,
-                status, created_by, approved_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                data["id"], data["node_id"], data["action"], data["params_json"],
-                data["reasoning"], data["risk_level"],
-                data["status"], data["created_by"], data["approved_by"],
-                data["created_at"], data["updated_at"],
-            ),
-        )
-        await db.commit()
+        async with transaction(db) as tx_db:
+            await tx_db.execute(
+                """INSERT INTO action_proposals
+                   (id, node_id, action, params_json, reasoning, risk_level,
+                    status, created_by, approved_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["id"], data["node_id"], data["action"], data["params_json"],
+                    data["reasoning"], data["risk_level"],
+                    data["status"], data["created_by"], data["approved_by"],
+                    data["created_at"], data["updated_at"],
+                ),
+            )
 
         try:
             result = await node_manager.send_intent(
@@ -658,18 +756,7 @@ class AutomationEngine:
             success = result.get("success", False)
             proposal.complete(success=success, result_data=result)
 
-            db_data = proposal.to_db_dict()
-            await db.execute(
-                """UPDATE action_proposals SET
-                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
-                   WHERE id = ?""",
-                (
-                    db_data["status"], db_data["updated_at"],
-                    db_data["executed_at"], db_data["result_json"],
-                    proposal.id,
-                ),
-            )
-            await db.commit()
+            await self._persist_proposal_update(proposal, db)
 
             await log_action(
                 db,
@@ -687,34 +774,38 @@ class AutomationEngine:
             return result
         except RuntimeError as exc:
             proposal.complete(success=False, result_data={"error": str(exc)})
-            db_data = proposal.to_db_dict()
-            await db.execute(
-                """UPDATE action_proposals SET
-                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
-                   WHERE id = ?""",
-                (
-                    db_data["status"], db_data["updated_at"],
-                    db_data["executed_at"], db_data["result_json"],
-                    proposal.id,
-                ),
-            )
-            await db.commit()
+            await self._persist_proposal_update(proposal, db)
             return {"success": False, "error": str(exc)}
         except TimeoutError:
             proposal.complete(success=False, result_data={"error": "worker_timeout"})
-            db_data = proposal.to_db_dict()
-            await db.execute(
-                """UPDATE action_proposals SET
-                    status = ?, updated_at = ?, executed_at = ?, result_json = ?
-                   WHERE id = ?""",
-                (
-                    db_data["status"], db_data["updated_at"],
-                    db_data["executed_at"], db_data["result_json"],
-                    proposal.id,
-                ),
-            )
-            await db.commit()
+            await self._persist_proposal_update(proposal, db)
             return {"success": False, "error": "Worker did not respond in time"}
+
+    @staticmethod
+    def _is_safe_webhook_url(url: str) -> bool:
+        """Validate URL to prevent SSRF attacks."""
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return False
+        if parsed.scheme not in ("http", "https"):
+            return False
+        if not parsed.hostname:
+            return False
+        try:
+            ip = ipaddress.ip_address(parsed.hostname)
+            if (
+                ip.is_loopback
+                or ip.is_private
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+            ):
+                return False
+        except ValueError:
+            if parsed.hostname in ("metadata.google.internal", "169.254.169.254"):
+                return False
+        return True
 
     async def _execute_call_webhook(self, action: dict, node_id: str, trigger_data: dict) -> dict:
         """HTTP POST to an external webhook URL."""
@@ -722,16 +813,25 @@ class AutomationEngine:
         if not url:
             raise ValueError("call_webhook action missing 'url' field.")
 
+        if not self._is_safe_webhook_url(url):
+            raise ValueError(f"Webhook URL blocked by SSRF protection: {url}")
+
         headers = action.get("headers", {})
         if not isinstance(headers, dict):
             headers = {}
         headers.setdefault("Content-Type", "application/json")
 
-        # Build body from template if provided
         body_template = action.get("body_template", "{}")
         try:
-            body_str = body_template.replace("{node_id}", str(node_id)).replace(
-                "{trigger_data}", json.dumps(trigger_data)
+            placeholders = set(re.findall(r"\{(\w+)\}", body_template))
+            allowed = {"node_id", "trigger_data"}
+            if not placeholders.issubset(allowed):
+                raise ValueError(
+                    f"Unknown placeholders in body_template: {placeholders - allowed}"
+                )
+            body_str = body_template.format(
+                node_id=str(node_id),
+                trigger_data=json.dumps(trigger_data),
             )
             body = json.loads(body_str)
         except Exception:
@@ -754,21 +854,21 @@ class AutomationEngine:
         try:
             entry_id = str(uuid.uuid4())
             now = time.time()
-            await db.execute(
-                """INSERT INTO automation_logs
-                   (id, rule_id, node_id, triggered_at, status, trigger_data_json, result_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    entry_id,
-                    rule_id,
-                    node_id,
-                    now,
-                    status,
-                    json.dumps(trigger_data),
-                    json.dumps(result),
-                ),
-            )
-            await db.commit()
+            async with transaction(db) as tx_db:
+                await tx_db.execute(
+                    """INSERT INTO automation_logs
+                       (id, rule_id, node_id, triggered_at, status, trigger_data_json, result_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        entry_id,
+                        rule_id,
+                        node_id,
+                        now,
+                        status,
+                        json.dumps(trigger_data),
+                        json.dumps(result),
+                    ),
+                )
         except Exception:
             logger.exception("Failed to write automation log for rule %s.", rule_id)
 

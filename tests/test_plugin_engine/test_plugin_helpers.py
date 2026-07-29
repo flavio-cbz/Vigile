@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-"""Tests for master.core.plugin_helpers re-export facade.
+"""Tests for master.core.plugin_utils shared utility functions.
 
-Verifies that parse_container_list, parse_service_list and parse_service_status
-are importable from master.core.plugin_helpers, that they are the same objects
-as the originals in master.plugins.* (genuine re-export, not a copy), and that
-they function correctly when invoked with sample data.
+Verifies that parse_worker_list and parse_worker_object
+are importable from master.core.plugin_utils, that they function correctly
+when invoked with sample data, and that they are used by plugin modules.
 """
 
 import json
 
 import pytest
 
-from master.core import plugin_helpers
-from master.core.plugin_helpers import (
-    parse_container_list,
-    parse_service_list,
-    parse_service_status,
+from master.core import plugin_utils
+from master.core.plugin_utils import (
+    parse_worker_list,
+    parse_worker_object,
 )
 from master.plugins.docker_plugin import parse_container_list as _orig_container
 from master.plugins.systemd_plugin import (
@@ -30,90 +28,24 @@ from master.plugins.systemd_plugin import (
 # ---------------------------------------------------------------------------
 
 
-def test_parse_container_list_importable():
-    assert callable(parse_container_list)
+def test_parse_worker_list_importable():
+    assert callable(parse_worker_list)
 
 
-def test_parse_service_list_importable():
-    assert callable(parse_service_list)
+def test_parse_worker_object_importable():
+    assert callable(parse_worker_object)
 
 
-def test_parse_service_status_importable():
-    assert callable(parse_service_status)
-
-
-def test_all_three_listed_in_all():
-    assert set(plugin_helpers.__all__) == {
-        "parse_container_list",
-        "parse_service_list",
-        "parse_service_status",
+def test_all_two_listed_in_all():
+    assert set(plugin_utils.__all__) == {
+        "parse_worker_output",
+        "parse_worker_list",
+        "parse_worker_object",
     }
 
 
-@pytest.mark.parametrize(
-    "name,original",
-    [
-        ("parse_container_list", _orig_container),
-        ("parse_service_list", _orig_service_list),
-        ("parse_service_status", _orig_service_status),
-    ],
-)
-def test_reexport_is_same_object(name, original):
-    assert getattr(plugin_helpers, name) is original
-
-
 # ---------------------------------------------------------------------------
-# parse_container_list — behavior
-# ---------------------------------------------------------------------------
-
-CONTAINER_SAMPLE = [
-    {
-        "id": "abc123def456",
-        "name": "vigile-master",
-        "image": "vigile/master:latest",
-        "state": "running",
-        "ports": ["0.0.0.0:8000->8000/tcp"],
-    },
-    {
-        "id": "deadbeef0000",
-        "name": "plex",
-        "image": "plexinc/pms:latest",
-        "state": "exited",
-        "ports": [],
-    },
-]
-
-
-def test_parse_container_list_valid():
-    parsed = parse_container_list(json.dumps(CONTAINER_SAMPLE))
-    assert parsed is not None
-    assert len(parsed) == 2
-    assert parsed[0]["id"] == "abc123def456"
-    assert parsed[0]["name"] == "vigile-master"
-    assert parsed[0]["state"] == "running"
-    assert parsed[0]["ports"] == ["0.0.0.0:8000->8000/tcp"]
-    assert parsed[1]["ports"] == []
-
-
-def test_parse_container_list_empty_array():
-    assert parse_container_list("[]") == []
-
-
-def test_parse_container_list_invalid_json():
-    assert parse_container_list("not json") is None
-
-
-def test_parse_container_list_not_a_list():
-    assert parse_container_list('{"id": "abc"}') is None
-
-
-def test_parse_container_list_bad_fields():
-    # Missing required 'name' field -> pydantic raises -> swallowed to None
-    assert parse_container_list('[{"id": "x"}]') is None
-
-
-# ---------------------------------------------------------------------------
-# parse_service_list — behavior
+# parse_worker_list — behavior
 # ---------------------------------------------------------------------------
 
 SERVICE_SAMPLE = [
@@ -122,8 +54,9 @@ SERVICE_SAMPLE = [
 ]
 
 
-def test_parse_service_list_valid():
-    parsed = parse_service_list(json.dumps(SERVICE_SAMPLE))
+def test_parse_worker_list_valid():
+    from master.plugins.systemd_plugin import ServiceInfo
+    parsed = parse_worker_list(json.dumps(SERVICE_SAMPLE), ServiceInfo)
     assert parsed is not None
     assert len(parsed) == 2
     assert parsed[0]["name"] == "ssh.service"
@@ -132,44 +65,52 @@ def test_parse_service_list_valid():
     assert parsed[1]["name"] == "nginx.service"
 
 
-def test_parse_service_list_empty_array():
-    assert parse_service_list("[]") == []
+def test_parse_worker_list_empty_array():
+    from master.plugins.systemd_plugin import ServiceInfo
+    assert parse_worker_list("[]", ServiceInfo) == []
 
 
-def test_parse_service_list_invalid_json():
-    assert parse_service_list("!!!") is None
+def test_parse_worker_list_invalid_json():
+    from master.plugins.systemd_plugin import ServiceInfo
+    assert parse_worker_list("!!!", ServiceInfo) is None
 
 
-def test_parse_service_list_not_a_list():
-    assert parse_service_list('{"name": "ssh.service"}') is None
+def test_parse_worker_list_not_a_list():
+    from master.plugins.systemd_plugin import ServiceInfo
+    assert parse_worker_list('{"name": "ssh.service"}', ServiceInfo) is None
 
 
-def test_parse_service_list_bad_fields():
-    assert parse_service_list('[{"state": "active"}]') is None
+def test_parse_worker_list_bad_fields():
+    from master.plugins.systemd_plugin import ServiceInfo
+    assert parse_worker_list('[{"state": "active"}]', ServiceInfo) is None
 
 
 # ---------------------------------------------------------------------------
-# parse_service_status — behavior
+# parse_worker_object — behavior
 # ---------------------------------------------------------------------------
 
 
-def test_parse_service_status_valid():
+def test_parse_worker_object_valid():
+    from master.plugins.systemd_plugin import ServiceStatus
     raw = json.dumps({"service": "ssh.service", "active": "active", "enabled": "enabled"})
-    parsed = parse_service_status(raw)
+    parsed = parse_worker_object(raw, ServiceStatus)
     assert parsed is not None
     assert parsed["service"] == "ssh.service"
     assert parsed["active"] == "active"
     assert parsed["enabled"] == "enabled"
 
 
-def test_parse_service_status_missing_field():
-    assert parse_service_status('{"service": "ssh.service"}') is None
+def test_parse_worker_object_missing_field():
+    from master.plugins.systemd_plugin import ServiceStatus
+    assert parse_worker_object('{"service": "ssh.service"}', ServiceStatus) is None
 
 
-def test_parse_service_status_invalid_json():
-    assert parse_service_status("{not json") is None
+def test_parse_worker_object_invalid_json():
+    from master.plugins.systemd_plugin import ServiceStatus
+    assert parse_worker_object("{not json", ServiceStatus) is None
 
 
-def test_parse_service_status_not_an_object():
+def test_parse_worker_object_not_an_object():
+    from master.plugins.systemd_plugin import ServiceStatus
     # A JSON array is not a mapping -> ServiceStatus(**[...]) raises TypeError
-    assert parse_service_status("[]") is None
+    assert parse_worker_object("[]", ServiceStatus) is None

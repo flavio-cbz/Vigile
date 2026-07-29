@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useLocaleStore, type Locale } from '../store/localeStore';
 import { fr } from './fr';
 import { en } from './en';
@@ -21,10 +22,15 @@ export function t(key: string, variables?: Record<string, string | number>): str
 
 export function useLocale() {
   const { locale, setLocale } = useLocaleStore();
+  const tBound = useCallback(
+    (key: string, variables?: Record<string, string | number>) => translateWith(locale, key, variables),
+    [locale]
+  );
   return {
     locale,
     setLocale,
-    t: (key: string, variables?: Record<string, string | number>) => translateWith(locale, key, variables),
+    t: tBound,
   };
 }
 export type { Locale };
+

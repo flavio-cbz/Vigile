@@ -94,8 +94,9 @@ export const Sidebar: React.FC = () => {
   };
 
   const computeActive = (item: NavItem, currentTab: string | null): boolean => {
-    if (item.to === '/chat/new') return false; // handled separately
+    if (item.to === '/chat/new' || item.to === '#') return false; // handled separately
     if (item.to.includes('tab=services')) return location.pathname.includes('/nodes/') && currentTab === 'services';
+    if (item.to.includes('tab=containers')) return location.pathname.includes('/nodes/') && currentTab === 'containers';
     return item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);
   };
 
@@ -137,7 +138,12 @@ export const Sidebar: React.FC = () => {
     ];
 
     if (isPlexActive) primaryItems.push({ to: '/plugins?open=plex', label: 'Plex', icon: Play });
-    primaryItems.push({ to: '/servers', label: t('nav.docker'), icon: Container, badge: nonRunningContainerCount > 0 ? nonRunningContainerCount : undefined });
+    primaryItems.push({
+      to: activeNodeId ? `/nodes/${activeNodeId}?tab=containers` : '#',
+      label: t('nav.docker'),
+      icon: Container,
+      badge: nonRunningContainerCount > 0 ? nonRunningContainerCount : undefined,
+    });
 
     const adminItems: NavItem[] = [
       { to: '/automations', label: t('nav.automations'), icon: Zap },

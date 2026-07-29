@@ -68,9 +68,10 @@ export const CopilotPanel: React.FC = () => {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [copilotOpen, closeCopilot]);
 
-  // Abort streaming on panel close.
+  // Abort streaming & reset trigger state on panel close.
   useEffect(() => {
     if (!copilotOpen) {
+      triggerProcessedRef.current = false;
       useChatStore.getState().abortStreaming();
     }
   }, [copilotOpen]);
@@ -102,38 +103,29 @@ export const CopilotPanel: React.FC = () => {
     setupSession();
   }, [copilotOpen, nodeId, fetchSessions, selectSession, createSession, targetNode?.name, fetchSuggestions, t]);
 
+  // Track whether the diagnostic/proposal trigger has already been processed
+  // for the current panel open, to avoid infinite re-triggering when
+  // fetchSessions (called by sendMessage's finally block) updates activeSession.
+  const triggerProcessedRef = useRef(false);
+
   // Diagnostic / proposal trigger fan-out (same as original behaviour).
+  // Runs once per copilotContext set, and is immune to re-triggering when
+  // activeSession or isStreaming changes (e.g., after fetchSessions in sendMessage's finally).
   useEffect(() => {
-    if (copilotOpen && activeSession && !loadingSession && !isStreaming) {
-      const triggerDiagnostic = async () => {
-        if (copilotContext?.trigger === 'diagnostic' && copilotContext.insight) {
-          const insight = copilotContext.insight;
-          const prompt = `Fais un diagnostic détaillé de cette anomalie : "${insight.headline}". Détails : "${insight.detail}"`;
+    if (!copilotOpen || !copilotContext || triggerProcessedRef.current) return;
 
-          const alreadySent = activeSession.history?.some(
-            (msg) => msg.role === 'user' && msg.content.includes(insight.headline)
-          );
+    triggerProcessedRef.current = true;
 
-          if (!alreadySent) {
-            await sendMessage(prompt, nodeId);
-          }
-        } else if (copilotContext?.trigger === 'proposal' && copilotContext.proposal) {
-          const proposal = copilotContext.proposal;
-          const prompt = `Que penses-tu de l'action proposée : "${proposal.action}" sur "${proposal.node_id}"? Raisonnement : ${proposal.reasoning}`;
-
-          const alreadySent = activeSession.history?.some(
-            (msg) => msg.role === 'user' && msg.content.includes(proposal.action)
-          );
-
-          if (!alreadySent) {
-            await sendMessage(prompt, nodeId);
-          }
-        }
-      };
-
-      triggerDiagnostic();
+    if (copilotContext.trigger === 'diagnostic' && copilotContext.insight) {
+      const insight = copilotContext.insight;
+      const prompt = `Fais un diagnostic détaillé de cette anomalie : "${insight.headline}". Détails : "${insight.detail}"`;
+      sendMessage(prompt, nodeId);
+    } else if (copilotContext.trigger === 'proposal' && copilotContext.proposal) {
+      const proposal = copilotContext.proposal;
+      const prompt = `Que penses-tu de l'action proposée : "${proposal.action}" sur "${proposal.node_id}"? Raisonnement : ${proposal.reasoning}`;
+      sendMessage(prompt, nodeId);
     }
-  }, [copilotOpen, activeSession, loadingSession, copilotContext, sendMessage, nodeId, isStreaming]);
+  }, [copilotOpen, copilotContext, sendMessage, nodeId]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -294,30 +286,24 @@ export const CopilotPanel: React.FC = () => {
                 />
               ))}
 
-              {/* Active agent activity indicator (compact, inline). */}
+              {/* Active agent activity indicator (explicit French status) */}
               {(isStreaming || activeSteps.length > 0) && (
-                <div className="px-4 py-2 flex items-center gap-2 text-[11px] text-text-3 font-mono">
-                  {activeSteps.length > 0 ? (
-                    <>
-                      <Zap className="w-3 h-3 text-accent-info-strong" />
-                      <Terminal className="w-3 h-3 text-accent-info-strong" />
-                      <span className="inline-flex items-center gap-1">
-                        Running
-                        <code className="text-text-1 font-bold">{activeSteps[activeSteps.length - 1]}</code>
-                      </span>
-                      <span className="cp-agent-typing text-accent-info-strong ml-1">
-                        <span />
-                        <span />
-                        <span />
-                      </span>
-                    </>
-                  ) : (
-                    <span className="cp-agent-typing text-accent-info-strong">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  )}
+                <div className="px-4 py-2 flex items-center gap-2 text-[11px] text-text-2 font-mono bg-accent-info/10 border border-accent-info/20 rounded-lg mx-3 my-2">
+                  <Zap className="w-3.5 h-3.5 text-accent-info-strong animate-pulse" />
+                  <Terminal className="w-3.5 h-3.5 text-accent-info-strong" />
+                  <span className="inline-flex items-center gap-1 font-bold">
+                    Analyse en cours...
+                    {activeSteps.length > 0 && (
+                      <code className="text-text-1 font-mono text-[10px]">
+                        [{activeSteps[activeSteps.length - 1]}]
+                      </code>
+                    )}
+                  </span>
+                  <span className="cp-agent-typing text-accent-info-strong ml-auto">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 </div>
               )}
 

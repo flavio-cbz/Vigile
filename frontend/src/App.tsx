@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router';
+import { Routes, Route, Navigate, useNavigate } from 'react-router';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { RootLayout } from './components/layout/RootLayout';
 import { LoginPage } from './pages/LoginPage';
@@ -16,10 +16,14 @@ import { useEffect } from 'react';
 
 const ChatRedirect = () => {
   const openCopilot = useUiStore((s) => s.openCopilot);
+  const navigate = useNavigate();
+
   useEffect(() => {
     openCopilot({ trigger: 'manual' });
-  }, [openCopilot]);
-  return <Navigate to="/" replace />;
+    navigate('/', { replace: true });
+  }, [openCopilot, navigate]);
+
+  return null;
 };
 
 export default function App() {
@@ -45,6 +49,7 @@ export default function App() {
         <Route path="servers" element={<ServersPage />} />
         <Route path="plugins" element={<PluginsPage />} />
         <Route path="automations" element={<AutomationsPage />} />
+        <Route path="chat" element={<ChatRedirect />} />
         <Route path="chat/new" element={<ChatRedirect />} />
       </Route>
 
