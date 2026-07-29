@@ -86,14 +86,19 @@ async def test_get_node_insights_real(client: AsyncClient, db, auth_headers):
             now,
         ),
     )
-    # Insert a metrics snapshot
-    await db.execute(
-        """
-        INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds)
-        VALUES ('snap-1', ?, ?, ?, 15.0, 8589934592, 4294967296, 50.0, 0, 0, 107374182400, 21474836480, 20.0, 1000)
-        """,
-        (node_id, now, now),
-    )
+    # Insert 4 snapshots over 7 hours with stable disk usage (20 GB / 100 GB)
+    # so the disk insight reports "Disque stable" (slope near zero).
+    disk_total = 107374182400  # 100 GB
+    disk_used = 21474836480    # 20 GB (20%)
+    for i in range(4):
+        collected_at = now - (7 - i) * 7200  # 7, 5, 3, 1 hours ago
+        await db.execute(
+            """
+            INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds)
+            VALUES (?, ?, ?, ?, 15.0, 8589934592, 4294967296, 50.0, 0, 0, ?, ?, 20.0, 1000)
+            """,
+            (f"snap-{i+1}", node_id, collected_at, collected_at, disk_total, disk_used),
+        )
     await db.commit()
 
     response = await client.get(f"/api/nodes/{node_id}/insights", headers=auth_headers("operator"))

@@ -114,7 +114,9 @@ export const CopilotPanel: React.FC = () => {
   useEffect(() => {
     if (!copilotOpen || !copilotContext || triggerProcessedRef.current) return;
 
-    triggerProcessedRef.current = true;
+    // Mark as processed before conditional logic to prevent re-triggering
+    // in React StrictMode's double-invocation.
+    triggerProcessedRef.current = true; // eslint-disable-line react-hooks/immutability
 
     if (copilotContext.trigger === 'diagnostic' && copilotContext.insight) {
       const insight = copilotContext.insight;

@@ -34,6 +34,11 @@ class DatabaseConnectionPool:
     async def init(self, database_path: str, size: int = 5, timeout: float | None = None) -> None:
         self._path = database_path
         self._timeout = timeout if timeout is not None else self._timeout
+        # Recreate the queue in the current event loop to avoid
+        # "bound to a different event loop" errors after reset_db().
+        # maxsize must match pool size to avoid deadlock when size > 5.
+        self._pool = asyncio.Queue(maxsize=size)
+        self._connections = []
         for _ in range(size):
             conn = await self._create_connection()
             self._connections.append(conn)

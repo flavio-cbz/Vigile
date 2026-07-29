@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import { Spinner } from '../primitives/Spinner';
 import { useLocale } from '../../i18n';
 import type { StatsPoint, DiskMount } from './types';
+import { estimateDiskSaturation } from './diskUtils';
 import { MetricsOverview } from './MetricsOverview';
 import { MetricCharts } from './MetricCharts';
 import { MetricCards } from './MetricCards';
@@ -215,14 +216,23 @@ export const NodeDetailMetricsTab: React.FC<{
         DISK_COLORS={DISK_COLORS}
       />
 
-      {disks.length > 0 && (
-        <div className="space-y-4">
-          <h4 className="font-interface font-black text-xs uppercase tracking-widest text-text-3 px-1">
-            {t('metrics.disks_title')}
-          </h4>
-          <DiskMountCards disks={disks} />
-        </div>
-      )}
+      const enrichedDisks = useMemo(() => {
+      const estimates = estimateDiskSaturation(statsHistory.map(s => s.disks || []));
+      return disks.map(d => ({
+        ...d,
+        days_left: estimates[d.mount_point]?.days_left ?? null,
+        growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
+      }));
+    }, [disks, statsHistory]);
+
+    {enrichedDisks.length > 0 && (
+      <div className="space-y-4">
+        <h4 className="font-interface font-black text-xs uppercase tracking-widest text-text-3 px-1">
+          {t('metrics.disks_title')}
+        </h4>
+        <DiskMountCards disks={enrichedDisks} />
+      </div>
+    )}
     </div>
   );
 };
