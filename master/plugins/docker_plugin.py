@@ -18,6 +18,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from master.core.plugin_utils import parse_worker_list
+
 logger = logging.getLogger(__name__)
 
 

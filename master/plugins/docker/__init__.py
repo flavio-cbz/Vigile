@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from fastapi import Depends
 from master.core.plugin_base import PluginBase, hook, route
 from master.api.deps import get_node_manager
+from master.core.plugin_utils import parse_worker_list
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +49,7 @@ class ContainerSummary(BaseModel):
 
 def parse_container_list(output: str) -> list[dict[str, Any]] | None:
     """Parse the JSON array returned by the Worker for LIST_CONTAINERS."""
-    try:
-        raw = json.loads(output)
-        if not isinstance(raw, list):
-            return None
-        validated = [ContainerSummary(**item).model_dump() for item in raw]
-        return validated
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        logger.warning("Invalid container list from worker: %s", exc)
-        return None
+    return parse_worker_list(output, ContainerSummary)
 
 
 # ---------------------------------------------------------------------------

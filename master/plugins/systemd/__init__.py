@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from fastapi import Depends
 from master.core.plugin_base import PluginBase, PluginContext, hook, route
 from master.api.deps import get_node_manager
+from master.core.plugin_utils import parse_worker_list, parse_worker_object
 
 logger = logging.getLogger(__name__)
 
@@ -50,26 +51,12 @@ class ServiceStatus(BaseModel):
 
 def parse_service_list(output: str) -> list[dict[str, str]] | None:
     """Parse the JSON array returned by the Worker for LIST_SERVICES."""
-    try:
-        raw = json.loads(output)
-        if not isinstance(raw, list):
-            return None
-        validated = [ServiceInfo(**item).model_dump() for item in raw]
-        return validated
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        logger.warning("Invalid service list from worker: %s", exc)
-        return None
+    return parse_worker_list(output, ServiceInfo)
 
 
 def parse_service_status(output: str) -> dict[str, str] | None:
     """Parse the JSON object returned by the Worker for STATUS_SERVICE."""
-    try:
-        raw = json.loads(output)
-        validated = ServiceStatus(**raw)
-        return validated.model_dump()
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        logger.warning("Invalid service status from worker: %s", exc)
-        return None
+    return parse_worker_object(output, ServiceStatus)
 
 
 # ---------------------------------------------------------------------------

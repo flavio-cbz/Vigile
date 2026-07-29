@@ -6,9 +6,14 @@ import type { Node } from '../../store/nodeStore';
 interface HeroBannerProps {
   nodes: Node[];
   lastUpdated: number | null;
+  topInsight?: {
+    severity: string;
+    headline: string;
+    detail: string;
+  } | null;
 }
 
-export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) => {
+export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated, topInsight }) => {
   const { t } = useLocale();
   const [secondsAgo, setSecondsAgo] = useState<number>(0);
 
@@ -50,8 +55,19 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
   }
 
   let status: 'ok' | 'warn' | 'crit' = 'ok';
+  let titleOverride: string | null = null;
+  let descOverride: string | null = null;
+
   if (offlineCount === total) {
     status = 'crit';
+  } else if (topInsight && topInsight.severity === 'critical') {
+    status = 'crit';
+    titleOverride = `Attention requise — ${topInsight.headline}`;
+    descOverride = `${topInsight.detail} · ${online}/${total} serveurs en ligne`;
+  } else if (topInsight && topInsight.severity === 'warning') {
+    status = 'warn';
+    titleOverride = `Attention requise — ${topInsight.headline}`;
+    descOverride = `${topInsight.detail} · ${online}/${total} serveurs en ligne`;
   } else if (offlineCount > 0) {
     status = 'warn';
   }
@@ -68,18 +84,18 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated }) =>
       gradient: 'var(--gradient-hero-warn)',
       border: 'border-warning/20',
       icon: <AlertTriangle className="w-8 h-8 text-warning animate-pulse-subtle" />,
-      title: t('dash.servers_offline_banner', {
+      title: titleOverride || t('dash.servers_offline_banner', {
         count: offlineCount,
         names: offlineNodes.map((n) => n.name).join(', ')
       }),
-      desc: t('dash.servers_online', { online, total }),
+      desc: descOverride || t('dash.servers_online', { online, total }),
     },
     crit: {
       gradient: 'var(--gradient-hero-crit)',
       border: 'border-danger/30',
       icon: <AlertOctagon className="w-8 h-8 text-danger animate-pulse-subtle" />,
-      title: t("hero.all_offline_title"),
-      desc: t("hero.all_offline_description"),
+      title: titleOverride || t("hero.all_offline_title"),
+      desc: descOverride || t("hero.all_offline_description"),
     },
   };
 

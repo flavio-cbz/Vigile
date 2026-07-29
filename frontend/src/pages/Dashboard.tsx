@@ -19,6 +19,8 @@ import { ContainersSection } from '../components/dashboard/ContainersSection';
 import { ActivitySection } from '../components/dashboard/ActivitySection';
 import { FleetSection } from '../components/dashboard/FleetSection';
 
+import { RecommendedCard } from '../components/dashboard/RecommendedCard';
+
 // Helper to resolve the highest priority active insight for a node: critical > warning > info
 const getTopInsight = (insights?: InsightItem[] | null): InsightItem | null => {
   if (!insights || insights.length === 0) return null;
@@ -124,10 +126,41 @@ export const Dashboard: React.FC = () => {
 
   const hasInsightContent = allInsightsList.length > 0 || stableMetricsCount > 0;
 
+  // Find top actionable insight (critical > warning)
+  const topActionableEntry = allInsightsList.find(
+    (item) => item.insight.severity === 'critical' || item.insight.severity === 'warning'
+  ) || null;
+
+  const topInsightForBanner = topActionableEntry ? topActionableEntry.insight : null;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 pb-10 animate-fade-in">
-      <HeroBanner nodes={nodes} lastUpdated={lastUpdated} />
+      {/* 1. Decision banner */}
+      <HeroBanner nodes={nodes} lastUpdated={lastUpdated} topInsight={topInsightForBanner} />
 
+      {/* 2. Recommended card */}
+      {topActionableEntry && (
+        <RecommendedCard
+          insight={topActionableEntry.insight}
+          nodeName={topActionableEntry.nodeName}
+          onUnderstand={() =>
+            openCopilot({
+              trigger: 'diagnostic',
+              insight: topActionableEntry.insight,
+              node_id: topActionableEntry.nodeId,
+            })
+          }
+          onPrepareProposal={() =>
+            openCopilot({
+              trigger: 'action',
+              insight: topActionableEntry.insight,
+              node_id: topActionableEntry.nodeId,
+            })
+          }
+        />
+      )}
+
+      {/* 3. Actionable insights section */}
       <InsightsSection
         loading={insightsLoading}
         insights={allInsightsList}
@@ -137,16 +170,7 @@ export const Dashboard: React.FC = () => {
         }
       />
 
-      <ServersSection
-        nodes={nodes}
-        bulkStatus={bulkStatus}
-        insightsByNode={insightsByNode}
-        hasInsightContent={hasInsightContent}
-        onNodeClick={(id) => navigate(`/nodes/${id}`)}
-        getTopInsight={getTopInsight}
-        formatUptime={formatUptime}
-      />
-
+      {/* 4. Pending proposals section */}
       <ProposalsSection
         proposals={proposals}
         nodes={nodes}
@@ -175,7 +199,6 @@ export const Dashboard: React.FC = () => {
           setRejectingProposalId(null);
           setRejectReason('');
           setLoadingProposalId(id);
-          // Start exit animation before removing
           setRemovingProposalId(id);
           await new Promise(resolve => setTimeout(resolve, 600));
           try {
@@ -187,22 +210,38 @@ export const Dashboard: React.FC = () => {
         }}
       />
 
+      {/* 5. Servers section */}
+      <ServersSection
+        nodes={nodes}
+        bulkStatus={bulkStatus}
+        insightsByNode={insightsByNode}
+        hasInsightContent={hasInsightContent}
+        onNodeClick={(id) => navigate(`/nodes/${id}`)}
+        getTopInsight={getTopInsight}
+        formatUptime={formatUptime}
+      />
+
+      {/* 6. Abnormal containers */}
       <ContainersSection
         containers={containers}
         isLoading={loadingContainers}
         onRefresh={fetchAllContainers}
       />
 
-      <ActivitySection entries={activity} />
+      {/* 7. Fleet Section / Capacity Trends (if > 1 node show fleet grid, else capacity trend) */}
+      {nodes.length > 1 && (
+        <FleetSection
+          nodes={nodes}
+          bulkStatus={bulkStatus}
+          insightsByNode={insightsByNode}
+          showChart={showChart}
+          onToggle={() => setShowChart((v) => !v)}
+          onNodeClick={(id) => navigate(`/nodes/${id}`)}
+        />
+      )}
 
-      <FleetSection
-        nodes={nodes}
-        bulkStatus={bulkStatus}
-        insightsByNode={insightsByNode}
-        showChart={showChart}
-        onToggle={() => setShowChart((v) => !v)}
-        onNodeClick={(id) => navigate(`/nodes/${id}`)}
-      />
+      {/* 8. Recent activity */}
+      <ActivitySection entries={activity} />
     </div>
   );
 };

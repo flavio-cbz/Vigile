@@ -217,13 +217,18 @@ async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
     """
     Seed default plugins in the plugins table if not present.
     Each default plugin is seeded at version 1.0.0 with status RUNNING.
+    Uses upsert to re-enable any plugin that was incorrectly disabled.
     """
     defaults = [("metrics", 1, "1.0.0", "RUNNING"), ("systemd", 1, "1.0.0", "RUNNING"), ("docker", 1, "1.0.0", "RUNNING")]
     for plugin_id, enabled, version, status in defaults:
         await db.execute(
             """
-            INSERT OR IGNORE INTO plugins (id, version, enabled, status, config_json)
+            INSERT INTO plugins (id, version, enabled, status, config_json)
             VALUES (?, ?, ?, ?, '{}')
+            ON CONFLICT(id) DO UPDATE SET
+                enabled = excluded.enabled,
+                status = excluded.status,
+                version = excluded.version
             """,
             (plugin_id, version, enabled, status),
         )

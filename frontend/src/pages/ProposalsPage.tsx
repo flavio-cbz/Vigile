@@ -163,31 +163,115 @@ export const ProposalsPage: React.FC = () => {
           <Spinner size="sm" />
           <span>{t('prop_page.loading')}</span>
         </div>
-        ) : proposals.length === 0 ? (
-          <EmptyState
-            icon={<Layers className="w-12 h-12" />}
-            title={t('prop_page.empty_title')}
-            description={t('prop_page.empty_description')}
-          />
-        ) : (
-        <div className="space-y-4">
-          {proposals.map((prop) => {
-            const node = nodes.find((n) => n.id === prop.node_id);
-            const executing = loadingProposalId === prop.id;
-
+      ) : proposals.length === 0 ? (
+        <EmptyState
+          icon={<Layers className="w-12 h-12" />}
+          title={t('prop_page.empty_title')}
+          description={t('prop_page.empty_description')}
+        />
+      ) : (
+        <div className="space-y-8">
+          {/* Zone 1: À valider (PENDING mutantes) */}
+          {(() => {
+            const pendingList = proposals.filter((p) => p.status === 'PENDING');
+            if (pendingList.length === 0) return null;
             return (
-              <ProposalRow
-                key={prop.id}
-                prop={prop}
-                node={node}
-                isOperator={isOperator}
-                executing={executing}
-                handleRejectInit={handleRejectInit}
-                setApprovingId={setApprovingId}
-                getStatusStyles={getStatusStyles}
-              />
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-border pb-2">
+                  <span className="w-2 h-2 rounded-full bg-severity-warning animate-pulse" />
+                  <h3 className="text-xs font-bold font-interface uppercase tracking-wider text-text-1">
+                    À valider ({pendingList.length}) — Actions mutantes requérant votre décision
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {pendingList.map((prop) => {
+                    const node = nodes.find((n) => n.id === prop.node_id);
+                    const executing = loadingProposalId === prop.id;
+                    return (
+                      <ProposalRow
+                        key={prop.id}
+                        prop={prop}
+                        node={node}
+                        isOperator={isOperator}
+                        executing={executing}
+                        handleRejectInit={handleRejectInit}
+                        setApprovingId={setApprovingId}
+                        getStatusStyles={getStatusStyles}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             );
-          })}
+          })()}
+
+          {/* Zone 2: En cours (APPROVED / En cours d'exécution) */}
+          {(() => {
+            const inProgressList = proposals.filter((p) => p.status === 'APPROVED');
+            if (inProgressList.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-border pb-2">
+                  <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+                  <h3 className="text-xs font-bold font-interface uppercase tracking-wider text-text-1">
+                    En cours ({inProgressList.length}) — Approbation accordée, transmission au Worker
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {inProgressList.map((prop) => {
+                    const node = nodes.find((n) => n.id === prop.node_id);
+                    const executing = loadingProposalId === prop.id;
+                    return (
+                      <ProposalRow
+                        key={prop.id}
+                        prop={prop}
+                        node={node}
+                        isOperator={isOperator}
+                        executing={executing}
+                        handleRejectInit={handleRejectInit}
+                        setApprovingId={setApprovingId}
+                        getStatusStyles={getStatusStyles}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Zone 3: Historique & Diagnostics */}
+          {(() => {
+            const historyList = proposals.filter((p) => p.status !== 'PENDING' && p.status !== 'APPROVED');
+            if (historyList.length === 0 && filterStatus !== 'ALL') return null;
+            const displayList = filterStatus === 'ALL' ? historyList : proposals;
+            return (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-border pb-2">
+                  <h3 className="text-xs font-bold font-interface uppercase tracking-wider text-text-2">
+                    Historique & Diagnostics ({displayList.length}) — Actions exécutées, rejetées et audits
+                  </h3>
+                </div>
+                <div className="space-y-3">
+                  {displayList.map((prop) => {
+                    const node = nodes.find((n) => n.id === prop.node_id);
+                    const executing = loadingProposalId === prop.id;
+                    return (
+                      <ProposalRow
+                        key={prop.id}
+                        prop={prop}
+                        node={node}
+                        isOperator={isOperator}
+                        executing={executing}
+                        handleRejectInit={handleRejectInit}
+                        setApprovingId={setApprovingId}
+                        getStatusStyles={getStatusStyles}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -27,14 +27,39 @@ export const ProposalRow: React.FC<{
   const { t } = useLocale();
   const [isExpanded, setIsExpanded] = useState(false);
 
+  const isDiagnostic =
+    prop.reasoning?.includes('Diagnostic') ||
+    prop.reasoning?.includes('read-only') ||
+    prop.action.startsWith('LIST_') ||
+    prop.action.startsWith('READ_') ||
+    prop.approved_by === 'system';
+
+  const getLocalizedStatusLabel = (status: string) => {
+    if (isDiagnostic) return 'Lecture de diagnostic — sans modification';
+    switch (status) {
+      case 'PENDING':
+        return 'En attente de validation';
+      case 'APPROVED':
+        return 'Approuvé';
+      case 'EXECUTED':
+        return 'Exécuté';
+      case 'FAILED':
+        return 'Échoué';
+      case 'REJECTED':
+        return 'Rejeté';
+      default:
+        return status;
+    }
+  };
+
   return (
     <div
       className={`p-5 border border-border rounded-xl bg-surface hover:border-border-strong flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm transition-all duration-200 ${isExpanded ? '!h-auto' : ''}`}
     >
       <div className="space-y-2 min-w-0 flex-1">
         <div className="flex items-center flex-wrap gap-2">
-          <span className={`text-[8px] font-extrabold tracking-widest uppercase px-1.5 py-0.5 border rounded ${getStatusStyles(prop.status)}`}>
-            {prop.status}
+          <span className={`text-[9px] font-extrabold tracking-wider uppercase px-2 py-0.5 border rounded ${getStatusStyles(prop.status)}`}>
+            {getLocalizedStatusLabel(prop.status)}
           </span>
           {node && (
             <div className="flex items-center gap-1 text-[10px] font-bold text-text-2 bg-surface-2 px-1.5 py-0.5 border border-border rounded">

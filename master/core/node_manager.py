@@ -215,7 +215,9 @@ class NodeManager:
 
     async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
         """Query and cache active services and Docker containers for online node(s)."""
-        from master.core.plugin_helpers import parse_container_list, parse_service_list
+        from master.core.plugin_utils import parse_worker_list
+        from master.plugins.systemd_plugin import ServiceInfo
+        from master.plugins.docker_plugin import ContainerSummary
 
         db = get_db_conn()
         connected = [node_id] if node_id else self.connected_node_ids()
@@ -231,7 +233,7 @@ class NodeManager:
                 try:
                     result = await self.send_intent(nid, {"action": "LIST_SERVICES"}, timeout=10.0)
                     if result.get("success"):
-                        parsed = parse_service_list(result.get("output", ""))
+                        parsed = parse_worker_list(result.get("output", ""), ServiceInfo)
                         if parsed is not None:
                             services_json = json.dumps(parsed)
                 except Exception as ex:
@@ -244,7 +246,7 @@ class NodeManager:
                         nid, {"action": "LIST_CONTAINERS"}, timeout=10.0
                     )
                     if result.get("success"):
-                        parsed = parse_container_list(result.get("output", ""))
+                        parsed = parse_worker_list(result.get("output", ""), ContainerSummary)
                         if parsed is not None:
                             containers_json = json.dumps(parsed)
                 except Exception as ex:

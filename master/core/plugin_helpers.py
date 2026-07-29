@@ -11,10 +11,18 @@ This keeps the import surface stable across refactors of the plugin
 package while preserving the original implementations untouched.
 """
 
+from master.core.plugin_utils import (
+    parse_worker_output,
+    parse_worker_list,
+    parse_worker_object,
+)
 from master.plugins.docker_plugin import parse_container_list
 from master.plugins.systemd_plugin import parse_service_list, parse_service_status
 
 __all__ = [
+    "parse_worker_output",
+    "parse_worker_list",
+    "parse_worker_object",
     "parse_container_list",
     "parse_service_list",
     "parse_service_status",
