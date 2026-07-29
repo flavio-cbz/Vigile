@@ -30,6 +30,8 @@ export interface DiskMount {
   total_bytes: number;
   used_bytes: number;
   percent: number;
+  days_left?: number;
+  growth_gb_per_day?: number;
 }
 
 export interface StatsPoint {

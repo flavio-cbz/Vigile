@@ -567,6 +567,13 @@ class InsightsManager:
         ram_insight = self._calculate_ram_insight(latest_snap, profile, locale=locale)
         if ram_insight:
             insights.append(ram_insight)
+
+        return {
+            "node_id": node_id,
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "insights": insights,
+            "profile_confidence": "high",
+        }
     async def _calculate_disk_insight(
         self,
         node_id: str,

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Sparkles, FileText, TrendingUp } from 'lucide-react';
 import type { InsightItem } from '../../store/uiStore';
-import { useLocale } from '../../i18n';
 
 interface RecommendedCardProps {
   insight: InsightItem;
@@ -16,8 +15,6 @@ export const RecommendedCard: React.FC<RecommendedCardProps> = ({
   onUnderstand,
   onPrepareProposal,
 }) => {
-  const { t } = useLocale();
-
   const isCritical = insight.severity === 'critical';
   const borderClass = isCritical
     ? 'border-severity-critical/30 bg-gradient-to-br from-severity-critical/10 via-surface-1 to-surface-2'
