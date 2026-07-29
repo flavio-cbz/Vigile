@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, Path, status
+from fastapi import Body, Depends, HTTPException, Path, status
 
 from master.api.chat_helpers import _normalize_action_proposal, _persist_proposal
 from master.api.chat_router import router
@@ -204,13 +204,13 @@ async def reject_proposal(
     proposal_id: Annotated[str, Path(description="Proposal UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    body: dict[str, str] = {},
+    body: Annotated[dict[str, str] | None, Body()] = None,
 ) -> dict[str, Any]:
     """
     Reject a pending action proposal. The LLM will be informed
     and can propose an alternative.
     """
-    reason = body.get("reason", "")
+    reason = (body or {}).get("reason", "")
 
     if is_demo(claims):
         prop = get_demo_proposal(proposal_id)
