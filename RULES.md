@@ -319,6 +319,37 @@ Read `docs/sessions/SESSION.md` (or the equivalent session log in `docs/sessions
 - Type must be one of: `feat`, `fix`, `chore`, `docs`, `refactor`, `ci`
 - Write in French (matching SESSION.md language)
 
+#### ✅ Do — Good commit message example
+```
+fix(master+db): corriger queue pool_size et return manquant dans insights
+
+- fix master/core/insights.py : get_insights() manquait un return apres
+  la collecte des insights (disque, CPU, RAM), provoquant une
+  ResponseValidationError sur GET /{node_id}/insights
+- fix master/db/database.py : asyncio.Queue recreee dans init() avec
+  maxsize=size au lieu de maxsize=5 fige dans __init__, evitant le
+  blocage indefini du 6e put() et le RuntimeError dans les tests
+- fix tests/test_api/test_insights.py : ajout de 4 snapshots sur 7 h
+  avec utilisation disque stable pour declencher le chemin "Disque stable"
+
+Ref: SESSION.md — Corrections Sprint 6, 2026-07-29
+```
+
+#### ❌ Don't — Bad commit message examples
+```
+# Trop vague, pas de type conventionnel
+Fix Python unit test failures and resolve SPA route shadowing
+
+# Pas de scope, pas de description
+chore: correction
+
+# Copie-colle generique du titre de pull request
+feat(master+frontend): integrate chat system, node management API, and UI overhaul
+
+# En anglais alors que SESSION.md est en francais
+fix database queue size bug
+```
+
 ### Step 3 — Stage and commit
 ```bash
 git add -u
@@ -326,13 +357,57 @@ git add <any_new_untracked_files_that_belong>
 git commit -m "<type>(<scope>): <title>" -m "" -m "<body with bullet list>"
 ```
 
+#### ✅ Do — Stage correctly
+```bash
+# Ajouter les fichiers modifies connus
+git add -u
+
+# Ajouter les nouveaux fichiers qui font partie du projet
+git add master/api/chat_helpers.py master/api/chat_proposals.py ...
+
+# Ne JAMAIS ajouter de fichiers d'environnement ou de build
+# ❌ git add .mac_venv/
+# ❌ git add frontend/dist_old/
+# ❌ git add node_modules/
+```
+
+#### ❌ Don't — Common staging mistakes
+```bash
+# Ne pas tout ajouter aveuglement
+# ❌ git add .        # inclut .mac_venv, dist_old, etc.
+
+# Ne pas commiter de fichiers ignores
+# ❌ git add -f .mac_venv/  # force l'ajout d'un venv
+
+# Ne pas oublier de stagerer les nouveaux fichiers (git add -u ne les ajoute pas)
+# ❌ git add -u && git commit   # oublie les nouveaux fichiers .py et .tsx
+```
+
 ### Step 4 — Push
 ```bash
 git push origin <branch>
 ```
 
+#### ✅ Do — Push safely
+```bash
+# Push normal sur une branche partagee
+git push origin master
+
+# Push d'une nouvelle branche locale pour la premiere fois
+git push -u origin ma-nouvelle-branche
+```
+
+#### ❌ Don't — Dangerous push patterns
+```bash
+# ❌ git push --force origin master    # ecrase l'historique distant
+# ❌ git push --force-with-lease ...   # seulement si vraiment necessaire
+# et encore seulement apres avoir coordonne avec l'equipe
+```
+
 ### Step 5 — Clear SESSION.md
 After committing and pushing, empty `docs/sessions/SESSION.md` to mark session content has been flushed to git history.
+
+> **Note** : SESSION.md is NOT versioned in git (it's a working session log). After each commit+push cycle, clear it so the next session starts with a clean slate.
 
 ---
 
