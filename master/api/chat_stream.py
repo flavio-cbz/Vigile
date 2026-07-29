@@ -33,6 +33,7 @@ from master.api.deps import DB, get_llm_client, get_node_manager, get_settings, 
 from master.core.action_proposal import ActionProposal
 from master.core.llm_client import LLMClient, LLMError
 from master.core.node_manager import NodeManager
+from master.core.plugin_base import redact_sensitive
 from master.core.structured_llm import StructuredLLM
 
 logger = logging.getLogger(__name__)
@@ -514,7 +515,8 @@ async def chat(
 
         except LLMError as exc:
             logger.exception("Chat LLM error")
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)}, separators=(',', ':'))}\n\n"
+            safe_detail = redact_sensitive(str(exc))
+            yield f"data: {json.dumps({'type': 'error', 'detail': safe_detail}, separators=(',', ':'))}\n\n"
             yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
         except Exception:
             logger.exception("Chat streaming error")

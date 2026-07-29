@@ -15,6 +15,7 @@ Endpoints:
 
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Annotated
@@ -1208,8 +1209,14 @@ async def get_node_logs(
         action = WorkerAction.READ_LOGS_SERVICE
         params = {"service": service, "lines": lines}
     elif effective_path:
+        clean_path = os.path.normpath(effective_path)
+        if not clean_path.startswith("/var/log/") and clean_path != "/var/log":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Path outside allowed prefix (/var/log/)",
+            )
         action = WorkerAction.READ_LOGS
-        params = {"path": effective_path, "lines": lines}
+        params = {"path": clean_path, "lines": lines}
     else:
         action = WorkerAction.READ_LOGS
         effective_path = "/var/log/syslog"
