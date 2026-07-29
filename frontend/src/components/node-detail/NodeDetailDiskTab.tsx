@@ -12,14 +12,6 @@ interface NodeDetailDiskTabProps {
   isAdmin: boolean;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = bytes / Math.pow(1024, i);
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
-}
-
 export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
   nodeId,
   mounts,
@@ -27,8 +19,6 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
 }) => {
   const { t } = useLocale();
   const [selectedPath, setSelectedPath] = useState(mounts[0] ?? '/');
-  const [maxDepth, setMaxDepth] = useState(4);
-  const [minSizeBytes, setMinSizeBytes] = useState(0);
   const [scanResult, setScanResult] = useState<DiskScanResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +32,6 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
         const result = await getDiskScan(nodeId, {
           path: selectedPath,
           force,
-          max_depth: maxDepth,
-          min_size_bytes: minSizeBytes || undefined,
         });
         if (result) {
           setScanResult(result);
@@ -56,7 +44,7 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
         setLoading(false);
       }
     },
-    [nodeId, selectedPath, maxDepth, minSizeBytes, t],
+    [nodeId, selectedPath, t],
   );
 
   useEffect(() => {
@@ -69,13 +57,11 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
     (path: string) => {
       if (!nodeId) return;
       setSelectedPath(path);
-      void getDiskScan(nodeId, { path, max_depth: maxDepth, min_size_bytes: minSizeBytes || undefined }).then(
-        (result) => {
-          if (result) setScanResult(result);
-        },
-      );
+      void getDiskScan(nodeId, { path }).then((result) => {
+        if (result) setScanResult(result);
+      });
     },
-    [nodeId, maxDepth, minSizeBytes],
+    [nodeId],
   );
 
   const breadcrumb = selectedPath
@@ -111,41 +97,6 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
                 )
             }
           </select>
-
-          {/* Max depth */}
-          <div className="flex items-center gap-2">
-            <label className="text-text-3 text-[9px] font-bold uppercase tracking-wider">
-              {t('node_detail.disk.max_depth')}
-            </label>
-            <input
-              type="range"
-              min={1}
-              max={20}
-              value={maxDepth}
-              onChange={(e) => setMaxDepth(Number(e.target.value))}
-              className="w-16 accent-[var(--color-accent, #f59e0b)]"
-            />
-            <span className="font-mono text-text-2 w-4 text-center">{maxDepth}</span>
-          </div>
-
-          {/* Min size */}
-          <div className="flex items-center gap-2">
-            <label className="text-text-3 text-[9px] font-bold uppercase tracking-wider">
-              {t('node_detail.disk.min_size')}
-            </label>
-            <input
-              type="range"
-              min={0}
-              max={104857600}
-              step={1048576}
-              value={minSizeBytes}
-              onChange={(e) => setMinSizeBytes(Number(e.target.value))}
-              className="w-16 accent-[var(--color-accent, #f59e0b)]"
-            />
-            <span className="font-mono text-text-2 text-[10px]">
-              {minSizeBytes > 0 ? formatBytes(minSizeBytes) : '—'}
-            </span>
-          </div>
         </div>
 
         <div className="flex items-center gap-2">

@@ -50,7 +50,9 @@ class TestHookBus:
             return await bus.async_call("on_test")
 
         results = asyncio.run(do())
-        assert results == ["async_ok"]
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert results[0]["result"] == "async_ok"
 
 
 class TestPluginEngine:
@@ -92,7 +94,9 @@ class TestPluginEngine:
             return await engine.async_call("on_test")
 
         results = asyncio.run(do())
-        assert results == ["async_ok"]
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert results[0]["result"] == "async_ok"
 
     def test_shutdown_unloads_everything(self):
         engine = PluginEngine(hook_bus=HookBus(), scheduler=Scheduler())

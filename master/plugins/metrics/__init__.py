@@ -358,12 +358,14 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
     later retrieval via GET /api/nodes/{id}/stats.
 
     Falls back to logging if no db handle is provided (graceful degradation).
+    Missing metrics are stored as NULL (None) rather than false zeros,
+    so consumers can distinguish "not reported" from "zero value" (resolves 🟡10).
     """
-    cpu = snapshot.get("cpu_percent", 0)
-    mem = snapshot.get("mem_percent", 0)
-    disk = snapshot.get("disk_percent", 0)
+    cpu = snapshot.get("cpu_percent")
+    mem = snapshot.get("mem_percent")
+    disk = snapshot.get("disk_percent")
     logger.info(
-        "Metrics [%s]: CPU=%.1f%% MEM=%.1f%% DISK=%.1f%%", node_id, cpu, mem, disk
+        "Metrics [%s]: CPU=%s%% MEM=%s%% DISK=%s%%", node_id, cpu, mem, disk
     )
 
     if db is None:
@@ -399,20 +401,20 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             node_id,
             snapshot.get("collected_at", now),
             now,
-            snapshot.get("cpu_percent", 0),
+            snapshot.get("cpu_percent"),
             snapshot.get("cpu_load_1m"),
             snapshot.get("cpu_load_5m"),
             snapshot.get("cpu_load_15m"),
             snapshot.get("cpu_cores"),
-            snapshot.get("mem_total_bytes", 0),
-            snapshot.get("mem_used_bytes", 0),
-            snapshot.get("mem_percent", 0),
-            snapshot.get("swap_total_bytes", 0),
-            snapshot.get("swap_used_bytes", 0),
-            snapshot.get("disk_total_bytes", 0),
-            snapshot.get("disk_used_bytes", 0),
-            snapshot.get("disk_percent", 0),
-            snapshot.get("uptime_seconds", 0),
+            snapshot.get("mem_total_bytes"),
+            snapshot.get("mem_used_bytes"),
+            snapshot.get("mem_percent"),
+            snapshot.get("swap_total_bytes"),
+            snapshot.get("swap_used_bytes"),
+            snapshot.get("disk_total_bytes"),
+            snapshot.get("disk_used_bytes"),
+            snapshot.get("disk_percent"),
+            snapshot.get("uptime_seconds"),
             snapshot.get("processes"),
             json.dumps(snapshot["disks"]) if snapshot.get("disks") else None,
             json.dumps(snapshot["top_processes"]) if snapshot.get("top_processes") else None,
@@ -502,7 +504,7 @@ class MetricsPlugin(PluginBase):
             params.append(node_id)
         query += " ORDER BY collected_at ASC"
 
-        cursor = await self.ctx.db_execute(query, params)
+        cursor = await self.ctx.db_query(query, params)
         rows = await cursor.fetchall()
 
         history = []

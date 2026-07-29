@@ -20,7 +20,7 @@ import aiosqlite
 import pytest
 
 from master.db.database import close_db, init_db, reset_db
-from master.db.migrations import run_migrations
+from master.db.migrations import run_migrations, run_seeds
 
 EXPECTED_COLUMNS = {
     "id",
@@ -47,6 +47,7 @@ async def _fresh_db(tmp: str) -> aiosqlite.Connection:
     conn = await init_db(db_path)
     try:
         await run_migrations(conn)
+        await run_seeds(conn)
     except Exception:
         await close_db()
         raise
@@ -215,12 +216,14 @@ class TestPluginsMigrationIdempotency:
             db_path = os.path.join(tmp, "test.db")
             conn = await init_db(db_path)
             await run_migrations(conn)
+            await run_seeds(conn)
             await close_db()
 
             await reset_db()
             conn2 = await init_db(db_path)
             try:
                 await run_migrations(conn2)
+                await run_seeds(conn2)
                 async with conn2.execute("SELECT COUNT(*) FROM plugins") as cursor:
                     row = await cursor.fetchone()
                     assert row is not None

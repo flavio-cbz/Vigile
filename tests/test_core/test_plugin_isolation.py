@@ -66,8 +66,6 @@ def register(pm):
 async def _get_user_count(db) -> int:
     cursor = await db.execute("SELECT COUNT(*) as count FROM users")
     row = await cursor.fetchone()
-    await db.commit()
-    # row is returned as a dict by the proxy since we convert Rows to dicts
     return row["count"]
 """
     plugin_path = os.path.join(temp_plugins_dir, "dummy_db_plugin.py")

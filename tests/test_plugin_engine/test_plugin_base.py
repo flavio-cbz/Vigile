@@ -135,14 +135,14 @@ class TestPluginContext:
         assert ctx.get_config("key") == "val"
         assert ctx.get_config("missing", "default") == "default"
 
-    def test_db_execute_no_db(self):
+    def test_db_query_no_db(self):
         ctx = PluginContext(plugin_id="test", config={}, db=None)
         import pytest
 
         with pytest.raises(RuntimeError):
             import asyncio
 
-            asyncio.run(ctx.db_execute("SELECT 1"))
+            asyncio.run(ctx.db_query("SELECT 1"))
 
     def test_create_proposal(self):
         ctx = PluginContext(plugin_id="test", config={}, db=None)
@@ -169,15 +169,15 @@ class TestPluginContext:
         import pytest
 
         with pytest.raises(PermissionError):
-            ctx._validate_sql("SELECT * FROM users")
+            ctx._validate_select("SELECT * FROM users")
 
-    def test_validate_sql_allows_shared(self):
+    def test_validate_select_allows_shared(self):
         ctx = PluginContext(
             plugin_id="test",
             config={},
             db=None,
         )
-        ctx._validate_sql("SELECT * FROM plugins")
+        ctx._validate_select("SELECT * FROM plugins")
 
 
 class TestSqlTokenizer:

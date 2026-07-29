@@ -230,6 +230,9 @@ CREATE TABLE IF NOT EXISTS action_proposals (
     updated_at        REAL NOT NULL,
     executed_at       REAL,
     result_json       TEXT,
+    dispatch_id       TEXT,                     -- UUID linking APPROVED proposal to dispatched intent
+    intent_id         TEXT,                     -- Worker-side intent_id for result correlation
+    expires_at        REAL,                     -- TTL for EXECUTED/FAILED proposals (auto-cleanup)
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 )
 """
@@ -354,8 +357,8 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE_INVESTIGATIONS = """
 CREATE TABLE IF NOT EXISTS investigations (
     id                TEXT PRIMARY KEY,           -- UUID
-    alert_id          TEXT,                       -- FK → alerts.id (nullable for manual)
-    node_id           TEXT NOT NULL,              -- FK → nodes.id
+    alert_id          TEXT,                       -- FK -> alerts.id (nullable for manual)
+    node_id           TEXT NOT NULL,              -- FK -> nodes.id
     alert_name        TEXT NOT NULL,              -- ex: "disk_usage_high"
     severity          TEXT NOT NULL DEFAULT 'warning',
     status            TEXT NOT NULL DEFAULT 'queued'
@@ -367,6 +370,24 @@ CREATE TABLE IF NOT EXISTS investigations (
     updated_at        REAL NOT NULL,
     FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE SET NULL,
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+# ---------------------------------------------------------------------------
+# outbox  (Transactional outbox for async event publishing)
+# ---------------------------------------------------------------------------
+CREATE_OUTBOX = """
+CREATE TABLE IF NOT EXISTS outbox (
+    id              TEXT PRIMARY KEY,          -- UUID
+    event_type      TEXT NOT NULL,             -- e.g. "node.connected", "alert.fired"
+    aggregate_id    TEXT,                      -- ID of the related entity
+    aggregate_type  TEXT,                      -- e.g. "node", "alert"
+    payload_json    TEXT NOT NULL,             -- JSON payload
+    created_at      REAL NOT NULL,             -- Unix timestamp (float)
+    processed       INTEGER NOT NULL DEFAULT 0,-- 0=unprocessed, 1=processed
+    processed_at    REAL,                      -- When it was dispatched
+    retry_count     INTEGER NOT NULL DEFAULT 0,
+    error           TEXT                       -- Last error message if failed
 )
 """
 
@@ -403,6 +424,7 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_investigations_node ON investigations(node_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)",
     "CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations(alert_id)",
+    "CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed ON outbox(processed, created_at)",
 ]
 
 # All CREATE statements in dependency order
@@ -422,4 +444,5 @@ ALL_TABLES = [
     CREATE_AUTOMATION_LOGS,
     CREATE_ALERTS,
     CREATE_INVESTIGATIONS,
+    CREATE_OUTBOX,
 ]

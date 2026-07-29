@@ -17,9 +17,25 @@ Operations:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Safe identifier pattern — only allow alphanumeric + underscore
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate that *name* is a safe SQL identifier. Returns the name unchanged."""
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
+
+
+def _escape_literal(value: str) -> str:
+    """Escape a string literal for safe embedding in SQL DDL (single-quote doubling)."""
+    return value.replace("'", "''")
 
 
 _COLUMN_TYPE_MAP = {
@@ -63,7 +79,15 @@ class DBAuto:
         return None
 
     def _table_name(self, plugin_id: str, table_name: str) -> str:
+        _validate_identifier(plugin_id)
+        _validate_identifier(table_name)
         return f"{plugin_id}_{table_name}"
+
+    @staticmethod
+    def _safe_col_def(col_name: str, sql_type: str) -> str:
+        _validate_identifier(col_name)
+        _validate_identifier(sql_type)
+        return f"    {col_name} {sql_type}"
 
     def _build_create_sql(
         self, plugin_id: str, table_name: str, columns: list[dict]
@@ -76,7 +100,7 @@ class DBAuto:
             col_name = col.get("name", "")
             raw_type = col.get("type", "TEXT").upper()
             sql_type = _COLUMN_TYPE_MAP.get(raw_type, "TEXT")
-            col_def = f"    {col_name} {sql_type}"
+            col_def = self._safe_col_def(col_name, sql_type)
 
             if col.get("not_null"):
                 col_def += " NOT NULL"
@@ -86,13 +110,13 @@ class DBAuto:
                 if isinstance(default, str) and default.upper() in (
                     "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME"
                 ):
-                    col_def += f" DEFAULT {default}"
+                    col_def += " DEFAULT " + default
                 elif isinstance(default, str):
-                    col_def += f" DEFAULT '{default}'"
+                    col_def += " DEFAULT '" + _escape_literal(default) + "'"
                 elif isinstance(default, bool):
-                    col_def += f" DEFAULT {'1' if default else '0'}"
+                    col_def += " DEFAULT " + ("1" if default else "0")
                 else:
-                    col_def += f" DEFAULT {default}"
+                    col_def += " DEFAULT " + str(default)
 
             col_defs.append(col_def)
 
@@ -100,10 +124,11 @@ class DBAuto:
                 pk_cols.append(col_name)
 
         if pk_cols:
-            col_defs.append(f"    PRIMARY KEY ({', '.join(pk_cols)})")
+            safe_pk = ", ".join(_validate_identifier(c) or c for c in pk_cols)
+            col_defs.append("    PRIMARY KEY (" + safe_pk + ")")
 
         sql = (
-            f"CREATE TABLE IF NOT EXISTS {full_name} (\n"
+            "CREATE TABLE IF NOT EXISTS " + full_name + " (\n"
             + ",\n".join(col_defs)
             + "\n)"
         )
@@ -142,8 +167,7 @@ class DBAuto:
 
     def _build_drop_sql(self, plugin_id: str, table_name: str) -> str:
         full_name = self._table_name(plugin_id, table_name)
-        # SAFE: table name derived from plugin manifest declaration, not user input
-        return f"DROP TABLE IF EXISTS {full_name}"
+        return "DROP TABLE IF EXISTS " + full_name
 
     async def drop_tables(
         self, plugin_id: str, schema: dict[str, list[dict]]
@@ -194,7 +218,7 @@ class DBAuto:
             full_name = self._table_name(plugin_id, table_name)
             try:
                 cursor = await self.db.execute(
-                    f"PRAGMA table_info({full_name})"
+                    "PRAGMA table_info(" + full_name + ")"
                 )
                 rows = await cursor.fetchall()
                 actual_cols = {row["name"] for row in rows}

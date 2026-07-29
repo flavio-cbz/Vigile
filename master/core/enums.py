@@ -118,6 +118,28 @@ class WebSocketCloseCode(IntEnum):
 
 
 # ---------------------------------------------------------------------------
+# Plugin hook names (canonical registry for HookBus)
+# ---------------------------------------------------------------------------
+
+
+class HookName(StrEnum):
+    """Lexicon of all known hook verbs used by the plugin engine.
+
+    Add new hooks here when defining a new extension point.  HookBus.validate()
+    warns on registration of unknown hook names.
+    """
+
+    ON_NODE_CONNECT = "on_node_connect"
+    ON_NODE_DISCONNECT = "on_node_disconnect"
+    ON_STATUS_REPORT = "on_status_report"
+    ON_PROPOSE_ACTION = "on_propose_action"
+    ON_METRICS = "on_metrics"
+    ON_PLUGIN_LOAD = "on_plugin_load"
+    ON_PLUGIN_UNLOAD = "on_plugin_unload"
+    ON_SHUTDOWN = "on_shutdown"
+
+
+# ---------------------------------------------------------------------------
 # User role hierarchy
 # ---------------------------------------------------------------------------
 

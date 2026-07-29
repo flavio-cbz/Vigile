@@ -40,7 +40,7 @@ async def test_cache_update_creates_audit_entry(db: aiosqlite.Connection):
         return {"success": False}
 
     with (
-        patch.object(nm, "send_intent", mock_send_intent),
+        patch.object(nm, "_send_intent", mock_send_intent),
         patch("master.core.node_manager.get_db_conn", return_value=db),
     ):
         ws = _DummyWS()
@@ -77,7 +77,7 @@ async def test_cache_update_audit_details(db: aiosqlite.Connection):
         return {"success": False}
 
     with (
-        patch.object(nm, "send_intent", mock_send_intent),
+        patch.object(nm, "_send_intent", mock_send_intent),
         patch("master.core.node_manager.get_db_conn", return_value=db),
     ):
         ws = _DummyWS()
@@ -107,7 +107,7 @@ async def test_cache_update_no_write_no_audit(db: aiosqlite.Connection):
         return {"success": True, "output": "not-json"}
 
     with (
-        patch.object(nm, "send_intent", mock_send_intent),
+        patch.object(nm, "_send_intent", mock_send_intent),
         patch("master.core.node_manager.get_db_conn", return_value=db),
     ):
         ws = _DummyWS()

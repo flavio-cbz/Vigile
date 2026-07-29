@@ -26,6 +26,15 @@ class ActionProposal(BaseModel):
     Stored in the action_proposals table. Status transitions:
       PENDING → APPROVED → EXECUTED | FAILED
       PENDING → REJECTED
+
+    CAS (Compare-And-Swap) fields:
+      - dispatch_id: UUID linking an APPROVED proposal to its dispatched intent.
+        Set atomically when the dispatcher claims the proposal for dispatch.
+        Prevents double-dispatch race conditions.
+      - intent_id: Worker-side intent identifier for result correlation.
+        Set when the intent is sent to the Worker.
+      - expires_at: TTL timestamp for EXECUTED/FAILED proposals.
+        Proposals past this timestamp are eligible for garbage collection.
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -43,6 +52,9 @@ class ActionProposal(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     executed_at: float | None = None
     result: dict[str, Any] | None = None
+    dispatch_id: str | None = None
+    intent_id: str | None = None
+    expires_at: float | None = None
 
     def approve(self, user_id: str) -> None:
         """Transition to APPROVED."""
@@ -88,6 +100,9 @@ class ActionProposal(BaseModel):
             "updated_at": self.updated_at,
             "executed_at": self.executed_at,
             "result_json": _json_dumps(self.result) if self.result else None,
+            "dispatch_id": self.dispatch_id,
+            "intent_id": self.intent_id,
+            "expires_at": self.expires_at,
         }
 
     @classmethod

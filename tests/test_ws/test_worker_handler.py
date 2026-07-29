@@ -408,6 +408,7 @@ async def test_operational_intent_result(db, security, worker_keys):
     intent_id = "test-intent-001"
     future = asyncio.get_running_loop().create_future()
     node_manager._pending_intents[intent_id] = future
+    node_manager._intent_nodes[intent_id] = node_id
 
     class IntentWS(MockWebSocket):
         async def send_text(self, data: str):

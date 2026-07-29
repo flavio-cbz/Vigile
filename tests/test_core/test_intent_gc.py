@@ -105,7 +105,7 @@ async def test_send_intent_stores_per_intent_max_age():
 
     intent = {"action": "PING"}
     task = asyncio.create_task(
-        nm.send_intent("test-node", intent, timeout=1.0, intent_max_age=60.0)
+        nm._send_intent("test-node", intent, timeout=1.0, intent_max_age=60.0)
     )
     await asyncio.sleep(0.05)
 

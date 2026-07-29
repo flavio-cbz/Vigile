@@ -135,6 +135,16 @@ export const NodeDetailMetricsTab: React.FC<{
   const ramSpark = useMemo(() => generateSparklinePaths(ramHistory.slice(-15)), [ramHistory]);
   const diskSpark = useMemo(() => generateSparklinePaths(diskHistory.slice(-15)), [diskHistory]);
 
+  const enrichedDisks = useMemo(() => {
+    const estimates = estimateDiskSaturation(statsHistory.map(s => s.disks || []));
+    return disks.map(d => ({
+      ...d,
+      days_left: estimates[d.mount_point]?.days_left ?? null,
+      growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
+    }));
+  }, [disks, statsHistory]);
+
+
   const getStatus = (val: number, type: 'cpu' | 'ram' | 'disk') => {
     const limits = type === 'disk' ? { warn: 70, crit: 85 } : { warn: 50, crit: 80 };
     if (val >= limits.crit) return { text: localT('Critique', 'Critical'), bg: 'bg-red-500/10 text-severity-critical border-red-500/20' };
@@ -215,15 +225,6 @@ export const NodeDetailMetricsTab: React.FC<{
         uniqueMounts={uniqueMounts}
         DISK_COLORS={DISK_COLORS}
       />
-
-      const enrichedDisks = useMemo(() => {
-      const estimates = estimateDiskSaturation(statsHistory.map(s => s.disks || []));
-      return disks.map(d => ({
-        ...d,
-        days_left: estimates[d.mount_point]?.days_left ?? null,
-        growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
-      }));
-    }, [disks, statsHistory]);
 
     {enrichedDisks.length > 0 && (
       <div className="space-y-4">

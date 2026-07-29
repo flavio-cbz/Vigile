@@ -87,6 +87,7 @@ desktop.ini
 /temp/
 *.tmp
 .pytest_tmp/
+.coverage
 
 ## Docker Build Artifacts
 .dockerignore
@@ -95,6 +96,7 @@ desktop.ini
 ## Documentation & Rules (local only)
 RULES.md
 AGENTS.md
+
 
 ## Tool-specific Artifacts
 .slim/
@@ -120,3 +122,9 @@ light-*.png
 
 ## Worker build cache
 worker-cache/
+
+.mac_venv/
+.opencode/
+.github/
+SESSION.md
+docs/sessions/*

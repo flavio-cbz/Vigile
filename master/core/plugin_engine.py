@@ -6,18 +6,33 @@ and sandbox execution, synchronized directly with the SQLite database.
 
 from __future__ import annotations
 import asyncio
+import hashlib
 import importlib.util
 import inspect
 import json
 import logging
 import os
+import shutil
 import sys
+import tempfile
+import zipfile
 from collections.abc import Callable
 from typing import Any, cast
-from master.core.plugin_base import PluginBase, PluginContext
+
+from master.core.plugin_base import PluginBase, PluginContext, RedactingAdapter
+from master.core.plugin_lifecycle import PluginLifecycleManager
 from master.core.plugin_manifest import PluginManifest
 
-logger = logging.getLogger(__name__)
+# Resource limits for subprocess isolation (Unix-only; best-effort on other platforms)
+try:
+    import resource as _resource_mod
+except ImportError:
+    _resource_mod = None  # type: ignore[assignment]
+
+# Environment variable whitelist for sandboxed subprocesses
+_ENV_WHITELIST = frozenset({"PYTHONPATH", "PATH", "HOME", "LANG"})
+
+logger: RedactingAdapter = RedactingAdapter(logging.getLogger(__name__))
 
 # Plugin lifecycle states (referenced by plugin_manager)
 STATE_DECOUVERT = "DECOUVERT"
@@ -138,11 +153,31 @@ class PluginProcessWrapper:
         worker_script = os.path.join(os.path.dirname(__file__), "plugin_worker.py")
         loop = asyncio.get_running_loop()
         self._init_future = loop.create_future()
-        
-        env = self._env if self._env is not None else os.environ.copy()
-        # Propagate python path to ensure core files can be imported by the worker
+
+        # Filter environment to whitelist only — no secrets, no host env leakage
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-        env["PYTHONPATH"] = project_root + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+        raw_env = self._env if self._env is not None else os.environ
+        env = {k: raw_env[k] for k in _ENV_WHITELIST if k in raw_env}
+        env.setdefault("PYTHONPATH", project_root)
+        if "PATH" not in env:
+            env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+        if "HOME" not in env:
+            env["HOME"] = "/root"
+        if "LANG" not in env:
+            env["LANG"] = "C.UTF-8"
+
+        # Build preexec_fn for resource limits (Unix-only)
+        preexec_fn = None
+        if _resource_mod is not None:
+            def _set_limits():
+                try:
+                    # Max address space: 512 MB
+                    _resource_mod.setrlimit(_resource_mod.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+                    # Max CPU time: 30 seconds
+                    _resource_mod.setrlimit(_resource_mod.RLIMIT_CPU, (30, 30))
+                except Exception:
+                    pass
+            preexec_fn = _set_limits
 
         logger.info("Starting isolated plugin process for '%s'...", self.plugin_id)
         self.process = await asyncio.create_subprocess_exec(
@@ -154,6 +189,7 @@ class PluginProcessWrapper:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            preexec_fn=preexec_fn,
         )
         self._stdout_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
@@ -205,7 +241,7 @@ class PluginProcessWrapper:
                             fut.set_result(msg.get("result"))
                         else:
                             fut.set_exception(RuntimeError(msg.get("error")))
-                elif msg_type in ("db_execute", "db_commit"):
+                elif msg_type in ("db_query",):
                     asyncio.create_task(self._handle_db(msg))
             except Exception:
                 logger.exception("Error parsing stdout line from plugin worker '%s'", self.plugin_id)
@@ -223,16 +259,13 @@ class PluginProcessWrapper:
             await self._send({"type": "db_result", "db_call_id": db_call_id, "status": "error", "error": "Database not initialized"})
             return
         try:
-            if msg["type"] == "db_execute":
+            if msg["type"] == "db_query":
                 cursor = await self.engine.db.execute(msg["sql"], msg.get("params", []))
                 rows = [dict(r) for r in await cursor.fetchall()]
                 await self._send({
                     "type": "db_result", "db_call_id": db_call_id, "status": "success",
                     "result": {"rowcount": cursor.rowcount, "lastrowid": cursor.lastrowid, "rows": rows}
                 })
-            elif msg["type"] == "db_commit":
-                await self.engine.db.commit()
-                await self._send({"type": "db_result", "db_call_id": db_call_id, "status": "success"})
         except Exception as e:
             await self._send({"type": "db_result", "db_call_id": db_call_id, "status": "error", "error": str(e)})
 
@@ -320,7 +353,7 @@ class PluginEngine:
         self._loaded_plugins: list[str] = []
         self._hooks: dict = self.hook_bus._hooks
         self._sandbox: bool = True
-        self.lifecycle: _Lifecycle = _Lifecycle()
+        self.lifecycle: PluginLifecycleManager = PluginLifecycleManager(engine=self)
 
     @property
     def db(self) -> Any | None:
@@ -353,7 +386,7 @@ class PluginEngine:
             self._loaded_plugins.remove(plugin_id)
         self._instances.pop(plugin_id, None)
         self._wrappers.pop(plugin_id, None)
-        self.lifecycle._states[plugin_id] = STATE_DEACTIVATED
+        self.lifecycle._set_runtime(plugin_id, "UNLOADED")
 
     async def initialize(self, db: Any = None, sandbox: bool | None = None) -> None:
         self._explicit_db = db
@@ -433,36 +466,162 @@ class PluginEngine:
                             self._errors[entry] = str(e)
                 elif os.path.isfile(full_path) and entry.endswith(".py") and not entry.startswith("__"):
                     pid = entry[:-3]
-                    p_name = pid.replace("_", " ").title()
-                    p_desc = "Custom plugin package."
-                    p_cat = "System"
-                    p_schema = {}
-                    try:
-                        module_name = f"master.plugins.{pid}"
-                        spec = importlib.util.spec_from_file_location(module_name, full_path)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            sys.modules[module_name] = module
-                            spec.loader.exec_module(module)
-                            if hasattr(module, "get_config_schema"):
-                                schema_info = module.get_config_schema()
-                                p_name = schema_info.get("name", p_name)
-                                p_desc = schema_info.get("description", p_desc)
-                                p_cat = schema_info.get("category", p_cat)
-                                p_schema = schema_info
-                    except Exception:
-                        pass
-                    discovered[pid] = PluginManifest(
-                        id=pid,
-                        name=p_name,
-                        version="1.0.0",
-                        description=p_desc,
-                        category=p_cat,
-                        config_schema=p_schema
-                    )
-                    self._manifest_dirs[pid] = d
+                    # Scan passif: no exec_module — only read manifest.json if present,
+                    # otherwise create a synthetic manifest from file metadata.
+                    manifest_path_py = full_path + ".manifest.json"
+                    dir_manifest = os.path.join(d, pid, "manifest.json")
+                    manifest_data = None
+                    if os.path.isfile(manifest_path_py):
+                        try:
+                            with open(manifest_path_py, encoding="utf-8") as mf:
+                                manifest_data = json.load(mf)
+                        except Exception as e:
+                            logger.error("Failed to parse sidecar manifest for '%s': %s", entry, e)
+                    elif os.path.isfile(dir_manifest):
+                        try:
+                            with open(dir_manifest, encoding="utf-8") as mf:
+                                manifest_data = json.load(mf)
+                        except Exception as e:
+                            logger.error("Failed to parse manifest for '%s': %s", entry, e)
+
+                    if manifest_data:
+                        try:
+                            manifest = PluginManifest(**manifest_data)
+                            discovered[manifest.id] = manifest
+                            self._manifest_dirs[manifest.id] = d
+                        except Exception as e:
+                            logger.error("Invalid manifest for '%s': %s", entry, e)
+                            self._errors[entry] = str(e)
+                    else:
+                        # Synthetic manifest — no code executed
+                        discovered[pid] = PluginManifest(
+                            id=pid,
+                            name=pid.replace("_", " ").title(),
+                            version="1.0.0",
+                            description="Custom plugin package.",
+                            category="System",
+                        )
+                        self._manifest_dirs[pid] = d
+                elif os.path.isfile(full_path) and entry.endswith(".zip"):
+                    await self._install_zip_plugin(full_path, d, discovered)
         self._discovered_manifests = discovered
         return self
+
+    async def _install_zip_plugin(
+        self, zip_path: str, scan_dir: str, discovered: dict[str, PluginManifest]
+    ) -> None:
+        """Validate a ZIP archive, extract it, and register the plugin.
+
+        Performs SHA-256 hash validation (if .sha256 sidecar exists),
+        checks ``min_master_version`` compatibility, validates the
+        manifest against the PluginManifest schema, extracts to a temp
+        directory, and atomically renames into the scan directory.
+
+        Unsigned archives are registered as LOCAL_UNVERIFIED.
+        """
+        logger.info("Processing ZIP plugin archive: %s", zip_path)
+        basename = os.path.splitext(os.path.basename(zip_path))[0]
+
+        # 1. SHA-256 hash validation (sidecar .sha256 file)
+        sha256_path = zip_path + ".sha256"
+        if os.path.isfile(sha256_path):
+            try:
+                with open(sha256_path, encoding="utf-8") as sf:
+                    expected_hash = sf.read().strip().split()[0].lower()
+                with open(zip_path, "rb") as zf:
+                    actual_hash = hashlib.sha256(zf.read()).hexdigest()
+                if expected_hash != actual_hash:
+                    logger.error(
+                        "SHA-256 mismatch for '%s': expected %s, got %s",
+                        zip_path, expected_hash, actual_hash,
+                    )
+                    self._errors[basename] = "SHA-256 hash mismatch"
+                    return
+                logger.info("SHA-256 hash verified for '%s'", zip_path)
+            except Exception as e:
+                logger.error("Failed to verify SHA-256 for '%s': %s", zip_path, e)
+                self._errors[basename] = f"SHA-256 verification error: {e}"
+                return
+        else:
+            logger.warning(
+                "No .sha256 sidecar for '%s' — marking as LOCAL_UNVERIFIED",
+                zip_path,
+            )
+
+        # 2. Validate manifest inside the archive
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                # Check manifest.json exists
+                manifest_members = [m for m in zf.namelist() if m.endswith("manifest.json")]
+                if not manifest_members:
+                    logger.error("No manifest.json found in ZIP '%s'", zip_path)
+                    self._errors[basename] = "Missing manifest.json in archive"
+                    return
+
+                # Use the first (or only) manifest.json
+                manifest_rel_path = manifest_members[0]
+                with zf.open(manifest_rel_path) as mf:
+                    manifest_data = json.loads(mf.read().decode("utf-8"))
+                manifest = PluginManifest(**manifest_data)
+
+                # 3. API version compatibility check
+                expected_master = getattr(self._settings, "version", None)
+                if manifest.min_master_version and expected_master:
+                    from packaging.version import Version
+                    if Version(expected_master) < Version(manifest.min_master_version):
+                        logger.error(
+                            "Plugin '%s' requires master >= %s, current is %s",
+                            manifest.id, manifest.min_master_version, expected_master,
+                        )
+                        self._errors[basename] = (
+                            f"Requires master >= {manifest.min_master_version}"
+                        )
+                        return
+
+                # 4. Extract to temp directory
+                extract_target = os.path.join(scan_dir, manifest.id)
+                if os.path.exists(extract_target):
+                    logger.error(
+                        "Plugin directory '%s' already exists for '%s'",
+                        extract_target, manifest.id,
+                    )
+                    self._errors[manifest.id] = "Target directory already exists"
+                    return
+
+                tmp_dir = tempfile.mkdtemp(prefix=f"vigile_zip_{manifest.id}_")
+                try:
+                    zf.extractall(tmp_dir)
+                    # Determine the top-level directory inside the archive
+                    extracted_items = os.listdir(tmp_dir)
+                    if len(extracted_items) == 1 and os.path.isdir(
+                        os.path.join(tmp_dir, extracted_items[0])
+                    ):
+                        src = os.path.join(tmp_dir, extracted_items[0])
+                    else:
+                        src = tmp_dir
+
+                    # Atomic rename
+                    os.rename(src, extract_target)
+                    logger.info(
+                        "ZIP plugin '%s' extracted and installed at '%s'",
+                        manifest.id, extract_target,
+                    )
+
+                    discovered[manifest.id] = manifest
+                    self._manifest_dirs[manifest.id] = scan_dir
+                except OSError as exc:
+                    logger.error(
+                        "Failed to extract/rename ZIP '%s': %s", zip_path, exc,
+                    )
+                    self._errors[manifest.id] = f"Extraction error: {exc}"
+                    # Cleanup temp dir on failure
+                    if os.path.exists(tmp_dir):
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    return
+
+        except (zipfile.BadZipFile, json.JSONDecodeError, Exception) as e:
+            logger.error("Failed to process ZIP plugin '%s': %s", zip_path, e)
+            self._errors[basename] = f"Invalid ZIP: {e}"
 
     def get_manifest(self, plugin_id: str) -> PluginManifest | None:
         return self._discovered_manifests.get(plugin_id)
@@ -614,6 +773,11 @@ class PluginEngine:
 
         self._instances.pop(plugin_id, None)
         self._errors.pop(plugin_id, None)
+
+        # Clean up sys.modules to prevent stale module references on reload
+        module_name = f"master.plugins.{plugin_id}"
+        sys.modules.pop(module_name, None)
+
         if self.db:
             await self.db.execute("UPDATE plugins SET status = 'DISABLED', enabled = 0 WHERE id = ?", (plugin_id,))
             await self.db.commit()

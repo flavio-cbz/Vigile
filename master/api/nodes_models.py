@@ -59,6 +59,7 @@ class NodeResponse(BaseModel):
     memory_percent: float | None = None
     disk_percent: float | None = None
     uptime_seconds: float | None = None
+    cached_disks_json: str | None = None
 
 
 class BulkNodeStatus(BaseModel):

@@ -47,7 +47,7 @@ from master.core.audit import AuditAction, log_action, verify_chain
 from master.core.llm_client import LLMClient, LLMError
 from master.core.node_manager import node_manager
 from master.core.plugin_manager import canonical_plugin_id, plugin_engine, plugin_file_stem, plugin_manager
-from master.db.database import get_db_conn
+from master.db.database import get_db_conn, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -712,20 +712,18 @@ async def configure_plugin(
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
     config_str = json.dumps(config)
-    await db.execute(
-        "INSERT INTO plugins (id, enabled, config_json) VALUES (?, 1, ?) "
-        "ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",
-        (plugin_id, config_str),
-    )
-    await db.commit()
-
-    # Log audit
-    await log_action(
-        db,
-        user_id=claims["sub"],
-        action=AuditAction.CONFIGURE_PLUGIN,
-        details={"plugin_id": plugin_id, "config": config},
-    )
+    async with transaction(db):
+        await db.execute(
+            "INSERT INTO plugins (id, enabled, config_json) VALUES (?, 1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",
+            (plugin_id, config_str),
+        )
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.CONFIGURE_PLUGIN,
+            details={"plugin_id": plugin_id, "config": config},
+        )
 
     return JSONResponse(
         {"status": "success", "message": f"Configuration du plugin '{plugin_id}' mise à jour."}
@@ -762,26 +760,24 @@ async def toggle_plugin(
             enabled = bool(row[0])
 
     new_state = not enabled
-    await db.execute(
-        "INSERT INTO plugins (id, enabled, config_json) VALUES (?, ?, '{}') "
-        "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
-        (plugin_id, int(new_state)),
-    )
-    await db.commit()
+    async with transaction(db):
+        await db.execute(
+            "INSERT INTO plugins (id, enabled, config_json) VALUES (?, ?, '{}') "
+            "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
+            (plugin_id, int(new_state)),
+        )
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.TOGGLE_PLUGIN,
+            details={"plugin_id": plugin_id, "enabled": new_state},
+        )
 
     # Reload or Unload dynamically
     if new_state:
         await plugin_manager.load_plugin(plugin_stem, settings.plugins_dir)
     else:
         await plugin_manager.unload_plugin(plugin_stem)
-
-    # Log audit
-    await log_action(
-        db,
-        user_id=claims["sub"],
-        action=AuditAction.TOGGLE_PLUGIN,
-        details={"plugin_id": plugin_id, "enabled": new_state},
-    )
 
     return JSONResponse(
         {
@@ -836,17 +832,15 @@ async def delete_plugin(
             status_code=500, detail=f"Impossible de supprimer le fichier du plugin : {str(e)}"
         )
 
-    # 3. Clean up database entry
-    await db.execute("DELETE FROM plugins WHERE id = ?", (plugin_id,))
-    await db.commit()
-
-    # 4. Log audit
-    await log_action(
-        db,
-        user_id=claims["sub"],
-        action=AuditAction.DELETE_PLUGIN,
-        details={"plugin_id": plugin_id},
-    )
+    # 3. Clean up database entry + audit log in same transaction
+    async with transaction(db):
+        await db.execute("DELETE FROM plugins WHERE id = ?", (plugin_id,))
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.DELETE_PLUGIN,
+            details={"plugin_id": plugin_id},
+        )
 
     return JSONResponse(
         {"status": "success", "message": f"Plugin '{plugin_id}' désinstallé avec succès."}
