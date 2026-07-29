@@ -305,5 +305,36 @@ The agent must maintain absolute rigor. The following four protocols are mandato
 
 ---
 
+## 17. COMMIT & PUSH WORKFLOW
+
+When asked to commit and push uncommitted changes, follow this exact process:
+
+### Step 1 — Read SESSION.md
+Read `docs/sessions/SESSION.md` (or the equivalent session log in `docs/sessions/`). This document captures what was done, when, and what corrections were made. Use it as the **single source of truth** for the commit message content.
+
+### Step 2 — Write a proper commit message
+- **Title**: A descriptive French summary of the changes, e.g. `Fix visuel et experience utilisateur et implementation du chat`
+- **Body (optional)**: Bullet list of every meaningful change, with references to files where relevant and cross-references to `SESSION.md` entries
+- Follow Conventional Commits format: `<type>(<scope>): <title>`
+- Type must be one of: `feat`, `fix`, `chore`, `docs`, `refactor`, `ci`
+- Write in French (matching SESSION.md language)
+
+### Step 3 — Stage and commit
+```bash
+git add -u
+git add <any_new_untracked_files_that_belong>
+git commit -m "<type>(<scope>): <title>" -m "" -m "<body with bullet list>"
+```
+
+### Step 4 — Push
+```bash
+git push origin <branch>
+```
+
+### Step 5 — Clear SESSION.md
+After committing and pushing, empty `docs/sessions/SESSION.md` to mark session content has been flushed to git history.
+
+---
+
 *Every line of committed code commits the project for years to come.
 You make no compromises on the rules above.*
