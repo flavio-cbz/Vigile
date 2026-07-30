@@ -76,8 +76,8 @@ export const NodeDetail: React.FC = () => {
     if (activeTab === 'containers' && !loadingContainers) fetchContainersList();
   }, [activeTab, id, fetchServicesList, fetchContainersList, loadingServices, loadingContainers]);
 
-  usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 15000, activeTab === 'metrics');
-  usePolling('detail_logs_poll', () => fetchNodeLogs(true), 10000, activeTab === 'logs');
+  usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 20000, activeTab === 'metrics');
+  usePolling('detail_logs_poll', () => fetchNodeLogs(true), 15000, activeTab === 'logs');
 
   const handleRestartService = async (serviceName: string) => {
     if (!id || !canRestartDirectly) return;

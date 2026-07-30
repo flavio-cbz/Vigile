@@ -74,7 +74,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
     };
 
     fetchAllStats();
-    const interval = setInterval(fetchAllStats, 30000);
+    const interval = setInterval(fetchAllStats, 45000);
 
     return () => {
       active = false;
