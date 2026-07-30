@@ -67,7 +67,7 @@ def parse_service_status(output: str) -> dict[str, str] | None:
 class SystemdPlugin(PluginBase):
     """Systemd Service Manager plugin using the class-based PluginBase API."""
 
-    plugin_id: str = "systemd"
+    plugin_id = "systemd"
 
     # Copilot actions supported by this plugin
     copilot_actions: list[dict[str, Any]] = [

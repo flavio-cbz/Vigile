@@ -66,6 +66,29 @@ class DockerPlugin(PluginBase):
 
     plugin_id = "docker"
 
+    @classmethod
+    def get_config_schema(cls) -> dict[str, Any]:
+        """Return plugin info and configuration schema."""
+        return {
+            "name": "Docker Orchestrator",
+            "description": "Manages container life cycle, network sockets, container logs, and lifecycle controls directly over local unix socket paths.",
+            "category": "Virtualization",
+            "schema": {
+                "docker_host": {
+                    "type": "string",
+                    "title": "Docker Host Socket",
+                    "default": "unix:///var/run/docker.sock",
+                    "description": "Unix socket path or TCP endpoint to connect to the Docker daemon.",
+                },
+                "auto_restart_failed": {
+                    "type": "boolean",
+                    "title": "Auto Restart Failed Containers",
+                    "default": False,
+                    "description": "Whether the orchestrator should automatically restart containers that exit with a non-zero code.",
+                },
+            },
+        }
+
     @hook("get_supported_actions")
     def get_supported_actions(self) -> list[str]:
         """Return the list of Docker actions this plugin supports."""

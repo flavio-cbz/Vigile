@@ -158,6 +158,7 @@ export const usePluginsData = () => {
           res.loaded ? [...prev, pluginId] : prev.filter((n) => n !== pluginId)
         );
         usePluginStore.getState().fetchPluginPages();
+        await fetchPlugins();
         addToast('success', t('plugins.title'), res.loaded ? t('plugins.activated') : t('plugins.deactivated'));
       }
     } catch (err: unknown) {
@@ -195,7 +196,7 @@ export const usePluginsData = () => {
       const res = await api<{ status: string }>(`/api/admin/plugins/${pluginId}`, {
         method: 'DELETE',
       });
-      if (res && res.status === 'deleted') {
+      if (res && (res.status === 'success' || res.status === 'deleted')) {
         addToast('success', t('plugins.title'), `Plugin "${pluginId}" deleted`);
         await fetchPlugins();
       }

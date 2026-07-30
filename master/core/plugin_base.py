@@ -272,6 +272,14 @@ class PluginBase:
         self.hooks: list[dict[str, Any]] = collected["hooks"]
         self.scheduled: list[dict[str, Any]] = collected["scheduled"]
 
+    @property
+    def config(self) -> dict[str, Any]:
+        return getattr(self.ctx, "_config", {}) if getattr(self, "ctx", None) is not None else {}
+
+    @property
+    def db(self) -> Any:
+        return getattr(self.ctx, "_db", None) if getattr(self, "ctx", None) is not None else None
+
     @classmethod
     def _collect_decorated(cls, instance: PluginBase) -> dict[str, list[dict[str, Any]]]:
         routes: list[dict[str, Any]] = []

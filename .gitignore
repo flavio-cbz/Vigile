@@ -128,3 +128,4 @@ worker-cache/
 .github/
 SESSION.md
 session.md 
+.mac_venv

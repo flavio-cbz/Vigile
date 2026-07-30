@@ -3,6 +3,7 @@
   "name": "Log File Housekeeping",
   "version": "1.0.0",
   "author": "Vigile",
+  "trusted": true,
   "description": "Automatically detect disk pressure and propose old log deletion.",
   "hooks": ["on_status_report", "get_supported_actions"]
 }

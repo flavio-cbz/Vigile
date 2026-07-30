@@ -1,22 +1,47 @@
 from __future__ import annotations
 
 """
-Vigile — Clean Logs Plugin (folder format)
+Vigile — Clean Logs Plugin (Package format)
 
 Monitors disk usage and auto-proposes log cleanup actions
 (Human-in-the-Loop) if space is running low.
 """
 
 import json
-import sys
+import logging
+import re
 import time
 import uuid
 from typing import Any
 
 from master.core.plugin_base import PluginBase, hook
 
+logger = logging.getLogger(__name__)
+
 # Default settings
 DEFAULT_DISK_LIMIT = 85
+DEFAULT_CLEANUP_PATTERNS = "/var/log/*.gz /var/log/*.1 /var/log/nginx/*.gz"
+
+# Disallow dangerous shell characters in glob patterns
+_UNSAFE_PATTERN_REGEX = re.compile(r"[;&|`$()<>\n\r\t]")
+
+
+def sanitize_cleanup_patterns(patterns: str) -> str:
+    """Sanitize space-separated glob patterns to prevent shell injection."""
+    if _UNSAFE_PATTERN_REGEX.search(patterns):
+        logger.warning("Unsafe shell characters detected in cleanup_patterns: %r. Falling back to default.", patterns)
+        return "/var/log/*.gz /var/log/*.1"
+
+    tokens = [t.strip() for t in patterns.split() if t.strip()]
+    safe_tokens = []
+    for token in tokens:
+        # Enforce safe path prefixes (e.g. /var/log/, /var/tmp/, /tmp/) and prevent path traversal
+        if token.startswith(("/var/log/", "/var/tmp/", "/tmp/")) and ".." not in token:
+            safe_tokens.append(token)
+        else:
+            logger.warning("Disallowed path token in cleanup_patterns: %r", token)
+
+    return " ".join(safe_tokens) if safe_tokens else "/var/log/*.gz /var/log/*.1"
 
 
 class CleanLogsPlugin(PluginBase):
@@ -44,7 +69,7 @@ class CleanLogsPlugin(PluginBase):
                 "cleanup_patterns": {
                     "type": "string",
                     "title": "Cleanup Glob Patterns",
-                    "default": "/var/log/*.gz /var/log/*.1 /var/log/nginx/*.gz",
+                    "default": DEFAULT_CLEANUP_PATTERNS,
                     "description": "Space-separated list of file paths or patterns to clean up.",
                 },
             },
@@ -58,26 +83,16 @@ class CleanLogsPlugin(PluginBase):
     async def on_status_report(self, **kwargs: Any) -> None:
         node_id: str = kwargs.get("node_id", "")
         snapshot: dict = kwargs.get("snapshot", {})
-        db = kwargs.get("db")
+        db = kwargs.get("db") or self.db
 
-        if not db:
+        if not db or not node_id:
             return
 
-        # 1. Fetch plugin config from DB
-        try:
-            cursor = await db.execute(
-                "SELECT config_json FROM plugins WHERE id = 'clean_logs'"
-            )
-            row = await cursor.fetchone()
-            if not row:
-                return
-            config = json.loads(row["config_json"])
-        except Exception as e:
-            print(f"clean_logs: Failed to query config: {e}", file=sys.stderr)
-            return
-
+        # 1. Read configuration from PluginContext
+        config = self.config or {}
         disk_threshold = config.get("disk_threshold", DEFAULT_DISK_LIMIT)
-        cleanup_patterns = config.get("cleanup_patterns", "/var/log/*.gz /var/log/*.1")
+        raw_patterns = config.get("cleanup_patterns", DEFAULT_CLEANUP_PATTERNS)
+        cleanup_patterns = sanitize_cleanup_patterns(str(raw_patterns))
 
         disk = snapshot.get("disk_percent", 0.0)
         if disk <= disk_threshold:
@@ -91,18 +106,16 @@ class CleanLogsPlugin(PluginBase):
             )
             existing = await cursor.fetchone()
             if existing:
-                # Proposal already exists, skip creating duplicate
                 return
         except Exception as e:
-            print(f"clean_logs: Failed to query pending proposals: {e}", file=sys.stderr)
+            logger.error("clean_logs: Failed to query pending proposals: %s", e)
             return
 
         # 3. Create a human-in-the-loop action proposal
         proposal_id = str(uuid.uuid4())
         now = time.time()
-        reasoning = f"Disk usage is at {disk:.1f}% (limit: {disk_threshold}%). Proposed deletion of rotated/archived logs to free up space."
+        reasoning = f"Disk usage is at {disk:.1f}% (limit: {disk_threshold}%). Proposed deletion of rotated/archived logs."
 
-        # Shell command params
         params = {"command": f"rm -f {cleanup_patterns}"}
         params_json = json.dumps(params)
 
@@ -117,24 +130,19 @@ class CleanLogsPlugin(PluginBase):
                 (proposal_id, node_id, params_json, reasoning, now, now),
             )
             await db.commit()
-            print(
-                f"clean_logs: Created cleanup proposal {proposal_id} for node {node_id} (Disk: {disk:.1f}%)",
-                file=sys.stderr,
+            logger.info(
+                "clean_logs: Created cleanup proposal %s for node %s (Disk: %.1f%%)",
+                proposal_id,
+                node_id,
+                disk,
             )
         except Exception as e:
-            print(f"clean_logs: Failed to insert proposal: {e}", file=sys.stderr)
+            logger.error("clean_logs: Failed to insert proposal: %s", e)
 
     @hook("get_supported_actions")
     def get_supported_actions(self, **kwargs: Any) -> list[str]:
         return []
 
-
-def register(pm):
-    from master.core.plugin_base import PluginContext
-    ctx = PluginContext(plugin_id="clean_logs", config={}, db=None)
-    instance = CleanLogsPlugin(ctx)
-    pm.register("get_supported_actions", instance.get_supported_actions, plugin_name="clean_logs")
-    pm.register("on_status_report", instance.on_status_report, plugin_name="clean_logs")
 
 
 

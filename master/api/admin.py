@@ -865,31 +865,36 @@ async def toggle_plugin(
 
     # Reload or Unload dynamically
     active_pm = _get_active_plugin_engine()
+    target_load_id = plugin_id_canonical
+    if hasattr(active_pm, "get_manifest"):
+        manifest = (
+            active_pm.get_manifest(plugin_id_canonical)
+            or active_pm.get_manifest(plugin_stem)
+            or active_pm.get_manifest(raw_plugin_id)
+        )
+        if manifest and manifest.id:
+            target_load_id = manifest.id
+
     success = True
     if new_state:
         if getattr(active_pm, "_disabled_plugins", None) is not None:
             active_pm._disabled_plugins.discard(plugin_id_canonical)
             active_pm._disabled_plugins.discard(plugin_stem)
             active_pm._disabled_plugins.discard(raw_plugin_id)
-        # If plugin was already in loaded_plugins list, unload it first to allow re-loading
-        if plugin_id_canonical in getattr(active_pm, "loaded_plugins", []):
-            await active_pm.unload_plugin(plugin_id_canonical)
-        success = await active_pm.load_plugin(plugin_id_canonical, settings.plugins_dir)
-        if not success and plugin_stem != plugin_id_canonical:
-            success = await active_pm.load_plugin(plugin_stem, settings.plugins_dir)
-        if not success and raw_plugin_id not in (plugin_id_canonical, plugin_stem):
-            success = await active_pm.load_plugin(raw_plugin_id, settings.plugins_dir)
+        # Unload any existing instance across candidates first
+        for k in {plugin_id_canonical, plugin_stem, raw_plugin_id, target_load_id}:
+            if k in getattr(active_pm, "loaded_plugins", []):
+                await active_pm.unload_plugin(k)
+
+        success = await active_pm.load_plugin(target_load_id, settings.plugins_dir)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Plugin '{plugin_id_canonical}' enabled in DB but failed to load in runtime.",
             )
     else:
-        await active_pm.unload_plugin(plugin_id_canonical)
-        if plugin_stem != plugin_id_canonical:
-            await active_pm.unload_plugin(plugin_stem)
-        if raw_plugin_id not in (plugin_id_canonical, plugin_stem):
-            await active_pm.unload_plugin(raw_plugin_id)
+        for k in {plugin_id_canonical, plugin_stem, raw_plugin_id, target_load_id}:
+            await active_pm.unload_plugin(k)
 
     return JSONResponse(
         {
@@ -930,14 +935,15 @@ async def delete_plugin(
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
     active_pm = _get_active_plugin_engine()
-    if hasattr(active_pm, "uninstall"):
-        try:
-            await active_pm.uninstall(plugin_id)
-        except Exception as e:
-            logger.error("Failed to uninstall plugin '%s' via engine: %s", plugin_id, e)
-            await active_pm.unload_plugin(plugin_id)
-    else:
-        await active_pm.unload_plugin(plugin_id)
+    for k in {plugin_id_canonical, plugin_stem, raw_plugin_id}:
+        if hasattr(active_pm, "uninstall"):
+            try:
+                await active_pm.uninstall(k)
+            except Exception as e:
+                logger.error("Failed to uninstall plugin '%s' via engine: %s", k, e)
+                await active_pm.unload_plugin(k)
+        else:
+            await active_pm.unload_plugin(k)
 
     # 2. Remove file/directory from disk
     try:

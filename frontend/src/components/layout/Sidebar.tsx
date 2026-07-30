@@ -32,13 +32,19 @@ export const Sidebar: React.FC = () => {
   useEffect(() => {
     const checkPlex = async () => {
       try {
-        const data = await api<{ loaded_plugins: string[] }>('/api/admin/plugins');
-        setIsPlexActive(!!data?.loaded_plugins?.includes('plex'));
+        const response = await api<any>('/api/admin/plugins');
+        const list = Array.isArray(response) ? response : (response?.plugins || []);
+        const plex = list.find((p: any) => p.id === 'plex' || p.name === 'plex');
+        if (plex) {
+          setIsPlexActive(Boolean(plex.enabled && plex.loaded));
+        } else if (response && Array.isArray(response.loaded_plugins)) {
+          setIsPlexActive(response.loaded_plugins.includes('plex'));
+        }
       } catch (err) {
         console.error('Failed to check Plex active status:', err);
       }
     };
-    checkPlex();
+    void checkPlex();
   }, [location.pathname]);
 
   useEffect(() => {

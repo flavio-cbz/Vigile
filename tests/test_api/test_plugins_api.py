@@ -295,8 +295,12 @@ async def test_package_directory_plugin_toggle_and_delete(
     })
     (pkg_dir / "manifest.json").write_text(manifest_content)
     (pkg_dir / "__init__.py").write_text(
-        'def register(pm):\n'
-        '    pm.register("get_supported_actions", lambda: ["PKG_ACTION"], plugin_name="test_pkg_plugin")\n'
+        "from master.core.plugin_base import PluginBase, hook\n"
+        "class TestPkg(PluginBase):\n"
+        "    plugin_id = 'test_pkg_plugin'\n"
+        "    @hook('on_status_report')\n"
+        "    async def on_status_report(self, node_id, snapshot, db=None):\n"
+        "        pass\n"
     )
 
     await plugin_manager.load_plugin("test_pkg_plugin", str(setup_temp_plugins_dir))

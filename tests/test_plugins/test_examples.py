@@ -8,16 +8,18 @@ import json
 import aiosqlite
 import pytest
 
-from master.core.plugin_manager import PluginManager
-from master.plugins.clean_logs import register as register_clean_logs
+from master.core.plugin_engine import PluginEngine
+from master.core.plugin_base import PluginContext
+from master.plugins.clean_logs import CleanLogsPlugin
 
 
 @pytest.mark.asyncio
 async def test_clean_logs_plugin(db: aiosqlite.Connection):
     # 1. Enable the plugin in the database first
+    config = {"disk_threshold": 75, "cleanup_patterns": "/var/log/*.1"}
     await db.execute(
         "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, ?)",
-        ("clean_logs", json.dumps({"disk_threshold": 75, "cleanup_patterns": "/var/log/*.1"})),
+        ("clean_logs", json.dumps(config)),
     )
     # Ensure test-node exists in nodes
     await db.execute(
@@ -26,9 +28,10 @@ async def test_clean_logs_plugin(db: aiosqlite.Connection):
     )
     await db.commit()
 
-    pm = PluginManager()
-    await pm.initialize(db, sandbox=False)
-    register_clean_logs(pm)
+    ctx = PluginContext(plugin_id="clean_logs", config=config, db=db)
+    plugin = CleanLogsPlugin(ctx)
+    pm = PluginEngine()
+    pm.register("on_status_report", plugin.on_status_report, plugin_name="clean_logs")
 
     # Trigger with disk above threshold (80% > 75%)
     snapshot = {"disk_percent": 80.0}

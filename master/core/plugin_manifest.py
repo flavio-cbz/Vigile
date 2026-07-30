@@ -141,6 +141,8 @@ class PluginManifest(BaseModel):
         default=None, description="Optional one-line tagline used in the plugin registry."
     )
     icon: str | None = Field(default=None, description="Optional icon name or URL")
+    trusted: bool = Field(default=False, description="Whether this plugin is a trusted system plugin")
+    loader: str | None = Field(default=None, description="Optional loader strategy ('class_based' or 'legacy')")
     category: str | None = Field(
         default=None, description="Optional high-level grouping (e.g. 'Maintenance', 'Media', 'containers')"
     )

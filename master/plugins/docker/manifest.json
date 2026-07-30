@@ -3,6 +3,7 @@
   "name": "Docker Container Orchestrator",
   "version": "1.0.0",
   "author": "Vigile",
+  "trusted": true,
   "category": "containers",
   "description_short": "Manage container lifecycles: list, inspect, start, stop, and restart across worker nodes.",
   "hooks": ["get_supported_actions"],
