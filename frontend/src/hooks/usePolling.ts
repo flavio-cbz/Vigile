@@ -11,6 +11,7 @@ export function usePolling(
   enabled = true,
 ) {
   const savedCallback = useRef(callback);
+  const wrapperRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     savedCallback.current = callback;
@@ -35,17 +36,20 @@ export function usePolling(
     }
     const callbacks = activeCallbacks.get(key)!;
 
-    // Wrapper local qui pointe vers le callback à jour à chaque render
-    const wrapper = () => {
-      void runCallback();
-    };
+    // Stable wrapper created once per component instance for correct StrictMode cleanup
+    if (wrapperRef.current === null) {
+      wrapperRef.current = () => {
+        void runCallback();
+      };
+    }
+    const wrapper = wrapperRef.current;
     callbacks.add(wrapper);
 
     if (!activeIntervals.has(key)) {
       void runCallback();
       const id = setInterval(() => {
         const currentCallbacks = activeCallbacks.get(key);
-        if (currentCallbacks) {
+        if (currentCallbacks && currentCallbacks.size > 0) {
           currentCallbacks.forEach(cb => cb());
         }
       }, intervalMs);

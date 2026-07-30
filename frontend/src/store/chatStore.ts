@@ -280,6 +280,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       };
 
+      // Throttle per-token setState via requestAnimationFrame to avoid
+      // re-rendering the CopilotPanel for every SSE token (30-50/s → max 60/s).
+      let rafPending = false;
+      let rafId: number | null = null;
+
+      const scheduleUpdate = () => {
+        if (rafPending) return;
+        rafPending = true;
+        rafId = requestAnimationFrame(() => {
+          rafPending = false;
+          rafId = null;
+          updateAssistantMessage();
+        });
+      };
+
+      const flushUpdate = () => {
+        if (rafPending && rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafPending = false;
+          rafId = null;
+          updateAssistantMessage();
+        }
+      };
+
       set(state => {
         if (!state.activeSession) return {};
         const withPlaceholder = [...(state.activeSession.history || []), { ...assistantMessage }];
@@ -336,7 +360,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 assistantMessage.latencyMs = Math.round(firstTokenTs - sendStartTs);
               }
               assistantMessage.content += data.content;
-              updateAssistantMessage();
+              scheduleUpdate();
             } else if (data.type === 'proposal' || data.type === 'proposal_needed') {
               assistantMessage.proposal = {
                 id: data.proposal_id,
@@ -373,6 +397,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
+      flushUpdate();
+
       // Latency fallback when no token was emitted (e.g. proposals straight away).
       if (assistantMessage.latencyMs === undefined) {
         assistantMessage.latencyMs = Math.round(performance.now() - sendStartTs);
@@ -386,6 +412,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         useToastStore.getState().addToast('error', t('chat.toast.network_error'), t('chat.toast.network_error_disconnected'));
       }
     } finally {
+      flushUpdate();
       window.clearTimeout(fetchTimeout);
       set({ isStreaming: false, _abortController: undefined, activeSteps: [], activeTools: [], activeMeta: null });
       // Skip fetchSessions on rate-limit to prevent a 429 cascade

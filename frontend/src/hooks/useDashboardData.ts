@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './useApi';
 import { usePolling } from './usePolling';
@@ -104,7 +104,8 @@ export function useDashboardData() {
   };
 
   const fetchAllContainers = useCallback(async () => {
-    const onlineNodes = nodes.filter((n) => n.online);
+    const currentNodes = useNodeStore.getState().nodes;
+    const onlineNodes = currentNodes.filter((n) => n.online);
     if (onlineNodes.length === 0) {
       setContainers([]);
       return;
@@ -152,7 +153,7 @@ export function useDashboardData() {
     } finally {
       setLoadingContainers(false);
     }
-  }, [nodes]);
+  }, []);
 
   // Initial load: nodes -> bulk metrics + proposals + activity -> insights
   useEffect(() => {
@@ -183,16 +184,22 @@ export function useDashboardData() {
   }, []);
 
   // Re-aggregate containers whenever the online node set changes
+  const onlineNodeIds = useMemo(
+    () => nodes.filter(n => n.online).map(n => n.id).join(','),
+    [nodes]
+  );
+
   useEffect(() => {
-    if (nodes.length > 0) {
+    if (onlineNodeIds) {
       void fetchAllContainers();
     }
-  }, [nodes, fetchAllContainers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlineNodeIds]);
 
-  usePolling('bulk_metrics_poll', fetchBulkMetrics, 15000);
-  usePolling('dashboard_proposals_poll', fetchProposalsList, 30000);
-  usePolling('dashboard_activity_poll', fetchRecentActivity, 30000);
-  usePolling('dashboard_containers_poll', fetchAllContainers, 45000);
+  usePolling('bulk_metrics_poll', fetchBulkMetrics, 20000);
+  usePolling('dashboard_proposals_poll', fetchProposalsList, 45000);
+  usePolling('dashboard_activity_poll', fetchRecentActivity, 45000);
+  usePolling('dashboard_containers_poll', fetchAllContainers, 60000);
 
   const handleApproveProposal = async (id: string) => {
     try {

@@ -288,6 +288,7 @@ html, body, #root {
   -webkit-backdrop-filter: blur(var(--glass-blur));
   backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
+  will-change: transform;
 }
 
 .cp-turn {
@@ -434,6 +435,7 @@ html, body, #root {
   backdrop-filter: blur(var(--glass-blur));
   border-right: 1px solid var(--glass-border);
   transition: width var(--transition-normal);
+  will-change: transform;
 }
 .cp-session-item {
   display: flex;
