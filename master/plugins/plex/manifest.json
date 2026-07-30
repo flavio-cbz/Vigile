@@ -3,6 +3,7 @@
   "name": "Plex Media Server Integration",
   "version": "1.0.0",
   "author": "Vigile",
+  "trusted": true,
   "description": "Auto-detect Plex Media Server, report active streaming sessions, and diagnose CPU load spikes.",
   "hooks": [
     "on_status_report",

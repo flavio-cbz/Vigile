@@ -6,8 +6,12 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from typing import Annotated, Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any
+
 
 from fastapi import Depends, HTTPException, Path, Query, status
 

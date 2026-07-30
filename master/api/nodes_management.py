@@ -8,8 +8,12 @@ import json
 import logging
 import os
 import time
-import uuid
-from typing import Annotated, Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any, List
+
 
 from fastapi import Depends, HTTPException, Path, Query, Request, status
 
@@ -285,7 +289,8 @@ async def verify_chain(
 
 @router.get(
     "",
-    response_model=list[NodeResponse],
+    response_model=List[NodeResponse],
+
     summary="List all nodes (Operator+)",
 )
 async def list_nodes(

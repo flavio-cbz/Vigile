@@ -38,8 +38,8 @@ import json
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Awaitable, Callable, Dict
+
 
 import aiosqlite
 import logging
@@ -50,7 +50,8 @@ logger = logging.getLogger(__name__)
 
 # Type alias for async outbox handlers.
 # Receives the full outbox row (as dict) and an aiosqlite connection.
-OutboxHandler = Callable[[dict[str, Any], aiosqlite.Connection], Awaitable[Any]]
+OutboxHandler = Callable[[Dict[str, Any], aiosqlite.Connection], Awaitable[Any]]
+
 
 
 class Outbox:

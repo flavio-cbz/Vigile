@@ -5,7 +5,12 @@ import tempfile
 
 import aiosqlite
 import pytest
-from pytest_asyncio import fixture as async_fixture
+try:
+    from pytest_asyncio import fixture as async_fixture
+except ImportError:
+    async_fixture = pytest.fixture
+
+
 
 from master.core.db_auto import DBAuto
 

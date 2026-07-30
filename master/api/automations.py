@@ -20,6 +20,8 @@ import logging
 import time
 import uuid
 
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from master.api.deps import require_role
@@ -92,7 +94,7 @@ async def _get_rule_or_404(rule_id: str) -> dict:
 
 @router.get(
     "",
-    response_model=list[AutomationRuleResponse],
+    response_model=List[AutomationRuleResponse],
     summary="List automation rules",
 )
 async def list_rules(
@@ -354,7 +356,7 @@ async def toggle_rule(
 
 @router.get(
     "/{rule_id}/logs",
-    response_model=list[AutomationLogResponse],
+    response_model=List[AutomationLogResponse],
     summary="Get rule execution logs",
 )
 async def get_rule_logs(

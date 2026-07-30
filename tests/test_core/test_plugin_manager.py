@@ -43,7 +43,8 @@ def register(pm):
             f.write(plugin_code)
         pm = PluginManager()
         loaded = await pm.load_plugins_from_dir(plugin_dir)
-        assert "test_plugin" in loaded
+        assert "test" in loaded
+
         assert pm.call("file_hook") == ["from_file"]
 
         # Test dedup (already loaded)

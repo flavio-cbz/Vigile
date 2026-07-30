@@ -53,8 +53,8 @@ class TestPoolBaselineBehavior:
             import asyncio
 
             with pytest.raises(asyncio.TimeoutError):
-                async with asyncio.timeout(5.0):
-                    await pool.acquire()
+                await asyncio.wait_for(pool.acquire(), timeout=5.0)
+
 
             await pool.release(conn1)
         finally:

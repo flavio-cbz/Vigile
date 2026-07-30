@@ -130,7 +130,7 @@ def register(pm):
     await pm_sync.initialize(db, sandbox=False)
     success = await pm_sync.load_plugin("dummy_mgr_plugin", temp_plugins_dir)
     assert success is True
-    assert "dummy_mgr_plugin" in pm_sync.loaded_plugins
+    assert "dummy_mgr" in pm_sync.loaded_plugins
     # Since it runs in-process, it should be in the local sys.modules
     assert "vigile.plugins.dummy_mgr_plugin" in sys.modules
 
@@ -142,7 +142,8 @@ def register(pm):
     await pm_sandbox.initialize(db, sandbox=True)
     success_sb = await pm_sandbox.load_plugin("dummy_mgr_plugin", temp_plugins_dir)
     assert success_sb is True
-    assert "dummy_mgr_plugin" in pm_sandbox.loaded_plugins
+    assert "dummy_mgr" in pm_sandbox.loaded_plugins
+
     # In sandbox mode, the plugin file itself is NOT loaded in the parent process interpreter
     assert "vigile.plugins.dummy_mgr_plugin" not in sys.modules
 

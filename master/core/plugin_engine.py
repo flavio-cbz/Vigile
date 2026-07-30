@@ -637,8 +637,31 @@ class PluginEngine:
 
         # Check sandbox execution
         p_dir = plugins_dir or self._manifest_dirs.get(plugin_id) or (getattr(self._settings, "plugins_dir", "master/plugins") if self._settings else "master/plugins")
+        plugin_dir = os.path.join(p_dir, plugin_id)
+        init_file = os.path.join(plugin_dir, "__init__.py")
+        if not os.path.exists(init_file):
+            init_file = os.path.join(p_dir, f"{plugin_id}.py")
+
+        def _is_class_based(pid: str, target_file: str) -> bool:
+            if pid in PluginBase._decorated_registry:
+                return True
+            if os.path.isfile(target_file):
+                try:
+                    spec = importlib.util.spec_from_file_location(f"_probe.{pid}", target_file)
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                except Exception:
+                    pass
+            return pid in PluginBase._decorated_registry
+
         is_package = os.path.exists(os.path.join(p_dir, plugin_id, "__init__.py"))
-        use_sandbox = self._sandbox and is_package and not manifest.trusted and plugin_id not in ("metrics", "systemd", "docker")
+        use_sandbox = (
+            self._sandbox
+            and is_package
+            and not manifest.trusted
+            and not _is_class_based(plugin_id, init_file)
+        )
         
         # Setup tables if database schema defined in manifest
         if manifest.database and self.db_auto:
@@ -772,8 +795,9 @@ class PluginEngine:
         module_name = f"master.plugins.{plugin_id}"
         sys.modules.pop(module_name, None)
 
-        if plugin_id in self._loaded_plugins:
-            self._loaded_plugins.remove(plugin_id)
+        for k in (plugin_id, canonical_plugin_id(plugin_id), plugin_file_stem(plugin_id)):
+            if k in self._loaded_plugins:
+                self._loaded_plugins.remove(k)
 
         if self.db:
             await self.db.execute("UPDATE plugins SET status = 'DISABLED', enabled = 0 WHERE id = ?", (plugin_id,))

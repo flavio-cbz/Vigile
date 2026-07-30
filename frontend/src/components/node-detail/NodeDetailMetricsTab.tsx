@@ -72,7 +72,7 @@ export const NodeDetailMetricsTab: React.FC<{
   }, [filteredHistory]);
 
   const lastSnap = statsHistory[statsHistory.length - 1];
-  const disks = lastSnap?.disks || [];
+
 
   const cpuHistory = useMemo(() => statsHistory.map(p => p.cpu), [statsHistory]);
   const ramHistory = useMemo(() => statsHistory.map(p => p.ram), [statsHistory]);
@@ -136,13 +136,16 @@ export const NodeDetailMetricsTab: React.FC<{
   const diskSpark = useMemo(() => generateSparklinePaths(diskHistory.slice(-15)), [diskHistory]);
 
   const enrichedDisks = useMemo(() => {
+    const lastSnap = statsHistory[statsHistory.length - 1];
+    const disks = lastSnap?.disks || [];
     const estimates = estimateDiskSaturation(statsHistory.map(s => s.disks || []));
     return disks.map(d => ({
       ...d,
       days_left: estimates[d.mount_point]?.days_left ?? null,
       growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
     }));
-  }, [disks, statsHistory]);
+  }, [statsHistory]);
+
 
 
   const getStatus = (val: number, type: 'cpu' | 'ram' | 'disk') => {

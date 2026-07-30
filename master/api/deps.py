@@ -15,7 +15,7 @@ try:
     from typing import Annotated
 except ImportError:
     from typing_extensions import Annotated  # type: ignore[attr-defined]
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 
 import aiosqlite
 from fastapi import Depends, Header, HTTPException, Query, Request, status
@@ -281,6 +281,7 @@ def get_locale(
 # Type aliases for cleaner router signatures
 # ---------------------------------------------------------------------------
 
-CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
+CurrentUser = Annotated[Dict[str, Any], Depends(get_current_user)]
 DB = Annotated[aiosqlite.Connection, Depends(get_db)]
 Insights = Annotated[Any, Depends(get_insights_manager)]
+

@@ -53,8 +53,13 @@ async def test_lockdown_closes_active_connections():
             self.code = code
             self.reason = reason
 
+    from master.core.node_manager import NodeManager
+    node_manager.is_connected = NodeManager.is_connected.__get__(node_manager, NodeManager)
+    node_manager._connections.clear()
     ws = MockWebSocket()
     node_id = "test-node-lockdown"
+
+
 
     # Register connection in NodeManager
     await node_manager.register_connection(node_id, ws)

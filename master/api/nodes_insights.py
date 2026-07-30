@@ -5,8 +5,11 @@ Vigile — Nodes API: insights, profiling, and anomaly analysis endpoints
 from __future__ import annotations
 
 import logging
-import time
-from typing import Annotated
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+
 
 from fastapi import Depends, HTTPException, Path, status
 

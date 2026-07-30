@@ -79,9 +79,9 @@ export function estimateDiskSaturation(
       continue;
     }
 
-    const currentUsed = y[y.length - 1];
     const freeGB = freeBytes / 1024 ** 3;
     const daysLeft = freeGB / slope;
+
 
     let confidence: 'none' | 'low' | 'medium' | 'high' = 'low';
     const hoursCollected = (data.timestamps[data.timestamps.length - 1] - data.timestamps[0]) / 3600000;

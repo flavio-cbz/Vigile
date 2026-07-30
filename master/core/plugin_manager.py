@@ -479,8 +479,12 @@ class PluginManager:
         plugin_id = canonical_plugin_id(plugin_name)
         plugin_path = os.path.join(plugins_dir, f"{plugin_name}.py")
         if not os.path.isfile(plugin_path):
-            logger.warning("Plugin file not found: %s", plugin_path)
-            return False
+            pkg_init = os.path.join(plugins_dir, plugin_name, "__init__.py")
+            if os.path.isfile(pkg_init):
+                plugin_path = pkg_init
+            else:
+                logger.warning("Plugin file not found: %s", plugin_path)
+                return False
 
         if plugin_id in self._loaded_plugins:
             logger.debug("Plugin '%s' already loaded — skipped.", plugin_id)
@@ -645,5 +649,7 @@ class PluginManager:
 
 
 # Module-level singleton
-plugin_manager = PluginManager()
-plugin_engine: Any | None = None
+from master.core.plugin_engine import plugin_engine as _engine  # noqa: E402
+
+plugin_engine = _engine
+plugin_manager = _engine

@@ -37,6 +37,9 @@ async def client(db):
 
 @pytest.fixture(autouse=True)
 def setup_temp_plugins_dir(tmp_path, client):
+    import sys
+    saved_modules = dict(sys.modules)
+
     # app.dependency_overrides is already populated with deps.get_db from the client fixture
     old_plugins_dir = settings.plugins_dir
     saved_loaded = list(plugin_manager._loaded_plugins)
@@ -73,6 +76,12 @@ def setup_temp_plugins_dir(tmp_path, client):
     plugin_manager._loaded_plugins.extend(saved_loaded)
     plugin_manager._hooks.clear()
     plugin_manager._hooks.update(saved_hooks)
+
+    for k in list(sys.modules.keys()):
+        if k not in saved_modules:
+            del sys.modules[k]
+    sys.modules.update(saved_modules)
+
 
 
 @pytest.mark.asyncio

@@ -19,9 +19,11 @@ import os
 import time
 import uuid
 try:
-    from typing import Annotated
+    from typing import Annotated, List
 except ImportError:
     from typing_extensions import Annotated  # type: ignore[attr-defined]
+    from typing import List
+
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse
@@ -646,7 +648,8 @@ async def get_kickstart_ps1_script(request: Request) -> PlainTextResponse:
 
 @router.get(
     "",
-    response_model=list[NodeResponse],
+    response_model=List[NodeResponse],
+
     summary="List all nodes (Operator+)",
 )
 async def list_nodes(

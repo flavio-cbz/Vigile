@@ -44,6 +44,9 @@ def clear_rate_limiter():
 
 @pytest.fixture(autouse=True)
 async def setup_temp_plugins_dir(tmp_path):
+    import sys
+    saved_modules = dict(sys.modules)
+
     # Backup original plugins dir setting
     old_plugins_dir = settings.plugins_dir
     temp_dir = tmp_path / "plugins"
@@ -97,7 +100,7 @@ async def setup_temp_plugins_dir(tmp_path):
 
     yield temp_dir
 
-    # Restore settings
+    # Restore settings and sys.modules
     settings.plugins_dir = old_plugins_dir
     try:
         import master.api.admin
@@ -105,6 +108,12 @@ async def setup_temp_plugins_dir(tmp_path):
         master.api.admin.settings.plugins_dir = old_plugins_dir
     except Exception:
         pass
+
+    for k in list(sys.modules.keys()):
+        if k not in saved_modules:
+            del sys.modules[k]
+    sys.modules.update(saved_modules)
+
 
 
 @pytest.mark.asyncio
@@ -195,7 +204,8 @@ async def test_upload_and_delete_plugin(client: AsyncClient, auth_headers, setup
     assert "le plugin doit définir une fonction 'register(pm)'" in res.json()["detail"]
 
     # 3. Upload valid plugin
-    valid_code = """
+    valid_code = """from __future__ import annotations
+
 def register(pm) -> None:
     pm.register("get_supported_actions", _actions, plugin_name="test_upload")
 
@@ -212,6 +222,7 @@ def get_config_schema() -> dict:
         }
     }
 """
+
     files = {"file": ("test_upload.py", valid_code, "text/plain")}
     res = await client.post("/api/admin/plugins/upload", headers=auth_headers("admin"), files=files)
     assert res.status_code == status.HTTP_200_OK
@@ -266,4 +277,53 @@ async def test_toggle_plugin_stem_canonicalization(client: AsyncClient, auth_hea
     assert docker_plugin["enabled"] is False
     assert docker_plugin["loaded"] is False
     assert docker_plugin["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_package_directory_plugin_toggle_and_delete(
+    client: AsyncClient, auth_headers, setup_temp_plugins_dir
+):
+    # 1. Create a package directory plugin (no root .py)
+    pkg_dir = setup_temp_plugins_dir / "test_pkg_plugin"
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    manifest_content = json.dumps({
+        "id": "test_pkg_plugin",
+        "name": "Test Package Plugin",
+        "version": "1.0.0",
+        "description": "Package directory test",
+        "trusted": True
+    })
+    (pkg_dir / "manifest.json").write_text(manifest_content)
+    (pkg_dir / "__init__.py").write_text(
+        'def register(pm):\n'
+        '    pm.register("get_supported_actions", lambda: ["PKG_ACTION"], plugin_name="test_pkg_plugin")\n'
+    )
+
+    await plugin_manager.load_plugin("test_pkg_plugin", str(setup_temp_plugins_dir))
+
+    # 2. Configure package plugin
+    res = await client.post(
+        "/api/admin/plugins/test_pkg_plugin/config",
+        headers=auth_headers("admin"),
+        json={"setting1": "val1"},
+    )
+    assert res.status_code == status.HTTP_200_OK
+
+    # 3. Toggle off package plugin
+    res = await client.post("/api/admin/plugins/test_pkg_plugin/toggle", headers=auth_headers("admin"))
+    assert res.status_code == status.HTTP_200_OK
+    assert res.json()["status"] == "success"
+
+    # 4. Toggle back on
+    res = await client.post("/api/admin/plugins/test_pkg_plugin/toggle", headers=auth_headers("admin"))
+    assert res.status_code == status.HTTP_200_OK
+
+    # 5. Delete package plugin
+    res = await client.delete("/api/admin/plugins/test_pkg_plugin", headers=auth_headers("admin"))
+    assert res.status_code == status.HTTP_200_OK
+    assert res.json()["status"] == "success"
+
+    # 6. Verify directory removed from disk
+    assert not pkg_dir.exists()
+
 

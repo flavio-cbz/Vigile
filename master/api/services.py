@@ -15,7 +15,13 @@ Endpoints:
 """
 
 import logging
-from typing import Annotated, Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any
+
+
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
