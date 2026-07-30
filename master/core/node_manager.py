@@ -162,6 +162,7 @@ class NodeManager:
         self._disk_scan_inflight: set[str] = set()
         # Per-node last disk-scan trigger time (for 12h periodic scheduling)
         self._disk_scan_last_run: dict[str, float] = {}
+        self._insights_manager: object | None = None
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -174,11 +175,13 @@ class NodeManager:
         stale_threshold: int = 86400,
         default_intent_max_age: float = 300.0,
         cache_update_interval: int = 300,
+        insights_manager: object | None = None,
     ) -> None:
         """Start the background heartbeat monitor and cache updater. Called at app startup.
         Thresholds are injected here — no config coupling inside the loop."""
         self.heartbeat_interval = heartbeat_interval
         self._default_intent_max_age = default_intent_max_age
+        self._insights_manager = insights_manager
         self._monitor_task = asyncio.create_task(
             self._heartbeat_monitor(heartbeat_interval, lost_threshold, stale_threshold),
             name="heartbeat_monitor",
@@ -235,8 +238,8 @@ class NodeManager:
     async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
         """Query and cache active services and Docker containers for online node(s)."""
         from master.core.plugin_utils import parse_worker_list
-        from master.plugins.systemd_plugin import ServiceInfo
-        from master.plugins.docker_plugin import ContainerSummary
+        from master.plugins.systemd import ServiceInfo
+        from master.plugins.docker import ContainerSummary
 
         db = get_db_conn()
         connected = [node_id] if node_id else self.connected_node_ids()
@@ -392,16 +395,14 @@ class NodeManager:
                             expired_time,
                             new_apps_detected,
                         )
-                        from master.api.deps import get_insights_manager
-
-                        im = get_insights_manager()
-                        asyncio.create_task(im.generate_profile(nid, db, self, force=True))
+                        if self._insights_manager:
+                            asyncio.create_task(
+                                self._insights_manager.generate_profile(nid, db, self, force=True)
+                            )
             except Exception as ex:
                 logger.warning(
                     "Cache updater: failed to check profile expiration for node %s: %s", nid, ex
                 )
-            except Exception as ex:
-                logger.exception("Cache updater: error updating node %s: %s", nid, ex)
 
     # -----------------------------------------------------------------------
     # Node creation (called when Admin generates a join token)
@@ -588,15 +589,6 @@ class NodeManager:
                 {
                     "node_id": node_id,
                     "previous_state": previous_state,
-                    "ts": now,
-                },
-            )
-            await bus.publish(
-                "node.state",
-                {
-                    "node_id": node_id,
-                    "from_state": previous_state,
-                    "new_state": NodeState.REVOKED.value,
                     "ts": now,
                 },
             )

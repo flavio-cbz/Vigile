@@ -11,7 +11,11 @@ Provides reusable dependency-injected objects:
 """
 
 import threading
-from typing import Annotated, Any, AsyncGenerator
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any, AsyncGenerator
 
 import aiosqlite
 from fastapi import Depends, Header, HTTPException, Query, Request, status
@@ -23,6 +27,7 @@ from master.core.insights import InsightsManager
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager, node_manager
 from master.core.plugin_manager import plugin_manager
+from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.security_manager import (
     ROLES_HIERARCHY,
     ExpiredTokenError,
@@ -31,6 +36,7 @@ from master.core.security_manager import (
     get_security_instance,
 )
 from master.core.structured_llm import StructuredLLM
+from master.core.worker_query_port import WorkerQueryPort
 from master.db.database import database_session
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -63,6 +69,14 @@ def get_security() -> SecurityManager:
 
 def get_node_manager() -> NodeManager:
     return node_manager
+
+
+def get_worker_query_port(nm: NodeManager = Depends(get_node_manager)) -> WorkerQueryPort:
+    return WorkerQueryPort(nm)
+
+
+def get_proposal_dispatcher(nm: NodeManager = Depends(get_node_manager)) -> ApprovedProposalDispatcher:
+    return ApprovedProposalDispatcher(nm)
 
 
 def get_bus() -> Any:

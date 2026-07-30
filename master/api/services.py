@@ -32,6 +32,7 @@ from master.api.rate_limits import WORKER_CONTROL_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
 from master.core.rate_limiter import rate_limiter
+from master.core.worker_query_port import WorkerQueryPort
 from master.core.plugin_utils import (
     parse_worker_list,
     parse_worker_object,
@@ -60,18 +61,43 @@ async def _get_node_or_404(nm: NodeManager, db: DB, node_id: str) -> dict[str, A
     return node
 
 
-async def _send_intent(
+async def _query_intent(
     nm: NodeManager,
     node_id: str,
     action: str,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    """Send an intent and handle connection/timeout errors."""
+    """Send a read-only intent via WorkerQueryPort and handle errors."""
+    port = WorkerQueryPort(nm)
     try:
-        return await nm.send_intent(
-            node_id,
-            {"action": action, "params": params},
-            timeout=15.0,
+        return await port.query(node_id, action, params, timeout=15.0)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    except TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Worker did not respond to {action} request in time",
+        )
+
+
+async def _dispatch_intent(
+    nm: NodeManager,
+    db: DB,
+    node_id: str,
+    action: str,
+    params: dict[str, Any],
+    user_id: str,
+) -> dict[str, Any]:
+    """Dispatch a mutating intent via ApprovedProposalDispatcher."""
+    from master.core.proposal_dispatcher import ApprovedProposalDispatcher
+
+    dispatcher = ApprovedProposalDispatcher(nm)
+    try:
+        return await dispatcher.dispatch_admin_action(
+            node_id, action, params, user_id, db, intent_timeout=15.0,
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -145,7 +171,7 @@ async def list_services(
         return ServiceListResponse(node_id=node_id, services=DEMO_SERVICES)
 
     await _get_node_or_404(nm, db, node_id)
-    result = await _send_intent(nm, node_id, "LIST_SERVICES", {})
+    result = await _query_intent(nm, node_id, "LIST_SERVICES", {})
 
     services: list[dict[str, str]] = []
     if result.get("success"):
@@ -196,7 +222,7 @@ async def get_service_status(
         )
 
     await _get_node_or_404(nm, db, node_id)
-    result = await _send_intent(nm, node_id, "STATUS_SERVICE", {"service": service_name})
+    result = await _query_intent(nm, node_id, "STATUS_SERVICE", {"service": service_name})
 
     if result.get("success"):
         parsed = parse_service_status(result.get("output", ""))
@@ -241,7 +267,7 @@ async def restart_service(
         )
 
     await _get_node_or_404(nm, db, node_id)
-    result = await _send_intent(nm, node_id, "RESTART_SERVICE", {"service": service_name})
+    result = await _dispatch_intent(nm, db, node_id, "RESTART_SERVICE", {"service": service_name}, claims["sub"])
 
     if result.get("success"):
         await log_action(
@@ -285,7 +311,7 @@ async def list_containers(
         return ContainerListResponse(node_id=node_id, containers=node_containers)
 
     await _get_node_or_404(nm, db, node_id)
-    result = await _send_intent(nm, node_id, "LIST_CONTAINERS", {})
+    result = await _query_intent(nm, node_id, "LIST_CONTAINERS", {})
 
     containers: list[dict[str, Any]] = []
     if result.get("success"):
@@ -331,7 +357,7 @@ async def restart_container(
         )
 
     await _get_node_or_404(nm, db, node_id)
-    result = await _send_intent(nm, node_id, "RESTART_CONTAINER", {"container_id": container_id})
+    result = await _dispatch_intent(nm, db, node_id, "RESTART_CONTAINER", {"container_id": container_id}, claims["sub"])
 
     if result.get("success"):
         await log_action(

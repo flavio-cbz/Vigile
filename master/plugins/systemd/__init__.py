@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from fastapi import Depends
 from master.core.plugin_base import PluginBase, PluginContext, hook, route
-from master.api.deps import get_node_manager
+from master.api.deps import get_node_manager, get_worker_query_port
 from master.core.plugin_utils import parse_worker_list, parse_worker_object
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,7 @@ class SystemdPlugin(PluginBase):
         self,
         node_id: str | None = None,
         nm: Any = Depends(get_node_manager),
+        port: Any = Depends(get_worker_query_port),
     ) -> dict:
         """Fetch systemd services list across workers."""
         nodes = []
@@ -100,7 +101,7 @@ class SystemdPlugin(PluginBase):
         services = []
         for nid in nodes:
             try:
-                result = await nm.send_intent(nid, {"action": "LIST_SERVICES"}, timeout=10.0)
+                result = await port.query(nid, "LIST_SERVICES", timeout=10.0)
                 if result.get("success"):
                     parsed = parse_service_list(result.get("output", ""))
                     if parsed:

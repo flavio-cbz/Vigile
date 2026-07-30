@@ -22,6 +22,7 @@ from master.core.automation_engine import automation_engine
 from master.core.enums import NodeState
 from master.core.investigation_manager import investigation_manager
 from master.core.node_manager import node_manager
+from master.core.insights import InsightsManager
 from master.core.plugin_engine import PluginEngine, PageRegistry
 from master.core.proposal_autoexpire import auto_expire_proposals
 from master.core.route_registrar import RouteRegistrar
@@ -160,6 +161,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     import master.core.plugin_manager as _pm
     _pm.plugin_engine = engine
+    _pm.plugin_manager = engine
+    _pm.plugin_manager.set_engine(engine)
+
     await engine.initialize(db, sandbox=settings.plugin_sandbox)
     logger.info("Plugins loaded: %s", engine.loaded_plugins)
 
@@ -214,12 +218,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.exception("Plugin state reconciliation failed during startup")
 
     # 6. Node Manager
+    insights_manager = InsightsManager()
     await node_manager.start(
         heartbeat_interval=settings.heartbeat_interval,
         lost_threshold=settings.heartbeat_lost_threshold,
         stale_threshold=settings.heartbeat_stale_threshold,
         default_intent_max_age=settings.default_intent_max_age,
         cache_update_interval=settings.cache_update_interval,
+        insights_manager=insights_manager,
     )
 
     # 6b. Disk Scan — background trigger on first CONNECTED + 12h periodic via _cache_updater.

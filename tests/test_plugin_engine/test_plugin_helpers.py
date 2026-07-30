@@ -16,8 +16,8 @@ from master.core.plugin_utils import (
     parse_worker_list,
     parse_worker_object,
 )
-from master.plugins.docker_plugin import parse_container_list as _orig_container
-from master.plugins.systemd_plugin import (
+from master.plugins.docker import parse_container_list as _orig_container
+from master.plugins.systemd import (
     parse_service_list as _orig_service_list,
     parse_service_status as _orig_service_status,
 )
@@ -55,7 +55,7 @@ SERVICE_SAMPLE = [
 
 
 def test_parse_worker_list_valid():
-    from master.plugins.systemd_plugin import ServiceInfo
+    from master.plugins.systemd import ServiceInfo
     parsed = parse_worker_list(json.dumps(SERVICE_SAMPLE), ServiceInfo)
     assert parsed is not None
     assert len(parsed) == 2
@@ -66,22 +66,22 @@ def test_parse_worker_list_valid():
 
 
 def test_parse_worker_list_empty_array():
-    from master.plugins.systemd_plugin import ServiceInfo
+    from master.plugins.systemd import ServiceInfo
     assert parse_worker_list("[]", ServiceInfo) == []
 
 
 def test_parse_worker_list_invalid_json():
-    from master.plugins.systemd_plugin import ServiceInfo
+    from master.plugins.systemd import ServiceInfo
     assert parse_worker_list("!!!", ServiceInfo) is None
 
 
 def test_parse_worker_list_not_a_list():
-    from master.plugins.systemd_plugin import ServiceInfo
+    from master.plugins.systemd import ServiceInfo
     assert parse_worker_list('{"name": "ssh.service"}', ServiceInfo) is None
 
 
 def test_parse_worker_list_bad_fields():
-    from master.plugins.systemd_plugin import ServiceInfo
+    from master.plugins.systemd import ServiceInfo
     assert parse_worker_list('[{"state": "active"}]', ServiceInfo) is None
 
 
@@ -91,7 +91,7 @@ def test_parse_worker_list_bad_fields():
 
 
 def test_parse_worker_object_valid():
-    from master.plugins.systemd_plugin import ServiceStatus
+    from master.plugins.systemd import ServiceStatus
     raw = json.dumps({"service": "ssh.service", "active": "active", "enabled": "enabled"})
     parsed = parse_worker_object(raw, ServiceStatus)
     assert parsed is not None
@@ -101,16 +101,16 @@ def test_parse_worker_object_valid():
 
 
 def test_parse_worker_object_missing_field():
-    from master.plugins.systemd_plugin import ServiceStatus
+    from master.plugins.systemd import ServiceStatus
     assert parse_worker_object('{"service": "ssh.service"}', ServiceStatus) is None
 
 
 def test_parse_worker_object_invalid_json():
-    from master.plugins.systemd_plugin import ServiceStatus
+    from master.plugins.systemd import ServiceStatus
     assert parse_worker_object("{not json", ServiceStatus) is None
 
 
 def test_parse_worker_object_not_an_object():
-    from master.plugins.systemd_plugin import ServiceStatus
+    from master.plugins.systemd import ServiceStatus
     # A JSON array is not a mapping -> ServiceStatus(**[...]) raises TypeError
     assert parse_worker_object("[]", ServiceStatus) is None

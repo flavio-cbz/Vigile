@@ -243,6 +243,7 @@ async def analyze_node_anomaly(
                 if locale == "en"
                 else "Aucune action requise. Si cela impacte d'autres services, vous pouvez limiter le CPU de Plex ou activer l'accélération matérielle (transcodage GPU)."
             ),
+            correlated_cause=[],
         )
 
     # Verify node exists

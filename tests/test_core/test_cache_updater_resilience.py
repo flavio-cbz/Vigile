@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import aiosqlite
 import pytest
@@ -10,7 +10,7 @@ from master.core.node_manager import NodeManager
 
 
 @pytest.mark.asyncio
-async def test_cache_updater_catches_operational_error():
+async def test_cache_updater_catches_operational_error(db: aiosqlite.Connection):
     """Cache updater should catch aiosqlite.OperationalError without crashing."""
     nm = NodeManager()
     event = asyncio.Event()
@@ -32,7 +32,7 @@ async def test_cache_updater_catches_operational_error():
 
 
 @pytest.mark.asyncio
-async def test_cache_updater_catches_generic_exception():
+async def test_cache_updater_catches_generic_exception(db: aiosqlite.Connection):
     """Cache updater should catch generic exceptions without crashing."""
     nm = NodeManager()
     event = asyncio.Event()
@@ -53,7 +53,7 @@ async def test_cache_updater_catches_generic_exception():
 
 
 @pytest.mark.asyncio
-async def test_cache_updater_stops_on_cancelled_error():
+async def test_cache_updater_stops_on_cancelled_error(db: aiosqlite.Connection):
     """Cache updater should break cleanly — no CancelledError propagation."""
     nm = NodeManager()
 

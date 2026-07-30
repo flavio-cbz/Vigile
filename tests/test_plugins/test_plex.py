@@ -12,7 +12,7 @@ import aiosqlite
 import pytest
 import httpx
 
-from master.plugins.plex_plugin import (
+from master.plugins.plex import (
     detect_plex_instance,
     _on_status_report,
     detect_route,

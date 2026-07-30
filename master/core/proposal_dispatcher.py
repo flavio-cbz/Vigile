@@ -243,13 +243,10 @@ class ApprovedProposalDispatcher:
         )
 
         logger.info(
-            "Proposal dispatched",
-            proposal_id=proposal_id,
-            dispatch_id=dispatch_id,
-            intent_id=intent_id,
-            node_id=proposal.node_id,
-            action=proposal.action,
-            status=proposal.status,
+            "Proposal dispatched: proposal_id=%s dispatch_id=%s intent_id=%s "
+            "node_id=%s action=%s status=%s",
+            proposal_id, dispatch_id, intent_id,
+            proposal.node_id, proposal.action, proposal.status,
         )
 
         return result
@@ -330,10 +327,54 @@ class ApprovedProposalDispatcher:
         )
 
         logger.info(
-            "Intent result resolved",
-            proposal_id=proposal_id,
-            intent_id=intent_id,
-            dispatch_id=dispatch_id,
+            "Intent result resolved: proposal_id=%s intent_id=%s "
+            "dispatch_id=%s node_id=%s status=%s",
+            proposal_id, intent_id, dispatch_id, node_id, status,
+        )
+
+    async def dispatch_admin_action(
+        self,
+        node_id: str,
+        action: str,
+        params: dict[str, Any],
+        user_id: str,
+        db: aiosqlite.Connection,
+        *,
+        intent_timeout: float | None = None,
+        reasoning: str | None = None,
+        risk_level: str = "LOW",
+    ) -> dict[str, Any]:
+        """Create an auto-approved proposal and dispatch it immediately.
+
+        For direct admin/API mutations that don't go through the interactive
+        HITL proposal flow.
+        """
+        proposal = ActionProposal(
             node_id=node_id,
-            status=status,
+            action=action,
+            params=params,
+            reasoning=reasoning or f"Admin action: {action}",
+            risk_level=risk_level,
+            created_by=user_id,
+            status="APPROVED",
+            approved_by=user_id,
+        )
+
+        data = proposal.to_db_dict()
+        async with transaction(db) as tx_db:
+            await tx_db.execute(
+                """INSERT INTO action_proposals
+                   (id, node_id, action, params_json, reasoning, risk_level,
+                    status, created_by, approved_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["id"], data["node_id"], data["action"], data["params_json"],
+                    data["reasoning"], data["risk_level"],
+                    data["status"], data["created_by"], data["approved_by"],
+                    data["created_at"], data["updated_at"],
+                ),
+            )
+
+        return await self.dispatch_approved(
+            proposal.id, db, intent_timeout=intent_timeout,
         )

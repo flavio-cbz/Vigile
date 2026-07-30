@@ -14,8 +14,9 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Path, Query, Request, status
 
 from master.api.demo_data import DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
-from master.api.deps import DB, CurrentUser, get_node_manager, get_security, require_role
+from master.api.deps import DB, CurrentUser, get_node_manager, get_security, get_worker_query_port, require_role
 from master.api.nodes_helpers import _add_bulk_node_metrics, _add_node_metrics, _node_to_response
+from master.core.worker_query_port import WorkerQueryPort
 from master.api.nodes_models import (
     BulkNodeStatus,
     BulkStatusResponse,
@@ -250,6 +251,34 @@ async def regenerate_join_token(
 
 
 # ---------------------------------------------------------------------------
+# Verify Chain (defined before /{node_id} to prevent route shadowing)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/verify-chain",
+    response_model=dict,
+    summary="Verify audit chain integrity with optional pagination (Admin only)",
+)
+async def verify_chain(
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("admin"))],
+    max_entries: int | None = Query(
+        default=None, ge=1, le=100000, description="Max entries to verify"
+    ),
+) -> dict:
+    """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
+    # Demo mode: return mock data
+    if is_demo(claims):
+        return {"verified": True, "entries_checked": 5, "corrupted": False, "valid": True}
+
+    from master.core.audit import verify_chain as _verify_chain
+
+    report = await _verify_chain(db, max_entries=max_entries)
+    return report
+
+
+# ---------------------------------------------------------------------------
 # Node CRUD
 # ---------------------------------------------------------------------------
 
@@ -453,34 +482,6 @@ async def configure_node(
 
 
 # ---------------------------------------------------------------------------
-# Verify Chain
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/verify-chain",
-    response_model=dict,
-    summary="Verify audit chain integrity with optional pagination (Admin only)",
-)
-async def verify_chain(
-    db: DB,
-    claims: Annotated[dict, Depends(require_role("admin"))],
-    max_entries: int | None = Query(
-        default=None, ge=1, le=100000, description="Max entries to verify"
-    ),
-) -> dict:
-    """Verify the audit log hash chain. `max_entries` limits scan for large tables."""
-    # Demo mode: return mock data
-    if is_demo(claims):
-        return {"verified": True, "entries_checked": 5, "corrupted": False, "valid": True}
-
-    from master.core.audit import verify_chain as _verify_chain
-
-    report = await _verify_chain(db, max_entries=max_entries)
-    return report
-
-
-# ---------------------------------------------------------------------------
 # Bulk Status
 # ---------------------------------------------------------------------------
 
@@ -660,6 +661,7 @@ async def get_node_logs(
         str | None, Query(description="Log file path on the worker (/var/log/ only)")
     ] = None,
     nm: NodeManager = Depends(get_node_manager),
+    port: WorkerQueryPort = Depends(get_worker_query_port),
 ) -> LogsResponse:
     """
     Fetch live logs from a Worker via INTENT.
@@ -708,10 +710,8 @@ async def get_node_logs(
         params = {"path": effective_path, "lines": lines}
 
     try:
-        result = await nm.send_intent(
-            node_id,
-            {"action": action, "params": params},
-            timeout=15.0,
+        result = await port.query(
+            node_id, action, params, timeout=15.0
         )
     except RuntimeError as exc:
         raise HTTPException(

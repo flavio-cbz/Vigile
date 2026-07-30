@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import status
+from fastapi import HTTPException, status
 from httpx import ASGITransport, AsyncClient
 
 from master.api import deps
@@ -119,12 +119,14 @@ async def test_offline_mode_online_mode_still_works(temp_dir, client, monkeypatc
 
     monkeypatch.setattr(settings, "offline_mode", False)
     monkeypatch.setattr(settings, "worker_binary_local_dir", str(temp_dir))
+    monkeypatch.setattr(settings, "worker_binary_cache_dir", str(Path(temp_dir) / "cache_empty"))
 
-    # When not in offline mode and the cache dir doesn't have a cached binary yet,
-    # the endpoint will try to fetch from the manifest URL, which will fail since
-    # there's no real manifest. We expect a 502 or similar, NOT a 404 (offline path)
-    # and NOT the local binary content.
-    resp = await client.get("/api/nodes/binary/linux/amd64/worker")
+    with patch("master.api.worker_binary._fetch_and_cache", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.side_effect = HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Manifest fetch failed in test",
+        )
+        resp = await client.get("/api/nodes/binary/linux/amd64/worker")
     # Should NOT be the local binary (which returns 200)
     assert resp.status_code != 200
     # Should not serve the local content

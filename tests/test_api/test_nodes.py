@@ -312,7 +312,8 @@ async def test_get_node_logs(client: AsyncClient, db, auth_headers):
     await db.commit()
 
     # Mock send_intent
-    orig_send_intent = node_manager.send_intent
+    orig_send_intent = node_manager._send_intent
+    orig_connected = node_manager.is_connected
 
     async def mock_send_intent(node_id, intent, timeout=15.0):
         assert node_id == "n-6"
@@ -320,7 +321,11 @@ async def test_get_node_logs(client: AsyncClient, db, auth_headers):
         assert intent["params"]["lines"] == 50
         return {"success": True, "output": "line 1\nline 2"}
 
-    node_manager.send_intent = mock_send_intent
+    async def mock_connected(node_id_arg):
+        return True
+
+    node_manager._send_intent = mock_send_intent
+    node_manager.is_connected = mock_connected
     try:
         response = await client.get(
             "/api/nodes/n-6/logs?lines=50", headers=auth_headers("operator")
@@ -330,7 +335,8 @@ async def test_get_node_logs(client: AsyncClient, db, auth_headers):
         assert data["node_id"] == "n-6"
         assert "line 1" in data["output"]
     finally:
-        node_manager.send_intent = orig_send_intent
+        node_manager._send_intent = orig_send_intent
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
@@ -342,29 +348,35 @@ async def test_get_node_logs_errors(client: AsyncClient, db, auth_headers):
     )
     await db.commit()
 
-    orig_send_intent = node_manager.send_intent
+    orig_send_intent = node_manager._send_intent
+    orig_connected = node_manager.is_connected
 
     # 1. Test TimeoutError
     async def mock_send_intent_timeout(node_id, intent, timeout=15.0):
         raise TimeoutError("Timeout")
 
-    node_manager.send_intent = mock_send_intent_timeout
+    node_manager._send_intent = mock_send_intent_timeout
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         response = await client.get("/api/nodes/n-7/logs", headers=auth_headers("operator"))
         assert response.status_code == status.HTTP_504_GATEWAY_TIMEOUT
     finally:
-        node_manager.send_intent = orig_send_intent
+        node_manager._send_intent = orig_send_intent
+        node_manager.is_connected = orig_connected
 
     # 2. Test RuntimeError (Service Unavailable)
     async def mock_send_intent_runtime(node_id, intent, timeout=15.0):
         raise RuntimeError("Worker not connected")
 
-    node_manager.send_intent = mock_send_intent_runtime
+    node_manager._send_intent = mock_send_intent_runtime
+    node_manager.is_connected = mock_connected
     try:
         response = await client.get("/api/nodes/n-7/logs", headers=auth_headers("operator"))
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     finally:
-        node_manager.send_intent = orig_send_intent
+        node_manager._send_intent = orig_send_intent
 
 
 @pytest.mark.asyncio
@@ -659,10 +671,10 @@ async def test_update_worker_success(client: AsyncClient, db, auth_headers):
     )
     await db.commit()
 
-    # Mock node manager's send_intent to return success
+    # Mock node manager's _send_intent to return success
     with mock.patch.object(
         node_manager,
-        "send_intent",
+        "_send_intent",
         return_value={"success": True, "output": "updated successfully"},
     ) as mock_send:
         response = await client.post(
@@ -671,11 +683,13 @@ async def test_update_worker_success(client: AsyncClient, db, auth_headers):
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {"success": True, "output": "updated successfully"}
-        mock_send.assert_called_once_with(
-            "n-update-1",
-            {"action": "UPDATE_WORKER", "params": {}},
-            timeout=30.0,
-        )
+        # ApprovedProposalDispatcher adds intent_id to the intent
+        call_args = mock_send.call_args
+        assert call_args[0][0] == "n-update-1"
+        assert call_args[0][1]["action"] == "UPDATE_WORKER"
+        assert call_args[0][1]["params"] == {}
+        assert "intent_id" in call_args[0][1]
+        assert call_args[1]["timeout"] == 30.0
 
 
 @pytest.mark.asyncio

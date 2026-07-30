@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "LIST_STATS",
+    "GET_STATS",
     "LIST_SERVICES",
     "LIST_CONTAINERS",
     "READ_LOGS",
+    "READ_LOGS_SERVICE",
+    "STATUS_SERVICE",
+    "DISK_SCAN",
 })
 
 
@@ -67,13 +71,33 @@ class WorkerQueryPort:
 
     @classmethod
     def is_allowed(cls, action: str) -> bool:
-        """Check whether *action* is in the read-only whitelist.
-
-        Returns:
-            True if the action is a read-only query (LIST_STATS,
-            LIST_SERVICES, LIST_CONTAINERS, READ_LOGS).
-        """
+        """Check whether *action* is in the read-only whitelist."""
         return action in cls.ALLOWED_ACTIONS
+
+    async def query(
+        self,
+        node_id: str,
+        action: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Send a whitelisted read-only intent to a connected Worker."""
+        if action not in self.ALLOWED_ACTIONS:
+            raise ValueError(
+                f"Action {action!r} is not in the read-only whitelist. "
+                f"Use ApprovedProposalDispatcher for mutations."
+            )
+
+        if not await self._node_manager.is_connected(node_id):
+            raise RuntimeError(f"Node {node_id} is not connected")
+
+        intent: dict[str, Any] = {
+            "intent_id": str(uuid.uuid4()),
+            "action": action,
+            "params": params or {},
+        }
+        return await self._node_manager._send_intent(node_id, intent, timeout=timeout)
 
     # ------------------------------------------------------------------
     # Read-only query methods

@@ -17,13 +17,13 @@ interface DiskMountCardsProps {
 }
 
 const SEVERITY_COLORS = {
-  crit: {
+  critical: {
     bar: 'bg-severity-critical',
     text: 'text-severity-critical',
     border: 'border-red-500/20',
     icon: 'text-severity-critical',
   },
-  warn: {
+  warning: {
     bar: 'bg-severity-warning',
     text: 'text-severity-warning',
     border: 'border-amber-500/20',
@@ -57,7 +57,7 @@ export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks }) => {
     <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
       {disks.map((d, idx) => {
         const severity = getDiskSeverity(d.percent, d.days_left);
-        const colors = SEVERITY_COLORS[severity];
+        const colors = SEVERITY_COLORS[severity] || SEVERITY_COLORS.ok;
         const daysLabel = formatDaysLeft(d.days_left, t);
         const growthPositive = d.growth_gb_per_day !== null && d.growth_gb_per_day !== undefined && d.growth_gb_per_day > 0;
 

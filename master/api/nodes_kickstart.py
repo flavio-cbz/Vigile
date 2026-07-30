@@ -104,6 +104,12 @@ if [ -z "$JOIN_TOKEN" ] || [ -z "$MASTER_URL" ]; then
     exit 1
 fi
 
+# Sanitize MASTER_URL to prevent command injection in heredocs
+if ! echo "$MASTER_URL" | grep -qE '^https?://[a-zA-Z0-9._:/@-]+$'; then
+    echo "ERROR: MASTER_URL contains invalid characters: $MASTER_URL" >&2
+    exit 1
+fi
+
 
 # ── OS / Arch detection ──────────────────────────────────────────────────────
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -153,6 +159,28 @@ if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
 fi
 
 echo "[vigile] SHA256 OK."
+
+# ── Minisign signature verification (optional if minisign CLI available) ───
+SIG_URL="$BINARY_URL.sig"
+PUBKEY_URL="$MASTER_URL/api/nodes/binary/public-key"
+
+if command -v minisign >/dev/null 2>&1; then
+    echo "[vigile] Verifying minisign signature..."
+    PUBKEY="$(curl $CURL_CA_OPTS -sSfL "$PUBKEY_URL" 2>/dev/null || true)"
+    SIG_FILE="$TMPDIR_VIGILE/worker.sig"
+    if [ -n "$PUBKEY" ] && curl $CURL_CA_OPTS -sSfL "$SIG_URL" -o "$SIG_FILE" 2>/dev/null; then
+        KEY_LINE="$(echo "$PUBKEY" | awk 'NR==2')"
+        if [ -n "$KEY_LINE" ] && minisign -Vm "$BINARY_PATH" -P "$KEY_LINE" -x "$SIG_FILE" >/dev/null 2>&1; then
+            echo "[vigile] Signature OK."
+        else
+            echo "ERROR: Minisign signature verification failed — binary rejected." >&2
+            exit 1
+        fi
+    fi
+else
+    echo "[vigile] WARNING: minisign CLI not found — signature verification skipped (SHA256 verified)."
+fi
+
 chmod +x "$BINARY_PATH"
 
 # ── Installation ──────────────────────────────────────────────────────────────

@@ -209,8 +209,6 @@ export const NodeDetailMetricsTab: React.FC<{
         focusedMetric={focusedMetric}
         onToggleMetric={handleToggleMetric}
         getStatus={getStatus}
-        disks={disks}
-        t={t}
       />
 
       <MetricCharts

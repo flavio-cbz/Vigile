@@ -49,6 +49,7 @@ class DatabaseConnectionPool:
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA foreign_keys=ON")
         await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = aiosqlite.Row
         await conn.commit()
         return conn
@@ -108,6 +109,7 @@ async def init_db(
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")
     await db.execute("PRAGMA synchronous=NORMAL")
+    await db.execute("PRAGMA busy_timeout=5000")
     db.row_factory = aiosqlite.Row
 
     await db.commit()

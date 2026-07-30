@@ -231,7 +231,7 @@ func TestDiskScan_AllocatedSize(t *testing.T) {
 	if !ok {
 		t.Skip("syscall.Stat_t not available on this platform")
 	}
-	expectedSize := stat.Blocks * int64(stat.Blksize)
+	expectedSize := stat.Blocks * 512
 
 	result := handleDiskScan(context.Background(), Intent{
 		Params: map[string]interface{}{
@@ -257,8 +257,8 @@ func TestDiskScan_AllocatedSize(t *testing.T) {
 		if child.Name == "sized_file" {
 			found = true
 			if child.Size != expectedSize {
-				t.Fatalf("expected size %d (Blocks=%d * Blksize=%d), got %d",
-					expectedSize, stat.Blocks, stat.Blksize, child.Size)
+				t.Fatalf("expected size %d (Blocks=%d * 512), got %d",
+					expectedSize, stat.Blocks, child.Size)
 			}
 			break
 		}

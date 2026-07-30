@@ -66,7 +66,7 @@ async def _process_worker_updates(db, nm, settings_obj) -> None:
                 await _update_node_if_needed(node, nm, latest_version, settings_obj)
 
 
-async def _update_node_if_needed(node, nm, latest_version, settings_obj) -> None:
+async def _update_node_if_needed(node, nm, latest_version, settings_obj, db) -> None:
     """
     Update a single node if its version is outdated.
     """
@@ -83,23 +83,26 @@ async def _update_node_if_needed(node, nm, latest_version, settings_obj) -> None
                 current_version,
                 latest_version,
             )
-            await _dispatch_node_update(node_id, nm, settings_obj)
+            await _dispatch_node_update(node_id, nm, settings_obj, db)
 
 
-async def _dispatch_node_update(node_id, nm, settings_obj) -> None:
+async def _dispatch_node_update(node_id, nm, settings_obj, db) -> None:
     """
     Dispatch an update intent to a specific node.
     """
     from master.core.enums import WorkerAction
+    from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 
+    dispatcher = ApprovedProposalDispatcher(nm)
     try:
-        await nm.send_intent(
+        await dispatcher.dispatch_admin_action(
             node_id,
-            {
-                "action": WorkerAction.UPDATE_WORKER,
-                "params": {},
-            },
-            timeout=settings_obj.DEFAULT_TIMEOUT,
+            WorkerAction.UPDATE_WORKER,
+            {},
+            "system",
+            db,
+            intent_timeout=settings_obj.DEFAULT_TIMEOUT,
+            reasoning="Auto-update: worker binary version mismatch",
         )
         logger.info(
             "Auto-update: Node %s successfully updated and restarted.",

@@ -26,6 +26,7 @@ import ipaddress
 import json
 import logging
 import re
+import socket
 import time
 import uuid
 from datetime import datetime, timezone
@@ -552,7 +553,11 @@ class AutomationEngine:
             end_minutes = eh * 60 + em
             return start_minutes <= current_minutes <= end_minutes
         except Exception:
-            return True  # fail open for malformed conditions
+            logger.warning(
+                "Malformed time_window condition '%s' — blocking rule as fail-safe.",
+                window,
+            )
+            return False  # Fail closed on malformed condition
 
     async def _fire_rule(
         self,
@@ -565,9 +570,16 @@ class AutomationEngine:
         rule_id = rule["id"]
         cooldown_seconds = rule.get("cooldown_seconds", 300)
 
-        # --- Cooldown check ---
-        if self._check_cooldown(rule_id, node_id, cooldown_seconds):
-            logger.debug("Rule %s on cooldown for node %s — skipping.", rule_id, node_id)
+        # --- Atomic Cooldown check & set under lock ---
+        async with self._lock:
+            if self._check_cooldown(rule_id, node_id, cooldown_seconds):
+                logger.debug("Rule %s on cooldown for node %s — skipping.", rule_id, node_id)
+                should_fire = False
+            else:
+                self._set_cooldown(rule_id, node_id)
+                should_fire = True
+
+        if not should_fire:
             await self._write_log(rule_id, node_id, "COOLDOWN", trigger_data, {}, db)
             return
 
@@ -583,8 +595,6 @@ class AutomationEngine:
             await self._write_log(rule_id, node_id, "SKIPPED", trigger_data, {}, db)
             return
 
-        # --- Mark cooldown before executing to prevent parallel fires ---
-        self._set_cooldown(rule_id, node_id)
         await self._persist_cooldown(rule_id, node_id, db)
 
         logger.info(
@@ -725,7 +735,7 @@ class AutomationEngine:
             node_id=node_id,
             action=intent_action,
             params=params,
-            reasoning=f"Automation rule triggered this action (trust_level=auto).",
+            reasoning="Automation rule triggered this action (trust_level=auto).",
             risk_level="LOW",
             created_by="automation",
             status="APPROVED",
@@ -748,29 +758,12 @@ class AutomationEngine:
             )
 
         try:
-            result = await node_manager.send_intent(
-                node_id,
-                {"action": intent_action, "params": params},
-                timeout=15.0,
+            from master.core.proposal_dispatcher import ApprovedProposalDispatcher
+
+            dispatcher = ApprovedProposalDispatcher(node_manager)
+            result = await dispatcher.dispatch_approved(
+                proposal.id, db, intent_timeout=15.0,
             )
-            success = result.get("success", False)
-            proposal.complete(success=success, result_data=result)
-
-            await self._persist_proposal_update(proposal, db)
-
-            await log_action(
-                db,
-                user_id="system",
-                action=AuditAction.AUTOMATION_TRIGGERED,
-                node_id=node_id,
-                details={
-                    "proposal_id": proposal.id,
-                    "action": intent_action,
-                    "trust_level": "auto",
-                    "status": proposal.status,
-                },
-            )
-
             return result
         except RuntimeError as exc:
             proposal.complete(success=False, result_data={"error": str(exc)})
@@ -782,8 +775,8 @@ class AutomationEngine:
             return {"success": False, "error": "Worker did not respond in time"}
 
     @staticmethod
-    def _is_safe_webhook_url(url: str) -> bool:
-        """Validate URL to prevent SSRF attacks."""
+    async def _is_safe_webhook_url(url: str) -> bool:
+        """Validate URL to prevent SSRF attacks including DNS rebinding."""
         try:
             parsed = urlparse(url)
         except Exception:
@@ -792,8 +785,15 @@ class AutomationEngine:
             return False
         if not parsed.hostname:
             return False
+
+        hostname = parsed.hostname.lower()
+        _BLOCKED_HOSTS = frozenset({"metadata.google.internal", "169.254.169.254", "localhost"})
+        if hostname in _BLOCKED_HOSTS:
+            return False
+
+        # Direct IP check
         try:
-            ip = ipaddress.ip_address(parsed.hostname)
+            ip = ipaddress.ip_address(hostname)
             if (
                 ip.is_loopback
                 or ip.is_private
@@ -802,10 +802,33 @@ class AutomationEngine:
                 or ip.is_multicast
             ):
                 return False
+            return True
         except ValueError:
-            if parsed.hostname in ("metadata.google.internal", "169.254.169.254"):
-                return False
-        return True
+            pass  # Hostname, proceed to DNS resolution
+
+        # Async DNS resolution to detect rebinding
+        try:
+            loop = asyncio.get_running_loop()
+            resolved = await loop.run_in_executor(
+                None, lambda: socket.getaddrinfo(hostname, None)
+            )
+            resolved_ips = {r[4][0] for r in resolved if r and r[4]}
+            for ip_str in resolved_ips:
+                try:
+                    ip = ipaddress.ip_address(ip_str)
+                    if (
+                        ip.is_loopback
+                        or ip.is_private
+                        or ip.is_link_local
+                        or ip.is_reserved
+                        or ip.is_multicast
+                    ):
+                        return False
+                except ValueError:
+                    return False
+            return True if resolved_ips else False
+        except Exception:
+            return False  # Fail closed on DNS resolution error
 
     async def _execute_call_webhook(self, action: dict, node_id: str, trigger_data: dict) -> dict:
         """HTTP POST to an external webhook URL."""
@@ -813,7 +836,7 @@ class AutomationEngine:
         if not url:
             raise ValueError("call_webhook action missing 'url' field.")
 
-        if not self._is_safe_webhook_url(url):
+        if not await self._is_safe_webhook_url(url):
             raise ValueError(f"Webhook URL blocked by SSRF protection: {url}")
 
         headers = action.get("headers", {})

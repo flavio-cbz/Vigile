@@ -12,11 +12,19 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Path, Query, status
 
 from master.api.demo_data import is_demo
-from master.api.deps import DB, get_node_manager, require_role
+from master.api.deps import (
+    DB,
+    get_node_manager,
+    get_proposal_dispatcher,
+    get_worker_query_port,
+    require_role,
+)
 from master.api.nodes_router import router
 from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
 from master.core.node_manager import NodeManager
+from master.core.proposal_dispatcher import ApprovedProposalDispatcher
+from master.core.worker_query_port import WorkerQueryPort
 from master.db.disk_scan_cache import (
     get_cached_disk_scan,
     get_node_disk_mounts,
@@ -43,6 +51,7 @@ async def update_worker(
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
     nm: NodeManager = Depends(get_node_manager),
+    dispatcher: ApprovedProposalDispatcher = Depends(get_proposal_dispatcher),
 ) -> dict:
     """Send an UPDATE_WORKER intent to the worker, causing it to download the latest binary from the Master and restart."""
     if is_demo(claims):
@@ -53,10 +62,14 @@ async def update_worker(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
     try:
-        result = await nm.send_intent(
+        result = await dispatcher.dispatch_admin_action(
             node_id,
-            {"action": WorkerAction.UPDATE_WORKER, "params": {}},
-            timeout=30.0,
+            WorkerAction.UPDATE_WORKER,
+            {},
+            claims["sub"],
+            db,
+            intent_timeout=30.0,
+            reasoning="Admin triggered worker self-update",
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -104,6 +117,7 @@ async def get_disk_scan(
     min_size_bytes: int = Query(10 * 1024 * 1024, ge=0),
     claims: Annotated[dict, _operator_plus] = None,
     nm: NodeManager = Depends(get_node_manager),
+    port: WorkerQueryPort = Depends(get_worker_query_port),
     db: DB = None,
 ) -> dict[str, Any]:
     """
@@ -145,8 +159,8 @@ async def get_disk_scan(
     mounts = await get_node_disk_mounts(db, node_id)
     if not mounts:
         try:
-            stats_result = await nm.send_intent(
-                node_id, {"action": "GET_STATS"}, timeout=10.0
+            stats_result = await port.query(
+                node_id, "GET_STATS", timeout=10.0
             )
             if stats_result.get("success"):
                 disks = stats_result.get("disks", [])
@@ -159,16 +173,14 @@ async def get_disk_scan(
             mounts = ["/"]
 
     try:
-        result = await nm.send_intent(
+        result = await port.query(
             node_id,
+            WorkerAction.DISK_SCAN,
             {
-                "action": WorkerAction.DISK_SCAN,
-                "params": {
-                    "path": path,
-                    "max_depth": max_depth,
-                    "min_size_bytes": min_size_bytes,
-                    "mounts": mounts,
-                },
+                "path": path,
+                "max_depth": max_depth,
+                "min_size_bytes": min_size_bytes,
+                "mounts": mounts,
             },
             timeout=45.0,
         )

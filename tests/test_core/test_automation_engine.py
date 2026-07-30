@@ -163,9 +163,9 @@ def test_time_window_valid_format(engine: AutomationEngine):
 
 
 def test_time_window_malformed_returns_true(engine: AutomationEngine):
-    """Malformed window fails open (returns True = condition passes)."""
+    """Malformed window fails closed (returns False = condition blocks rule)."""
     condition = {"type": "time_window", "window": "INVALID"}
-    assert engine._check_time_window(condition) is True
+    assert engine._check_time_window(condition) is False
 
 
 # ---------------------------------------------------------------------------

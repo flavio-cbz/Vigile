@@ -43,13 +43,7 @@ STATE_UNINSTALL = "UNINSTALL"
 
 DEFAULT_TIMEOUT: float = 30.0
 
-def canonical_plugin_id(name: str) -> str:
-    if name.endswith("_plugin"):
-        return name[:-7]
-    return name
-
-def plugin_file_stem(plugin_id: str) -> str:
-    return plugin_id
+from master.core.plugin_ids import canonical_plugin_id, plugin_file_stem
 
 class HookBus:
     """Manages subscription and dispatching of synchronous and asynchronous hooks."""
@@ -417,7 +411,7 @@ class PluginEngine:
             # If plugin not in DB, insert as DISCOVERED
             if plugin_id not in db_states:
                 await self.db.execute(
-                    "INSERT INTO plugins (id, version, enabled, status, config_json) VALUES (?, ?, 0, 'DISCOVERED', '{}')",
+                    "INSERT INTO plugins (id, version, enabled, status, config_json) VALUES (?, ?, 1, 'DISCOVERED', '{}')",
                     (plugin_id, manifest.version)
                 )
                 db_states[plugin_id] = False
@@ -644,7 +638,7 @@ class PluginEngine:
         # Check sandbox execution
         p_dir = plugins_dir or self._manifest_dirs.get(plugin_id) or (getattr(self._settings, "plugins_dir", "master/plugins") if self._settings else "master/plugins")
         is_package = os.path.exists(os.path.join(p_dir, plugin_id, "__init__.py"))
-        use_sandbox = self._sandbox and is_package and plugin_id not in ("metrics", "systemd", "docker")
+        use_sandbox = self._sandbox and is_package and not manifest.trusted and plugin_id not in ("metrics", "systemd", "docker")
         
         # Setup tables if database schema defined in manifest
         if manifest.database and self.db_auto:
@@ -778,6 +772,9 @@ class PluginEngine:
         module_name = f"master.plugins.{plugin_id}"
         sys.modules.pop(module_name, None)
 
+        if plugin_id in self._loaded_plugins:
+            self._loaded_plugins.remove(plugin_id)
+
         if self.db:
             await self.db.execute("UPDATE plugins SET status = 'DISABLED', enabled = 0 WHERE id = ?", (plugin_id,))
             await self.db.commit()
@@ -794,7 +791,9 @@ class PluginEngine:
 
     @property
     def loaded_plugins(self) -> list[str]:
-        return list(self._instances.keys()) + list(self._wrappers.keys()) + self._loaded_plugins
+        seen = set(self._instances.keys()) | set(self._wrappers.keys())
+        legacy = [pid for pid in self._loaded_plugins if pid not in seen]
+        return list(seen) + legacy
 
     async def load_plugins_from_dir(self, directory: str) -> list[str]:
         await self.scan(directory)

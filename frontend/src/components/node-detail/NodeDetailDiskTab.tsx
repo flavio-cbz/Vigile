@@ -55,13 +55,9 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
 
   const handleDrill = useCallback(
     (path: string) => {
-      if (!nodeId) return;
       setSelectedPath(path);
-      void getDiskScan(nodeId, { path }).then((result) => {
-        if (result) setScanResult(result);
-      });
     },
-    [nodeId],
+    [],
   );
 
   const breadcrumb = selectedPath

@@ -182,12 +182,12 @@ async def test_approve_proposal(db, client, auth_headers):
     await _insert_proposal(db, p)
 
     # Mock send_intent to return success
-    orig = node_manager.send_intent
+    orig = node_manager._send_intent
 
     async def mock_send(*args, **kwargs):
         return {"success": True, "output": "CPU: 10%"}
 
-    node_manager.send_intent = mock_send
+    node_manager._send_intent = mock_send
     try:
         resp = await client.post(
             f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
@@ -199,7 +199,7 @@ async def test_approve_proposal(db, client, auth_headers):
         assert d["executed_at"] is not None
         assert d.get("result") is not None
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
 
 
 @pytest.mark.asyncio
@@ -223,13 +223,13 @@ async def test_approve_restart_container_fuzzy_resolves_from_cache(db, client, a
     await _insert_proposal(db, p)
 
     sent_intents = []
-    orig = node_manager.send_intent
+    orig = node_manager._send_intent
 
     async def mock_send(node_id_arg, intent, *, timeout=30.0):
         sent_intents.append(intent)
         return {"success": True, "output": "Container plex restarted", "error": ""}
 
-    node_manager.send_intent = mock_send
+    node_manager._send_intent = mock_send
     try:
         resp = await client.post(
             f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
@@ -238,11 +238,11 @@ async def test_approve_restart_container_fuzzy_resolves_from_cache(db, client, a
         d = resp.json()
         assert d["status"] == "EXECUTED"
         assert d["params"] == {"container_id": "plex", "target": "plex"}
-        assert sent_intents == [
-            {"action": "RESTART_CONTAINER", "params": {"container_id": "plex", "target": "plex"}}
-        ]
+        assert len(sent_intents) == 1
+        assert sent_intents[0]["action"] == "RESTART_CONTAINER"
+        assert sent_intents[0]["params"] == {"container_id": "plex", "target": "plex"}
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
 
 
 @pytest.mark.asyncio
@@ -272,13 +272,13 @@ async def test_approve_restart_container_exact_name_and_id_remain_stable(db, cli
     await _insert_proposal(db, by_id)
 
     sent_targets = []
-    orig = node_manager.send_intent
+    orig = node_manager._send_intent
 
     async def mock_send(node_id_arg, intent, *, timeout=30.0):
         sent_targets.append(intent["params"]["container_id"])
         return {"success": True, "output": "restarted", "error": ""}
 
-    node_manager.send_intent = mock_send
+    node_manager._send_intent = mock_send
     try:
         name_resp = await client.post(
             f"/api/chat/proposals/{by_name.id}/approve", headers=auth_headers("admin")
@@ -295,7 +295,7 @@ async def test_approve_restart_container_exact_name_and_id_remain_stable(db, cli
             "target": "abc123def456",
         }
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
 
 
 @pytest.mark.asyncio
@@ -321,13 +321,13 @@ async def test_approve_restart_container_ambiguous_target_fails_without_restart(
     await _insert_proposal(db, p)
 
     sent_intents = []
-    orig = node_manager.send_intent
+    orig = node_manager._send_intent
 
     async def mock_send(node_id_arg, intent, *, timeout=30.0):
         sent_intents.append(intent)
         return {"success": True, "output": "should not happen", "error": ""}
 
-    node_manager.send_intent = mock_send
+    node_manager._send_intent = mock_send
     try:
         resp = await client.post(
             f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
@@ -338,7 +338,7 @@ async def test_approve_restart_container_ambiguous_target_fails_without_restart(
         assert "Ambiguous container target" in d["result"]["error"]
         assert sent_intents == []
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
 
 
 @pytest.mark.asyncio
@@ -357,7 +357,8 @@ async def test_approve_restart_container_fallbacks_to_live_container_list(
     await _insert_proposal(db, p)
 
     sent_actions = []
-    orig = node_manager.send_intent
+    orig_send = node_manager._send_intent
+    orig_connected = node_manager.is_connected
 
     async def mock_send(node_id_arg, intent, *, timeout=30.0):
         sent_actions.append(intent["action"])
@@ -379,7 +380,11 @@ async def test_approve_restart_container_fallbacks_to_live_container_list(
             }
         return {"success": True, "output": "Container plex restarted", "error": ""}
 
-    node_manager.send_intent = mock_send
+    async def mock_connected(node_id_arg):
+        return True
+
+    node_manager._send_intent = mock_send
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.post(
             f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
@@ -390,7 +395,8 @@ async def test_approve_restart_container_fallbacks_to_live_container_list(
         assert d["params"] == {"container_id": "plex", "target": "plex"}
         assert sent_actions == ["LIST_CONTAINERS", "RESTART_CONTAINER"]
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig_send
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
@@ -412,12 +418,12 @@ async def test_approve_restart_container_audit_target_uses_container_id(
     )
     await _insert_proposal(db, p)
 
-    orig = node_manager.send_intent
+    orig = node_manager._send_intent
 
     async def mock_send(node_id_arg, intent, *, timeout=30.0):
         return {"success": True, "output": "Container plex restarted", "error": ""}
 
-    node_manager.send_intent = mock_send
+    node_manager._send_intent = mock_send
     try:
         resp = await client.post(
             f"/api/chat/proposals/{p.id}/approve", headers=auth_headers("admin")
@@ -437,7 +443,7 @@ async def test_approve_restart_container_audit_target_uses_container_id(
         details = json.loads(row["details_json"])
         assert details["target"] == "plex"
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
 
 
 @pytest.mark.asyncio

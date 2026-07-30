@@ -16,8 +16,8 @@ from master.core.plugin_utils import (
     parse_worker_list,
     parse_worker_object,
 )
-from master.plugins.docker_plugin import parse_container_list
-from master.plugins.systemd_plugin import parse_service_list, parse_service_status
+from master.plugins.docker import parse_container_list
+from master.plugins.systemd import parse_service_list, parse_service_status
 
 __all__ = [
     "parse_worker_output",

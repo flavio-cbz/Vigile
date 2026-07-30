@@ -3,6 +3,7 @@
   "name": "Metrics Collector",
   "version": "1.0.0",
   "author": "Vigile",
+  "trusted": true,
   "description": "Collect and persist CPU, memory, disk, network, and process telemetry from worker nodes.",
   "hooks": [
     "get_supported_actions",

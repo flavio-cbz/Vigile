@@ -179,6 +179,10 @@ class PluginManifest(BaseModel):
         default=None,
         description="Optional minimum compatible Master version (semver string)",
     )
+    trusted: bool = Field(
+        default=False,
+        description="If true, plugin runs in-process without sandbox. Reserved for built-in system plugins.",
+    )
 
     @property
     def manifest_hash(self) -> str:

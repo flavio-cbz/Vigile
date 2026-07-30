@@ -24,6 +24,7 @@ import ast
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -46,7 +47,8 @@ from master.api.worker_binary import refresh_binary_cache
 from master.core.audit import AuditAction, log_action, verify_chain
 from master.core.llm_client import LLMClient, LLMError
 from master.core.node_manager import node_manager
-from master.core.plugin_manager import canonical_plugin_id, plugin_engine, plugin_file_stem, plugin_manager
+from master.core.plugin_ids import canonical_plugin_id, plugin_file_stem
+import master.core.plugin_manager as _pm_mod
 from master.db.database import get_db_conn, transaction
 
 logger = logging.getLogger(__name__)
@@ -54,10 +56,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
+def _get_active_plugin_engine() -> Any:
+    return _pm_mod.plugin_engine if _pm_mod.plugin_engine is not None else _pm_mod.plugin_manager
+
+
+
 def _resolve_plugin_stem(plugin_id: str, plugins_dir: str) -> str:
     # Try progressively normalized candidates to tolerate display names,
     # title-cased labels, or mixed input as the plugin_id.
     candidates = [
+        canonical_plugin_id(plugin_id),
         plugin_file_stem(plugin_id),
         plugin_id,
         plugin_id.lower(),
@@ -75,6 +83,8 @@ def _resolve_plugin_stem(plugin_id: str, plugins_dir: str) -> str:
 
     for candidate in unique_candidates:
         if os.path.isfile(os.path.join(plugins_dir, f"{candidate}.py")):
+            return candidate
+        if os.path.isdir(os.path.join(plugins_dir, candidate)):
             return candidate
     return plugin_file_stem(plugin_id)
 
@@ -332,10 +342,24 @@ async def list_plugins(
 
     # 3. Build response for each plugin
     result = []
+    seen_ids: set[str] = set()
     for name in plugin_files:
         plugin_id = canonical_plugin_id(name)
-        is_loaded = plugin_id in plugin_manager.loaded_plugins
-        db_state = plugin_db_states.get(plugin_id, {"enabled": True, "config": {}})
+        if plugin_id in seen_ids:
+            continue
+        seen_ids.add(plugin_id)
+        active_pm = _get_active_plugin_engine()
+        _lp = getattr(active_pm, "_loaded_plugins", [])
+        is_loaded = any(
+            k in _lp or k in active_pm.loaded_plugins
+            for k in (plugin_id, name, plugin_file_stem(plugin_id))
+        )
+        db_state = (
+            plugin_db_states.get(plugin_id)
+            or plugin_db_states.get(name)
+            or plugin_db_states.get(plugin_file_stem(plugin_id))
+            or {"enabled": True, "config": {}}
+        )
         version = db_state.get("version", db_state.get("config", {}).get("version", "0.0.0"))
 
         path = os.path.join(plugins_dir, f"{name}.py")
@@ -351,7 +375,11 @@ async def list_plugins(
             "schema": {},
         }
 
-        error: str | None = plugin_errors.get(plugin_id)
+        error: str | None = (
+            plugin_errors.get(plugin_id)
+            or plugin_errors.get(name)
+            or plugin_errors.get(plugin_file_stem(plugin_id))
+        )
         if error is None and not is_loaded and db_state["enabled"]:
             error = "Plugin not loaded"
 
@@ -362,23 +390,29 @@ async def list_plugins(
                     meta.update(mod.get_config_schema())
                 except Exception:
                     pass
-        elif getattr(plugin_manager, "_sandbox", False) and plugin_id in plugin_manager.loaded_plugins:
-            wrapper = getattr(plugin_manager, "_wrappers", {}).get(plugin_id)
+        elif getattr(active_pm, "_sandbox", False) and any(
+            k in active_pm.loaded_plugins
+            for k in (plugin_id, name, plugin_file_stem(plugin_id))
+        ):
+            wrapper = (
+                getattr(active_pm, "_wrappers", {}).get(plugin_id)
+                or getattr(active_pm, "_wrappers", {}).get(name)
+                or getattr(active_pm, "_wrappers", {}).get(plugin_file_stem(plugin_id))
+            )
             if wrapper and wrapper.schema:
                 meta.update(wrapper.schema)
 
-        from master.core.plugin_manager import plugin_engine
-        if plugin_engine is not None and plugin_engine.scanner is not None:
-            manifest = plugin_engine.scanner.get_manifest(plugin_id)
+        if getattr(active_pm, "scanner", None) is not None:
+            manifest = active_pm.scanner.get_manifest(plugin_id) or active_pm.scanner.get_manifest(name)
             if manifest is not None:
                 version = manifest.version
                 meta["name"] = manifest.name
                 meta["description"] = manifest.description or meta["description"]
 
         plugin_hooks = []
-        hooks_registry = plugin_manager.get_hooks()
+        hooks_registry = active_pm.get_hooks()
         for hook_name, plugins in hooks_registry.items():
-            if plugin_id in plugins:
+            if any(k in plugins for k in (plugin_id, name, plugin_file_stem(plugin_id))):
                 plugin_hooks.append(hook_name)
 
         result.append(
@@ -401,8 +435,8 @@ async def list_plugins(
 
     return JSONResponse(
         {
-            "loaded_plugins": plugin_manager.loaded_plugins,
-            "hooks": plugin_manager.get_hooks(),
+            "loaded_plugins": active_pm.loaded_plugins,
+            "hooks": active_pm.get_hooks(),
             "plugins": result,
         }
     )
@@ -661,13 +695,15 @@ async def upload_plugin(
         raise HTTPException(status_code=500, detail=f"Échec de l'écriture du fichier: {str(e)}")
 
     db = get_db_conn()
+    canonical_id = canonical_plugin_id(plugin_name)
     await db.execute(
         "INSERT OR IGNORE INTO plugins (id, enabled, config_json) VALUES (?, 1, '{}')",
-        (plugin_name,),
+        (canonical_id,),
     )
     await db.commit()
 
-    success = await plugin_manager.load_plugin(plugin_name, settings.plugins_dir)
+    active_pm = _get_active_plugin_engine()
+    success = await active_pm.load_plugin(canonical_id, settings.plugins_dir)
     if not success:
         if os.path.exists(plugin_path):
             try:
@@ -705,10 +741,13 @@ async def configure_plugin(
 
     db = get_db_conn()
 
+    plugin_id = canonical_plugin_id(plugin_id)
+
     # Validate plugin exists
     plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
-    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
-    if not os.path.isfile(plugin_path):
+    plugin_path_py = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
+    plugin_path_dir = os.path.join(settings.plugins_dir, plugin_stem)
+    if not os.path.isfile(plugin_path_py) and not os.path.isdir(plugin_path_dir):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
     config_str = json.dumps(config)
@@ -744,16 +783,18 @@ async def toggle_plugin(
 
     db = get_db_conn()
 
-    # Validate plugin exists
+    plugin_id_canonical = canonical_plugin_id(plugin_file_stem(plugin_id))
     plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
-    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
-    if not os.path.isfile(plugin_path):
+    plugin_path_py = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
+    plugin_path_dir = os.path.join(settings.plugins_dir, plugin_stem)
+    if not os.path.isfile(plugin_path_py) and not os.path.isdir(plugin_path_dir):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
     # Get current state
     enabled = True
     async with db.execute(
-        "SELECT enabled FROM plugins WHERE id = ?", (plugin_id,)
+        "SELECT enabled FROM plugins WHERE id IN (?, ?, ?)",
+        (plugin_id_canonical, plugin_stem, plugin_id),
     ) as cursor:
         row = await cursor.fetchone()
         if row:
@@ -764,25 +805,35 @@ async def toggle_plugin(
         await db.execute(
             "INSERT INTO plugins (id, enabled, config_json) VALUES (?, ?, '{}') "
             "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
-            (plugin_id, int(new_state)),
+            (plugin_id_canonical, int(new_state)),
         )
         await log_action(
             db,
             user_id=claims["sub"],
             action=AuditAction.TOGGLE_PLUGIN,
-            details={"plugin_id": plugin_id, "enabled": new_state},
+            details={"plugin_id": plugin_id_canonical, "enabled": new_state},
         )
 
     # Reload or Unload dynamically
+    active_pm = _get_active_plugin_engine()
     if new_state:
-        await plugin_manager.load_plugin(plugin_stem, settings.plugins_dir)
+        if getattr(active_pm, "_disabled_plugins", None) is not None:
+            active_pm._disabled_plugins.discard(plugin_id_canonical)
+            active_pm._disabled_plugins.discard(plugin_stem)
+            active_pm._disabled_plugins.discard(plugin_id)
+        success = await active_pm.load_plugin(plugin_id_canonical, settings.plugins_dir)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Plugin '{plugin_id_canonical}' enabled in DB but failed to load in runtime.",
+            )
     else:
-        await plugin_manager.unload_plugin(plugin_stem)
+        await active_pm.unload_plugin(plugin_id_canonical)
 
     return JSONResponse(
         {
             "status": "success",
-            "message": f"Plugin '{plugin_id}' est maintenant {'activé' if new_state else 'désactivé'}.",
+            "message": f"Plugin '{plugin_id_canonical}' est maintenant {'activé' if new_state else 'désactivé'}.",
             "loaded": new_state,
         }
     )
@@ -800,6 +851,8 @@ async def delete_plugin(
             detail="Désinstallation d'extensions non autorisée en mode démonstration.",
         )
 
+    plugin_id = canonical_plugin_id(plugin_id)
+
     if plugin_id in ["metrics", "systemd", "docker"]:
         raise HTTPException(
             status_code=400,
@@ -810,23 +863,28 @@ async def delete_plugin(
 
     # Validate plugin exists
     plugin_stem = _resolve_plugin_stem(plugin_id, settings.plugins_dir)
-    plugin_path = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
-    if not os.path.isfile(plugin_path):
+    plugin_path_py = os.path.join(settings.plugins_dir, f"{plugin_stem}.py")
+    plugin_path_dir = os.path.join(settings.plugins_dir, plugin_stem)
+    if not os.path.isfile(plugin_path_py) and not os.path.isdir(plugin_path_dir):
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
-    # 1. Uninstall via engine if available, otherwise unload legacy
-    if plugin_engine is not None:
+    active_pm = _get_active_plugin_engine()
+    if hasattr(active_pm, "uninstall"):
         try:
-            await plugin_engine.uninstall(plugin_id)
+            await active_pm.uninstall(plugin_id)
         except Exception as e:
             logger.error("Failed to uninstall plugin '%s' via engine: %s", plugin_id, e)
-            await plugin_manager.unload_plugin(plugin_stem)
+            await active_pm.unload_plugin(plugin_id)
     else:
-        await plugin_manager.unload_plugin(plugin_stem)
+        await active_pm.unload_plugin(plugin_id)
 
-    # 2. Remove file from disk
+
+    # 2. Remove file/directory from disk
     try:
-        os.remove(plugin_path)
+        if os.path.isdir(plugin_path_dir):
+            shutil.rmtree(plugin_path_dir)
+        elif os.path.isfile(plugin_path_py):
+            os.remove(plugin_path_py)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Impossible de supprimer le fichier du plugin : {str(e)}"
@@ -834,7 +892,7 @@ async def delete_plugin(
 
     # 3. Clean up database entry + audit log in same transaction
     async with transaction(db):
-        await db.execute("DELETE FROM plugins WHERE id = ?", (plugin_id,))
+        await db.execute("DELETE FROM plugins WHERE id = ? OR id = ?", (plugin_id, plugin_stem))
         await log_action(
             db,
             user_id=claims["sub"],

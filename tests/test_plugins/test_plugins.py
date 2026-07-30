@@ -8,8 +8,8 @@ import tempfile
 import pytest
 
 from master.core.plugin_manager import PluginManager
-from master.plugins.metrics_plugin import MetricsSnapshot, _on_status_report
-from master.plugins.metrics_plugin import register as register_metrics
+from master.plugins.metrics import MetricsSnapshot, _on_status_report
+from master.plugins.metrics import register as register_metrics
 
 
 # 1. MetricsSnapshot Model Tests
@@ -238,8 +238,8 @@ async def test_plugin_loading_from_dir(tmp_path):
     import pathlib
 
     project_root = pathlib.Path(__file__).parent.parent.parent
-    plugin_src = project_root / "master" / "plugins" / "metrics_plugin.py"
-    plugin_dst = tmp_path / "metrics_plugin.py"
+    plugin_src = project_root / "master" / "plugins" / "metrics" / "__init__.py"
+    plugin_dst = tmp_path / "metrics.py"
     shutil.copy2(plugin_src, plugin_dst)
 
     pm2 = PluginManager()

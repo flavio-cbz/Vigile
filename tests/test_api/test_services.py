@@ -125,8 +125,10 @@ async def _setup_node(db, name: str = "test-svc") -> str:
 @pytest.mark.asyncio
 async def test_list_services_success(db, client, auth_headers):
     node_id = await _setup_node(db, "svc-list")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_list_services
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_list_services
     try:
         resp = await client.get(f"/api/nodes/{node_id}/services", headers=auth_headers("admin"))
         assert resp.status_code == 200
@@ -136,7 +138,9 @@ async def test_list_services_success(db, client, auth_headers):
         assert d["services"][0].get("name") == "ssh.service"
         assert d["services"][0].get("state") == "active"
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
@@ -148,32 +152,42 @@ async def test_list_services_not_found(client, auth_headers):
 @pytest.mark.asyncio
 async def test_list_services_not_connected(db, client, auth_headers):
     node_id = await node_manager.create_node(db, name="svc-offline")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_intent_not_connected
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_intent_not_connected
     try:
         resp = await client.get(f"/api/nodes/{node_id}/services", headers=auth_headers("admin"))
         assert resp.status_code == 503
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_list_services_timeout(db, client, auth_headers):
     node_id = await _setup_node(db, "svc-timeout")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_intent_timeout
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_intent_timeout
     try:
         resp = await client.get(f"/api/nodes/{node_id}/services", headers=auth_headers("admin"))
         assert resp.status_code == 504
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_service_status_success(db, client, auth_headers):
     node_id = await _setup_node(db, "svc-status")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_status_service
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_status_service
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/services/nginx.service", headers=auth_headers("admin")
@@ -185,14 +199,18 @@ async def test_service_status_success(db, client, auth_headers):
         assert d["active"] == "active"
         assert d["enabled"] == "enabled"
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_service_status_fail(db, client, auth_headers):
     node_id = await _setup_node(db, "svc-status-fail")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_intent_fail
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_intent_fail
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/services/unknown.service", headers=auth_headers("admin")
@@ -202,14 +220,18 @@ async def test_service_status_fail(db, client, auth_headers):
         assert d.get("active") == "unknown"
         assert d.get("enabled") == "unknown"
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_restart_service_success(db, client, auth_headers):
     node_id = await _setup_node(db, "svc-restart")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_restart_service
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_restart_service
     try:
         resp = await client.post(
             f"/api/nodes/{node_id}/services/nginx.service/restart", headers=auth_headers("admin")
@@ -221,28 +243,36 @@ async def test_restart_service_success(db, client, auth_headers):
         assert "restarted" in d.get("output", "")
         assert d.get("error") is None
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_restart_service_admin_required(db, client, auth_headers):
     node_id = await _setup_node(db, "svc-restart-auth")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_restart_service
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_restart_service
     try:
         resp = await client.post(
             f"/api/nodes/{node_id}/services/nginx.service/restart", headers=auth_headers("operator")
         )
         assert resp.status_code == 403
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_list_containers_success(db, client, auth_headers):
     node_id = await _setup_node(db, "c-list")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_list_containers
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_list_containers
     try:
         resp = await client.get(f"/api/nodes/{node_id}/containers", headers=auth_headers("admin"))
         assert resp.status_code == 200
@@ -253,7 +283,9 @@ async def test_list_containers_success(db, client, auth_headers):
         assert d["containers"][0].get("name") == "web"
         assert d["containers"][0].get("state") == "running"
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
@@ -265,8 +297,10 @@ async def test_list_containers_not_found(client, auth_headers):
 @pytest.mark.asyncio
 async def test_restart_container_success(db, client, auth_headers):
     node_id = await _setup_node(db, "c-restart")
-    orig = node_manager.send_intent
-    node_manager.send_intent = mock_restart_container
+    orig = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_restart_container
     try:
         resp = await client.post(
             f"/api/nodes/{node_id}/containers/a1b2c3d4e5f6/restart", headers=auth_headers("admin")
@@ -278,7 +312,9 @@ async def test_restart_container_success(db, client, auth_headers):
         assert "restarted" in d.get("output", "")
         assert d.get("error") is None
     finally:
-        node_manager.send_intent = orig
+        node_manager._send_intent = orig
+        node_manager.is_connected = orig_connected
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio

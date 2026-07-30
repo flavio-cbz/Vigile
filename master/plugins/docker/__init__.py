@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from fastapi import Depends
 from master.core.plugin_base import PluginBase, hook, route
-from master.api.deps import get_node_manager
+from master.api.deps import get_node_manager, get_worker_query_port
 from master.core.plugin_utils import parse_worker_list
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,7 @@ class DockerPlugin(PluginBase):
         self,
         node_id: str | None = None,
         nm: Any = Depends(get_node_manager),
+        port: Any = Depends(get_worker_query_port),
     ) -> dict:
         """Fetch Docker containers list across workers."""
         nodes = []
@@ -87,7 +88,7 @@ class DockerPlugin(PluginBase):
         containers = []
         for nid in nodes:
             try:
-                result = await nm.send_intent(nid, {"action": "LIST_CONTAINERS"}, timeout=10.0)
+                result = await port.query(nid, "LIST_CONTAINERS", timeout=10.0)
                 if result.get("success"):
                     parsed = parse_container_list(result.get("output", ""))
                     if parsed:

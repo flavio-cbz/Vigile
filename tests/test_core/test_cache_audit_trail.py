@@ -39,10 +39,7 @@ async def test_cache_update_creates_audit_entry(db: aiosqlite.Connection):
             }
         return {"success": False}
 
-    with (
-        patch.object(nm, "_send_intent", mock_send_intent),
-        patch("master.core.node_manager.get_db_conn", return_value=db),
-    ):
+    with patch.object(nm, "_send_intent", mock_send_intent):
         ws = _DummyWS()
         await nm.register_connection("test-node-audit", ws)
         await nm.update_all_nodes_cache(node_id="test-node-audit")
@@ -76,10 +73,7 @@ async def test_cache_update_audit_details(db: aiosqlite.Connection):
         # Container request fails
         return {"success": False}
 
-    with (
-        patch.object(nm, "_send_intent", mock_send_intent),
-        patch("master.core.node_manager.get_db_conn", return_value=db),
-    ):
+    with patch.object(nm, "_send_intent", mock_send_intent):
         ws = _DummyWS()
         await nm.register_connection("test-node-details", ws)
         await nm.update_all_nodes_cache(node_id="test-node-details")
@@ -106,10 +100,7 @@ async def test_cache_update_no_write_no_audit(db: aiosqlite.Connection):
         # Return success but with no data (output not parseable JSON)
         return {"success": True, "output": "not-json"}
 
-    with (
-        patch.object(nm, "_send_intent", mock_send_intent),
-        patch("master.core.node_manager.get_db_conn", return_value=db),
-    ):
+    with patch.object(nm, "_send_intent", mock_send_intent):
         ws = _DummyWS()
         await nm.register_connection("test-node-no-cache", ws)
         await nm.update_all_nodes_cache(node_id="test-node-no-cache")

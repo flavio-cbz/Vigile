@@ -8,7 +8,11 @@ import json
 import logging
 import time
 import uuid
-from typing import Annotated, Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any
 
 from fastapi import Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel

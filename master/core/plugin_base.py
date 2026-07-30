@@ -74,6 +74,9 @@ class RedactingAdapter(logging.LoggerAdapter):
     before forwarding to the underlying logger.
     """
 
+    def __init__(self, logger: logging.Logger, extra: dict[str, Any] | None = None) -> None:
+        super().__init__(logger, extra or {})
+
     def process(self, msg: Any, kwargs: Any) -> tuple[Any, Any]:
         if isinstance(msg, str):
             msg = redact_sensitive(msg)

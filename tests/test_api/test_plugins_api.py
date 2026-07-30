@@ -56,10 +56,29 @@ async def setup_temp_plugins_dir(tmp_path):
     except Exception:
         pass
 
-    # Copy default plugins to temp dir so they are available
-    shutil.copy("master/plugins/metrics_plugin.py", temp_dir / "metrics.py")
-    shutil.copy("master/plugins/systemd_plugin.py", temp_dir / "systemd.py")
-    shutil.copy("master/plugins/docker_plugin.py", temp_dir / "docker.py")
+    (temp_dir / "metrics.py").write_text(
+        'def register(pm):\n'
+        '    pm.register("get_supported_actions", lambda: ["GET_STATS"], plugin_name="metrics")\n'
+        '    pm.register("normalize_status_report", lambda raw_report: raw_report, plugin_name="metrics")\n'
+        '    pm.register("on_status_report", lambda node_id, snapshot, db=None: None, plugin_name="metrics")\n'
+        '\n'
+        'def get_config_schema():\n'
+        '    return {"name": "Metrics", "category": "Monitoring", "schema": {}}\n'
+    )
+    (temp_dir / "systemd.py").write_text(
+        'def register(pm):\n'
+        '    pm.register("get_supported_actions", lambda: ["LIST_SERVICES", "RESTART_SERVICE"], plugin_name="systemd")\n'
+        '\n'
+        'def get_config_schema():\n'
+        '    return {"name": "Systemd", "category": "System", "schema": {}}\n'
+    )
+    (temp_dir / "docker.py").write_text(
+        'def register(pm):\n'
+        '    pm.register("get_supported_actions", lambda: ["LIST_CONTAINERS", "RESTART_CONTAINER"], plugin_name="docker")\n'
+        '\n'
+        'def get_config_schema():\n'
+        '    return {"name": "Docker", "category": "Virtualization", "schema": {}}\n'
+    )
 
     # Fully reset plugin_manager singleton so tests are order-independent.
     # A prior test's app lifespan (e.g. test_main) may have left _engine set and
@@ -224,3 +243,27 @@ def get_config_schema() -> dict:
     plugin_ids = [p["id"] for p in data]
     assert "test_upload" not in plugin_ids
     assert not os.path.exists(os.path.join(settings.plugins_dir, "test_upload.py"))
+
+
+@pytest.mark.asyncio
+async def test_toggle_plugin_stem_canonicalization(client: AsyncClient, auth_headers, setup_temp_plugins_dir):
+    # Create docker_plugin.py stem in temp dir
+    (setup_temp_plugins_dir / "docker_plugin.py").write_text(
+        'def register(pm):\n'
+        '    pm.register("get_supported_actions", lambda: ["LIST_CONTAINERS"], plugin_name="docker")\n'
+    )
+    await plugin_manager.load_plugin("docker_plugin", str(setup_temp_plugins_dir))
+
+    # Toggle using 'docker_plugin'
+    res = await client.post("/api/admin/plugins/docker_plugin/toggle", headers=auth_headers("admin"))
+    assert res.status_code == status.HTTP_200_OK
+
+    # Check list plugins - canonical ID 'docker' should have no 'Plugin not loaded' error when disabled
+    res = await client.get("/api/admin/plugins", headers=auth_headers("admin"))
+    assert res.status_code == status.HTTP_200_OK
+    data = res.json()["plugins"]
+    docker_plugin = next(p for p in data if p["id"] == "docker")
+    assert docker_plugin["enabled"] is False
+    assert docker_plugin["loaded"] is False
+    assert docker_plugin["error"] is None
+

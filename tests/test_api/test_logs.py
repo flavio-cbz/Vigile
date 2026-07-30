@@ -69,8 +69,12 @@ async def _setup_node(db, name: str = "test-logs") -> str:
 @pytest.mark.asyncio
 async def test_logs_success_file(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-file")
-    original = node_manager.send_intent
-    node_manager.send_intent = mock_send_intent_success
+    original = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_send_intent_success
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/logs?path=/var/log/syslog&lines=10",
@@ -84,14 +88,19 @@ async def test_logs_success_file(db, client, auth_headers):
         assert d["path"] == "/var/log/syslog"
         assert d["error"] is None
     finally:
-        node_manager.send_intent = original
+        node_manager._send_intent = original
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_logs_success_service(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-svc")
-    original = node_manager.send_intent
-    node_manager.send_intent = mock_send_intent_success
+    original = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_send_intent_success
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/logs?service=nginx&lines=20",
@@ -103,14 +112,19 @@ async def test_logs_success_service(db, client, auth_headers):
         assert d["service"] == "nginx"
         assert d["path"] is None
     finally:
-        node_manager.send_intent = original
+        node_manager._send_intent = original
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_logs_default_path(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-default")
-    original = node_manager.send_intent
-    node_manager.send_intent = mock_send_intent_success
+    original = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_send_intent_success
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/logs",
@@ -121,7 +135,8 @@ async def test_logs_default_path(db, client, auth_headers):
         assert d["path"] == "/var/log/syslog"
         assert d["lines"] == 50
     finally:
-        node_manager.send_intent = original
+        node_manager._send_intent = original
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
@@ -136,8 +151,12 @@ async def test_logs_node_not_found(client, auth_headers):
 @pytest.mark.asyncio
 async def test_logs_node_not_connected(db, client, auth_headers):
     node_id = await node_manager.create_node(db, name="logs-offline")
-    original = node_manager.send_intent
-    node_manager.send_intent = mock_send_intent_not_connected
+    original = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_send_intent_not_connected
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/logs",
@@ -146,14 +165,19 @@ async def test_logs_node_not_connected(db, client, auth_headers):
         assert resp.status_code == 503
         assert "not connected" in resp.json()["detail"].lower()
     finally:
-        node_manager.send_intent = original
+        node_manager._send_intent = original
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_logs_worker_timeout(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-timeout")
-    original = node_manager.send_intent
-    node_manager.send_intent = mock_send_intent_timeout
+    original = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_send_intent_timeout
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/logs",
@@ -161,14 +185,19 @@ async def test_logs_worker_timeout(db, client, auth_headers):
         )
         assert resp.status_code == 504
     finally:
-        node_manager.send_intent = original
+        node_manager._send_intent = original
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio
 async def test_logs_worker_error(db, client, auth_headers):
     node_id = await _setup_node(db, "logs-error")
-    original = node_manager.send_intent
-    node_manager.send_intent = mock_send_intent_fail
+    original = node_manager._send_intent
+    orig_connected = node_manager.is_connected
+    node_manager._send_intent = mock_send_intent_fail
+    async def mock_connected(node_id_arg):
+        return True
+    node_manager.is_connected = mock_connected
     try:
         resp = await client.get(
             f"/api/nodes/{node_id}/logs?path=/var/log/auth.log",
@@ -179,7 +208,8 @@ async def test_logs_worker_error(db, client, auth_headers):
         assert d["error"] == "permission denied"
         assert d["output"] == ""
     finally:
-        node_manager.send_intent = original
+        node_manager._send_intent = original
+        node_manager.is_connected = orig_connected
 
 
 @pytest.mark.asyncio

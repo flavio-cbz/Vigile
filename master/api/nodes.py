@@ -18,7 +18,10 @@ import logging
 import os
 import time
 import uuid
-from typing import Annotated
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse
@@ -31,7 +34,9 @@ from master.api.deps import (
     Insights,
     get_locale,
     get_node_manager,
+    get_proposal_dispatcher,
     get_security,
+    get_worker_query_port,
     require_role,
 )
 from master.api.rate_limits import KICKSTART_LIMIT
@@ -39,8 +44,10 @@ from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
 from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
 from master.core.node_manager import NodeManager, NodeState
+from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityManager
+from master.core.worker_query_port import WorkerQueryPort
 from master.db.disk_scan_cache import get_cached_disk_scan, set_cached_disk_scan
 from master.schemas.disk_scan import DiskScanResult
 
@@ -1175,6 +1182,7 @@ async def get_node_logs(
         str | None, Query(description="Log file path on the worker (/var/log/ only)")
     ] = None,
     nm: NodeManager = Depends(get_node_manager),
+    port: WorkerQueryPort = Depends(get_worker_query_port),
 ) -> LogsResponse:
     """
     Fetch live logs from a Worker via INTENT.
@@ -1223,10 +1231,8 @@ async def get_node_logs(
         params = {"path": effective_path, "lines": lines}
 
     try:
-        result = await nm.send_intent(
-            node_id,
-            {"action": action, "params": params},
-            timeout=15.0,
+        result = await port.query(
+            node_id, action, params, timeout=15.0
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -1618,6 +1624,7 @@ async def analyze_node_anomaly(
                 if locale == "en"
                 else "Aucune action requise. Si cela impacte d'autres services, vous pouvez limiter le CPU de Plex ou activer l'accélération matérielle (transcodage GPU)."
             ),
+            correlated_cause=[],
         )
 
     # Verify node exists
@@ -1644,6 +1651,7 @@ async def update_worker(
     db: DB,
     claims: Annotated[dict, Depends(require_role("admin"))],
     nm: NodeManager = Depends(get_node_manager),
+    dispatcher: ApprovedProposalDispatcher = Depends(get_proposal_dispatcher),
 ) -> dict:
     """Send an UPDATE_WORKER intent to the worker, causing it to download the latest binary from the Master and restart."""
     if is_demo(claims):
@@ -1654,10 +1662,14 @@ async def update_worker(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
     try:
-        result = await nm.send_intent(
+        result = await dispatcher.dispatch_admin_action(
             node_id,
-            {"action": WorkerAction.UPDATE_WORKER, "params": {}},
-            timeout=30.0,
+            WorkerAction.UPDATE_WORKER,
+            {},
+            claims["sub"],
+            db,
+            intent_timeout=30.0,
+            reasoning="Admin triggered worker self-update",
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -1704,9 +1716,10 @@ async def get_disk_scan(
     path: str = Query("/"),
     force: bool = False,
     max_depth: int = Query(4, ge=0, le=20),
-    min_size_bytes: int = Query(10 * 1024 * 1024, ge=0),
+    min_size_bytes: int = Query(1 * 1024 * 1024, ge=0),
     claims: Annotated[dict, _operator_plus] = None,
     nm: NodeManager = Depends(get_node_manager),
+    port: WorkerQueryPort = Depends(get_worker_query_port),
     db: DB = None,
 ) -> dict[str, Any]:
     """
@@ -1745,8 +1758,8 @@ async def get_disk_scan(
 
     mounts = ["/"]
     try:
-        stats_result = await nm.send_intent(
-            node_id, {"action": "GET_STATS"}, timeout=10.0
+        stats_result = await port.query(
+            node_id, "GET_STATS", timeout=10.0
         )
         if stats_result.get("success"):
             disks = stats_result.get("disks", [])
@@ -1757,16 +1770,14 @@ async def get_disk_scan(
         logger.warning("Node %s: GET_STATS failed for disk-scan mounts: %s", node_id, exc)
 
     try:
-        result = await nm.send_intent(
+        result = await port.query(
             node_id,
+            WorkerAction.DISK_SCAN,
             {
-                "action": WorkerAction.DISK_SCAN,
-                "params": {
-                    "path": path,
-                    "max_depth": max_depth,
-                    "min_size_bytes": min_size_bytes,
-                    "mounts": mounts,
-                },
+                "path": path,
+                "max_depth": max_depth,
+                "min_size_bytes": min_size_bytes,
+                "mounts": mounts,
             },
             timeout=45.0,
         )

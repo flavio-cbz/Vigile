@@ -30,25 +30,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_BUILTIN_PLUGIN_FILE_TO_ID = {
-    "metrics_plugin": "metrics",
-    "systemd_plugin": "systemd",
-    "docker_plugin": "docker",
-}
+from master.core.plugin_ids import canonical_plugin_id, plugin_file_stem
 
-_BUILTIN_PLUGIN_ID_TO_FILE = {
-    plugin_id: file_stem for file_stem, plugin_id in _BUILTIN_PLUGIN_FILE_TO_ID.items()
-}
-
-
-def canonical_plugin_id(plugin_name: str) -> str:
-    """Map an on-disk plugin stem to the public plugin id."""
-    return _BUILTIN_PLUGIN_FILE_TO_ID.get(plugin_name, plugin_name)
-
-
-def plugin_file_stem(plugin_id: str) -> str:
-    """Resolve the file stem for a public plugin id."""
-    return _BUILTIN_PLUGIN_ID_TO_FILE.get(plugin_id, plugin_id)
 
 
 class PluginProcessWrapper:
@@ -77,6 +60,13 @@ class PluginProcessWrapper:
         loop = asyncio.get_running_loop()
         self._init_future = loop.create_future()
 
+        env = os.environ.copy()
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        if "PYTHONPATH" in env:
+            env["PYTHONPATH"] = f"{project_root}:{env['PYTHONPATH']}"
+        else:
+            env["PYTHONPATH"] = project_root
+
         logger.info("Starting isolated plugin process for '%s'...", self.plugin_name)
         self.process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -86,13 +76,14 @@ class PluginProcessWrapper:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
         self._stdout_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
 
         try:
-            await asyncio.wait_for(self._init_future, timeout=5.0)
+            await asyncio.wait_for(self._init_future, timeout=10.0)
             logger.info(
                 "Isolated plugin process '%s' initialized with hooks: %s",
                 self.plugin_name,
@@ -102,7 +93,7 @@ class PluginProcessWrapper:
             logger.error("Initialization timed out for plugin process '%s'", self.plugin_name)
             await self.stop()
             raise RuntimeError(
-                f"Plugin '{self.plugin_name}' worker process failed to initialize within 5s"
+                f"Plugin '{self.plugin_name}' worker process failed to initialize within 10s"
             )
 
     async def stop(self) -> None:
@@ -284,7 +275,12 @@ class PluginManager:
                 "SELECT id FROM plugins WHERE enabled = 0"
             ) as cursor:
                 rows = await cursor.fetchall()
-                self._disabled_plugins = {row[0] for row in rows}
+                self._disabled_plugins = set()
+                for row in rows:
+                    raw_id = row[0]
+                    self._disabled_plugins.add(raw_id)
+                    self._disabled_plugins.add(canonical_plugin_id(raw_id))
+                    self._disabled_plugins.add(plugin_file_stem(raw_id))
             logger.info(
                 "PluginManager initialized. Disabled plugins: %s (Sandbox=%s)",
                 self._disabled_plugins,
@@ -503,8 +499,10 @@ class PluginManager:
                     )
 
                 self._loaded_plugins.append(plugin_id)
-                if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
-                    self._disabled_plugins.remove(plugin_id)
+                if self._disabled_plugins is not None:
+                    self._disabled_plugins.discard(plugin_id)
+                    self._disabled_plugins.discard(plugin_name)
+                    self._disabled_plugins.discard(plugin_file_stem(plugin_id))
                 if self._engine is not None:
                     self._engine.lifecycle._set_runtime(plugin_id, "ACTIVE")
                 logger.info("Plugin loaded in isolated subprocess: %s", plugin_id)
@@ -516,13 +514,19 @@ class PluginManager:
             # Standalone dynamic load
             try:
                 module_name = f"vigile.plugins.{plugin_name}"
+                import sys
+
+                if module_name in sys.modules:
+                    sys.modules.pop(module_name)
+                    for hook_name in list(self._hooks.keys()):
+                        self.unregister(hook_name, plugin_id)
+                        self.unregister(hook_name, plugin_name)
+
                 spec = importlib.util.spec_from_file_location(module_name, plugin_path)
                 if spec is None or spec.loader is None:
                     raise ImportError(f"Could not load spec for {plugin_path}")
 
                 module = importlib.util.module_from_spec(spec)
-                import sys
-
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
 
@@ -534,8 +538,10 @@ class PluginManager:
 
                 module.register(self)
                 self._loaded_plugins.append(plugin_id)
-                if self._disabled_plugins is not None and plugin_id in self._disabled_plugins:
-                    self._disabled_plugins.remove(plugin_id)
+                if self._disabled_plugins is not None:
+                    self._disabled_plugins.discard(plugin_id)
+                    self._disabled_plugins.discard(plugin_name)
+                    self._disabled_plugins.discard(plugin_file_stem(plugin_id))
                 if self._engine is not None:
                     self._engine.lifecycle._set_runtime(plugin_id, "ACTIVE")
                 logger.info("Plugin loaded in-process: %s", plugin_id)
@@ -603,6 +609,8 @@ class PluginManager:
             self._loaded_plugins.remove(plugin_id)
         if self._disabled_plugins is not None:
             self._disabled_plugins.add(plugin_id)
+            self._disabled_plugins.add(module_stem)
+            self._disabled_plugins.add(plugin_name)
         if self._engine is not None:
             self._engine.lifecycle._remove(plugin_id)
 

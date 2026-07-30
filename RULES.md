@@ -411,5 +411,21 @@ After committing and pushing, empty `docs/sessions/SESSION.md` to mark session c
 
 ---
 
+## 9. AUTOMATION TRUST LEVELS (`trust_level`)
+
+Automation rules in `automation_engine.py` support three trust levels that control how actions are dispatched:
+
+| Level | Behavior | Risk |
+|-------|----------|------|
+| `auto` (default) | Auto-creates an `ActionProposal` with status `APPROVED` and executes immediately via `ApprovedProposalDispatcher` | LOW |
+| `always_approve` | Auto-creates a `PENDING` proposal that is immediately dispatched (still goes through the proposal system) | MEDIUM |
+| `manual` | Creates a `PENDING` proposal requiring explicit operator approval before execution | HIGH |
+
+**Key invariant**: Even `trust_level="auto"` always goes through the `ActionProposal` / `ApprovedProposalDispatcher` path (PENDING → APPROVED → DISPATCHED → EXECUTED). It never bypasses the proposal system. The only difference is that the proposal is auto-approved rather than requiring human review.
+
+**Rule**: No mutation intent (restart, stop, delete, etc.) may Execute directly without passing through `ActionProposal`. The `trust_level` controls the approval gate, not whether the gate exists.
+
+---
+
 *Every line of committed code commits the project for years to come.
 You make no compromises on the rules above.*

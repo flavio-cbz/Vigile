@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -17,7 +17,7 @@ class DiskNode(BaseModel):
     path: str
     size: int  # allocated bytes on disk
     is_dir: bool
-    children: Optional[list[DiskNode]] = Field(default=None, max_length=100)
+    children: Optional[List[DiskNode]] = Field(default=None, max_length=100)
 
 
 # Self-referencing forward-ref resolution — MUST stay after DiskNode.

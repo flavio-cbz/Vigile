@@ -231,14 +231,17 @@ async def _get_cached_containers(db: DB, node_id: str) -> list[dict[str, Any]]:
 
 async def _get_live_containers(nm: NodeManager, node_id: str) -> list[dict[str, Any]]:
     """Fetch live containers from the Worker when cache data cannot resolve a target."""
+    from master.core.worker_query_port import WorkerQueryPort
+
+    port = WorkerQueryPort(nm)
     try:
-        result = await nm.send_intent(node_id, {"action": "LIST_CONTAINERS"}, timeout=10.0)
+        result = await port.query(node_id, "LIST_CONTAINERS", timeout=10.0)
     except (RuntimeError, TimeoutError):
         return []
     if not result.get("success"):
         return []
     from master.core.plugin_utils import parse_worker_list
-    from master.plugins.docker_plugin import ContainerSummary
+    from master.plugins.docker import ContainerSummary
     parsed = parse_worker_list(result.get("output", ""), ContainerSummary)
     return parsed or []
 

@@ -70,17 +70,6 @@ class NodeServiceClassification(BaseModel):
     baseline_ram_percent: float
 
 
-def _guess_context(hostname: str, containers: list[dict[str, Any]]) -> str:
-    host_lower = hostname.lower()
-    if "web" in host_lower:
-        return "Serveur Web / Applicatif"
-    elif "db" in host_lower or "sql" in host_lower:
-        return "Serveur de Base de Données"
-    elif "media" in host_lower or "nas" in host_lower:
-        return "Homelab Médias & Stockage"
-    return "Serveur général"
-
-
 class NodeProfile(BaseModel):
     node_id: str
     known_heavy_processes: list[HeavyProcessConfig] = Field(default_factory=list)
@@ -98,18 +87,49 @@ class DiagnosticReport(BaseModel):
     headline: str = Field(description="Short human-friendly summary of the diagnostic")
     explanation: str = Field(description="Detailed explanation of what is causing the load")
     suggested_action: str = Field(description="Remediation action recommended for the user")
+    correlated_cause: list[str] = Field(
+        default_factory=list,
+        description="List of correlated events (audit actions, automation triggers, service changes) that may have contributed to this anomaly",
+    )
 
 
 class InsightsManager:
     """
     Manages node profiling, real-time insights generation, and anomaly diagnostics.
-    Follows Dependency Injection: receives LLMClient and PluginManager inside constructor.
+    Follows Dependency Injection: receives LLMClient, PluginManager, and optional WorkerQueryPort.
     """
 
-    def __init__(self, llm_client: LLMClient | None = None, plugin_manager: PluginManager | None = None) -> None:
+    def __init__(
+        self,
+        llm_client: LLMClient | None = None,
+        plugin_manager: PluginManager | None = None,
+        worker_query_port: Any | None = None,
+    ) -> None:
         self._llm_client = llm_client
         self._sllm = StructuredLLM(llm_client) if llm_client else None
         self._plugin_manager = plugin_manager
+        self._worker_query_port = worker_query_port
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def _spawn_task(self, coro: Any, name: str) -> asyncio.Task:
+        """Spawn a supervised background task tracked for graceful shutdown."""
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def ensure_tasks_complete(self, timeout: float = 30.0) -> None:
+        """Wait for all background tasks to complete (graceful shutdown)."""
+        if not self._background_tasks:
+            return
+        done, pending = await asyncio.wait(
+            self._background_tasks, timeout=timeout
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=5.0)
+        self._background_tasks.clear()
 
     async def generate_profile(
         self,
@@ -148,7 +168,7 @@ class InsightsManager:
             if not services:
                 try:
                     from master.core.plugin_utils import parse_worker_list
-                    from master.plugins.systemd_plugin import ServiceInfo
+                    from master.plugins.systemd import ServiceInfo
 
                     result = await self._auto_profiling_intent(
                         node_id, "LIST_SERVICES", {}, nm, db, timeout=8.0
@@ -163,7 +183,7 @@ class InsightsManager:
             if not containers:
                 try:
                     from master.core.plugin_utils import parse_worker_list
-                    from master.plugins.docker_plugin import ContainerSummary
+                    from master.plugins.docker import ContainerSummary
 
                     result = await self._auto_profiling_intent(
                         node_id, "LIST_CONTAINERS", {}, nm, db, timeout=8.0
@@ -268,18 +288,14 @@ class InsightsManager:
         )
         await db.commit()
 
+        from master.core.worker_query_port import WorkerQueryPort
+
+        port = self._worker_query_port or WorkerQueryPort(nm)
         try:
-            result = await nm.send_intent(
-                node_id, {"action": action, "params": params}, timeout=timeout
-            )
-            success = result.get("success", False)
-            proposal.complete(success=success, result_data=result)
-        except RuntimeError as exc:
+            result = await port.query(node_id, action, params, timeout=timeout)
+        except (RuntimeError, TimeoutError) as exc:
             proposal.complete(success=False, result_data={"error": str(exc)})
             result = {"success": False, "error": str(exc)}
-        except TimeoutError:
-            proposal.complete(success=False, result_data={"error": "worker_timeout"})
-            result = {"success": False, "error": "Worker did not respond in time"}
 
         db_data = proposal.to_db_dict()
         await db.execute(
@@ -439,7 +455,18 @@ class InsightsManager:
                 logger.warning("LLM classification failed for node %s: %s", node_id, ex)
 
         known_heavy = self._classify_services_fallback(services, containers)
-        context = _guess_context(hostname, containers)
+        # Read context_label from the stored insight_profile JSON,
+        # falling back to a sensible default if not yet configured.
+        stored_profile = node.get("insight_profile")
+        if stored_profile:
+            try:
+                context = json.loads(stored_profile).get(
+                    "context_label", "Serveur homelab"
+                )
+            except (json.JSONDecodeError, TypeError):
+                context = "Serveur homelab"
+        else:
+            context = "Serveur homelab"
         classified = [
             ClassifiedService(
                 name=h.container_name or h.service_name or "",
@@ -459,17 +486,15 @@ class InsightsManager:
     def generate_fallback_profile(
         self,
         node_id: str,
-        hostname: str,
         services: list[dict[str, Any]],
         containers: list[dict[str, Any]],
     ) -> NodeProfile:
         known_heavy = self._classify_services_fallback(services, containers)
-        context = _guess_context(hostname, containers)
         return NodeProfile(
             node_id=node_id,
             known_heavy_processes=known_heavy,
             baseline_ram_percent=65.0,
-            context_label=context,
+            context_label="Serveur homelab",
         )
 
     async def get_insights(
@@ -492,7 +517,10 @@ class InsightsManager:
         if not profile_json:
             if node.get("online"):
                 # Spawn generation background task
-                asyncio.create_task(self.generate_profile(node_id, db, nm, locale=locale))
+                self._spawn_task(
+                    self.generate_profile(node_id, db, nm, locale=locale),
+                    name=f"profile:{node_id}",
+                )
                 return {
                     "node_id": node_id,
                     "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -641,7 +669,7 @@ class InsightsManager:
                 },
             }
 
-        # Calculate slope (GB per day)
+        # Calculate slope (GB per day) and R² (coefficient of determination)
         t0 = snapshots[0]["collected_at"]
         x = [(s["collected_at"] - t0) / 86400.0 for s in snapshots]
         y = [s["disk_used_bytes"] / (1024**3) for s in snapshots]
@@ -653,11 +681,54 @@ class InsightsManager:
         sum_xy = sum(xi * yi for xi, yi in zip(x, y))
 
         denominator = n * sum_xx - sum_x * sum_x
-        slope = 0.0
+        raw_slope = 0.0
         if abs(denominator) > 1e-6:
-            slope = (n * sum_xy - sum_x * sum_y) / denominator
-            if slope < 0.0:
-                slope = 0.0
+            raw_slope = (n * sum_xy - sum_x * sum_y) / denominator
+
+        # Calculate R² (Pearson correlation coefficient squared)
+        y_mean = sum_y / n
+        ss_tot = sum((yi - y_mean) ** 2 for yi in y)
+        ss_res = sum(
+            (yi - (raw_slope * xi + (sum_y - raw_slope * sum_x) / n)) ** 2
+            for xi, yi in zip(x, y)
+        )
+        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 1e-9 else 0.0
+
+        # Handle negative slope (disk is being freed)
+        if raw_slope < -0.05:
+            return {
+                "type": "disk",
+                "severity": "ok",
+                "icon": "🗑️",
+                "headline": "Disque en cours de libération",
+                "detail": f"Tendance à la baisse de {abs(raw_slope):.2f} Go/jour",
+                "confidence": "high" if timespan >= 86400 else "medium",
+                "raw": {
+                    "used_percent": used_percent,
+                    "free_gb": round(free_gb, 1),
+                    "growth_gb_per_day": round(raw_slope, 3),
+                    "r_squared": round(r_squared, 2),
+                },
+            }
+
+        slope = max(0.0, raw_slope)
+
+        # Handle noisy / non-linear data (R² < 0.5)
+        if r_squared < 0.5 and timespan >= 21600 and slope > 0.05:
+            return {
+                "type": "disk",
+                "severity": "ok",
+                "icon": "📊",
+                "headline": "Tendance disque fluctuante",
+                "detail": f"Variation non-linéaire détectée sur l'historique (R²={r_squared:.2f})",
+                "confidence": "low",
+                "raw": {
+                    "used_percent": used_percent,
+                    "free_gb": round(free_gb, 1),
+                    "growth_gb_per_day": round(slope, 3),
+                    "r_squared": round(r_squared, 2),
+                },
+            }
 
         # Check stability / trend
         if slope <= 0.01:
@@ -672,6 +743,7 @@ class InsightsManager:
                     "used_percent": used_percent,
                     "free_gb": round(free_gb, 1),
                     "growth_gb_per_day": round(slope, 3),
+                    "r_squared": round(r_squared, 2),
                 },
             }
 
@@ -999,6 +1071,7 @@ class InsightsManager:
                 headline="Diagnostic IA temporairement indisponible",
                 explanation="Le service d'IA n'est pas configuré sur ce serveur Master.",
                 suggested_action="Veuillez configurer la clé LLM dans l'environnement du Master.",
+                correlated_cause=[],
             )
 
         node = await nm.get_node(db, node_id)
@@ -1091,4 +1164,5 @@ class InsightsManager:
                 headline="Diagnostic IA temporairement indisponible",
                 explanation=f"Une erreur est survenue lors de l'appel au service de diagnostic : {ex}",
                 suggested_action="Veuillez inspecter manuellement les services systemd et conteneurs Docker via l'interface du serveur.",
+                correlated_cause=[],
             )

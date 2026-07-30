@@ -82,7 +82,10 @@ class StubNodeManager:
     async def get_node(self, db, node_id: str) -> dict | None:  # noqa: ANN001
         return self._nodes.get(node_id)
 
-    async def send_intent(  # noqa: ANN201
+    async def is_connected(self, node_id: str) -> bool:
+        return node_id in self._nodes
+
+    async def _send_intent(  # noqa: ANN201
         self, node_id: str, intent: dict, *, timeout: float = 30.0
     ):
         self.intent_calls.append(intent)
@@ -92,6 +95,11 @@ class StubNodeManager:
         if action == "GET_STATS":
             return {"success": True, "disks": [{"mount_point": "/"}]}
         return {"success": True, "output": _disk_scan_json()}
+
+    async def send_intent(  # noqa: ANN201
+        self, node_id: str, intent: dict, *, timeout: float = 30.0
+    ):
+        return await self._send_intent(node_id, intent, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------

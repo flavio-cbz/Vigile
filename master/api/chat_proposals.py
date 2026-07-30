@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Annotated, Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any
 
 from fastapi import Body, Depends, HTTPException, Path, status
 
@@ -18,10 +22,11 @@ from master.api.demo_data import (
     is_demo,
     update_demo_proposal,
 )
-from master.api.deps import DB, get_node_manager, require_role
+from master.api.deps import DB, get_node_manager, get_proposal_dispatcher, require_role
 from master.core.action_proposal import ActionProposal
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
+from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +93,7 @@ async def approve_proposal(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
+    dispatcher: ApprovedProposalDispatcher = Depends(get_proposal_dispatcher),
 ) -> dict[str, Any]:
     """
     Approve a pending action proposal and execute it immediately.
@@ -132,49 +138,69 @@ async def approve_proposal(
             detail=f"Proposal is {proposal.status}, not PENDING",
         )
 
-    # Approve
     proposal.approve(claims["sub"])
 
-    # Execute intent
-    try:
-        validation_error = await _normalize_action_proposal(db, nm, proposal)
-        if validation_error:
-            proposal.complete(success=False, result_data={"error": validation_error})
-        else:
-            result = await nm.send_intent(
-                proposal.node_id,
-                {"action": proposal.action, "params": proposal.params},
-                timeout=15.0,
-            )
-            success = result.get("success", False)
-            proposal.complete(success=success, result_data=result)
-    except RuntimeError as exc:
-        proposal.complete(success=False, result_data={"error": str(exc)})
-    except TimeoutError:
-        proposal.complete(success=False, result_data={"error": "Worker did not respond in time"})
+    validation_error = await _normalize_action_proposal(db, nm, proposal)
+    if validation_error:
+        proposal.complete(success=False, result_data={"error": validation_error})
+        db_data = proposal.to_db_dict()
+        await db.execute(
+            """
+            UPDATE action_proposals SET
+                status = ?, approved_by = ?, updated_at = ?,
+                executed_at = ?, result_json = ?, params_json = ?
+            WHERE id = ?
+            """,
+            (
+                db_data["status"],
+                db_data["approved_by"],
+                db_data["updated_at"],
+                db_data["executed_at"],
+                db_data["result_json"],
+                db_data["params_json"],
+                proposal.id,
+            ),
+        )
+        await db.commit()
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.PROPOSAL_APPROVED,
+            node_id=proposal.node_id,
+            details={
+                "proposal_id": proposal.id,
+                "action": proposal.action,
+                "target": proposal.params.get("target")
+                or proposal.params.get("container_id")
+                or proposal.params.get("container")
+                or proposal.params.get("service")
+                or "",
+                "status": proposal.status,
+                "result": db_data["result_json"],
+            },
+        )
+        return proposal.model_dump()
 
-    # Persist
     db_data = proposal.to_db_dict()
     await db.execute(
         """
         UPDATE action_proposals SET
             status = ?, approved_by = ?, updated_at = ?,
-            executed_at = ?, result_json = ?, params_json = ?
+            params_json = ?
         WHERE id = ?
         """,
         (
             db_data["status"],
             db_data["approved_by"],
             db_data["updated_at"],
-            db_data["executed_at"],
-            db_data["result_json"],
             db_data["params_json"],
             proposal.id,
         ),
     )
     await db.commit()
 
-    # Audit
+    result = await dispatcher.dispatch_approved(proposal.id, db, intent_timeout=15.0)
+
     await log_action(
         db,
         user_id=claims["sub"],
@@ -189,9 +215,15 @@ async def approve_proposal(
             or proposal.params.get("service")
             or "",
             "status": proposal.status,
-            "result": db_data["result_json"],
+            "result": result,
         },
     )
+
+    async with db.execute(
+        "SELECT * FROM action_proposals WHERE id = ?", (proposal_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+    proposal = ActionProposal.from_db_row(dict(row))
 
     return proposal.model_dump()
 

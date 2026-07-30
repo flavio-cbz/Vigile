@@ -42,6 +42,27 @@ class InvestigationManager:
         self._insights: Any = None  # InsightsManager — lazy-loaded from DI
         self._max_concurrent = max_concurrent
         self._active_count = 0
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def _spawn_task(self, coro: Any, name: str) -> asyncio.Task:
+        """Spawn a supervised background task tracked for graceful shutdown."""
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def ensure_tasks_complete(self, timeout: float = 30.0) -> None:
+        """Wait for all background tasks to complete (graceful shutdown)."""
+        if not self._background_tasks:
+            return
+        done, pending = await asyncio.wait(
+            self._background_tasks, timeout=timeout
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=5.0)
+        self._background_tasks.clear()
 
     def _get_insights(self) -> Any:
         """Lazy-load InsightsManager from the DI layer."""
@@ -118,7 +139,7 @@ class InvestigationManager:
         )
 
         # Launch Phase 3 analysis asynchronously
-        asyncio.create_task(
+        self._spawn_task(
             self._run_investigation(investigation_id, node_id, db),
             name=f"investigation:{investigation_id[:12]}",
         )

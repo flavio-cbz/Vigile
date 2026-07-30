@@ -7,7 +7,11 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Annotated, Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[attr-defined]
+from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -29,12 +33,21 @@ from master.api.demo_data import (
     is_demo,
     save_demo_chat_session,
 )
-from master.api.deps import DB, get_llm_client, get_node_manager, get_settings, get_structured_llm, require_role
+from master.api.deps import (
+    DB,
+    get_llm_client,
+    get_node_manager,
+    get_settings,
+    get_structured_llm,
+    get_worker_query_port,
+    require_role,
+)
 from master.core.action_proposal import ActionProposal
 from master.core.llm_client import LLMClient, LLMError
 from master.core.node_manager import NodeManager
 from master.core.plugin_base import redact_sensitive
 from master.core.structured_llm import StructuredLLM
+from master.core.worker_query_port import WorkerQueryPort
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +67,7 @@ async def chat(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
+    port: WorkerQueryPort = Depends(get_worker_query_port),
     llm: LLMClient = Depends(get_llm_client),
     sllm: StructuredLLM = Depends(get_structured_llm),
     settings: Any = Depends(get_settings),
@@ -407,7 +421,7 @@ async def chat(
                                 params["min_size_bytes"] = fn_args["min_size_bytes"]
 
                         try:
-                            result = await nm.send_intent(node_id, {"action": action, "params": params}, timeout=15.0)
+                            result = await port.query(node_id, action, params, timeout=15.0)
                             tool_output = json.dumps(result)
                             tool_success = bool(result.get("success", False))
                         except Exception as e:

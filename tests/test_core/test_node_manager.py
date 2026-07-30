@@ -198,61 +198,51 @@ async def test_node_manager_delete_nonexistent(db: aiosqlite.Connection, node_ma
 
 @pytest.mark.asyncio
 async def test_node_manager_heartbeat_monitor(db: aiosqlite.Connection, node_manager: NodeManager):
-    # Set up global DB connection mock/hack if needed
-    import master.core.node_manager as nm
+    node_id_1 = await node_manager.create_node(db, name="node-1")
+    node_id_2 = await node_manager.create_node(db, name="node-2")
 
-    original_get_db = nm.get_db_conn
-    nm.get_db_conn = lambda: db
+    # Set transition limits
+    await node_manager.transition_state(db, node_id_1, NodeState.ENROLLING)
+    await node_manager.transition_state(db, node_id_1, NodeState.CONNECTED)
+    await node_manager.transition_state(db, node_id_2, NodeState.ENROLLING)
+    await node_manager.transition_state(db, node_id_2, NodeState.CONNECTED)
 
-    try:
-        node_id_1 = await node_manager.create_node(db, name="node-1")
-        node_id_2 = await node_manager.create_node(db, name="node-2")
+    ws1 = DummyWebSocket()
+    ws2 = DummyWebSocket()
+    conn1 = await node_manager.register_connection(node_id_1, ws1)
+    conn2 = await node_manager.register_connection(node_id_2, ws2)
 
-        # Set transition limits
-        await node_manager.transition_state(db, node_id_1, NodeState.ENROLLING)
-        await node_manager.transition_state(db, node_id_1, NodeState.CONNECTED)
-        await node_manager.transition_state(db, node_id_2, NodeState.ENROLLING)
-        await node_manager.transition_state(db, node_id_2, NodeState.CONNECTED)
+    # Make conn1 age past lost_threshold
+    conn1.last_heartbeat = time.time() - 500
 
-        ws1 = DummyWebSocket()
-        ws2 = DummyWebSocket()
-        conn1 = await node_manager.register_connection(node_id_1, ws1)
-        conn2 = await node_manager.register_connection(node_id_2, ws2)
+    # Execute check heartbeats
+    await node_manager._check_heartbeats(lost_threshold=300, stale_threshold=86400)
 
-        # Make conn1 age past lost_threshold
-        conn1.last_heartbeat = time.time() - 500
+    # node-1 should be LOST and disconnected
+    assert not await node_manager.is_connected(node_id_1)
+    node1 = await node_manager.get_node(db, node_id_1)
+    assert node1["state"] == "LOST"
 
-        # Execute check heartbeats
-        await node_manager._check_heartbeats(lost_threshold=300, stale_threshold=86400)
+    # node-2 should still be CONNECTED
+    assert await node_manager.is_connected(node_id_2)
+    node2 = await node_manager.get_node(db, node_id_2)
+    assert node2["state"] == "CONNECTED"
 
-        # node-1 should be LOST and disconnected
-        assert not await node_manager.is_connected(node_id_1)
-        node1 = await node_manager.get_node(db, node_id_1)
-        assert node1["state"] == "LOST"
+    # Now test LOST -> STALE transition
+    # We manually update database last_heartbeat for node-1
+    await db.execute(
+        "UPDATE nodes SET last_heartbeat = ? WHERE id = ?", (time.time() - 90000, node_id_1)
+    )
+    await db.commit()
 
-        # node-2 should still be CONNECTED
-        assert await node_manager.is_connected(node_id_2)
-        node2 = await node_manager.get_node(db, node_id_2)
-        assert node2["state"] == "CONNECTED"
-
-        # Now test LOST -> STALE transition
-        # We manually update database last_heartbeat for node-1
-        await db.execute(
-            "UPDATE nodes SET last_heartbeat = ? WHERE id = ?", (time.time() - 90000, node_id_1)
-        )
-        await db.commit()
-
-        # Run check heartbeats again with stale_threshold=80000
-        await node_manager._check_heartbeats(lost_threshold=300, stale_threshold=80000)
-        node1 = await node_manager.get_node(db, node_id_1)
-        assert node1["state"] == "STALE"
-
-    finally:
-        nm.get_db_conn = original_get_db
+    # Run check heartbeats again with stale_threshold=80000
+    await node_manager._check_heartbeats(lost_threshold=300, stale_threshold=80000)
+    node1 = await node_manager.get_node(db, node_id_1)
+    assert node1["state"] == "STALE"
 
 
 @pytest.mark.asyncio
-async def test_node_manager_startup_shutdown(node_manager: NodeManager):
+async def test_node_manager_startup_shutdown(db: aiosqlite.Connection, node_manager: NodeManager):
     ws = DummyWebSocket()
     await node_manager.register_connection("n1", ws)
 
@@ -353,9 +343,6 @@ async def test_node_manager_monitor_loop_and_exceptions(
 ):
     import master.core.node_manager as nm
 
-    original_get_db = nm.get_db_conn
-    nm.get_db_conn = lambda: db
-
     try:
         # Mock _check_heartbeats to raise an exception once to cover exception branch in monitor loop
         calls = 0
@@ -390,9 +377,7 @@ async def test_node_manager_monitor_loop_and_exceptions(
 
         with mock.patch("asyncio.sleep", mock_sleep):
             # Start the monitor with extremely small interval to quickly complete 10+ cycles
-            await node_manager.start(
-                heartbeat_interval=0.0001, lost_threshold=5, stale_threshold=10
-            )
+            await node_manager.start(heartbeat_interval=0.001, lost_threshold=5, stale_threshold=10)
 
             # Wait deterministically until calls reaches at least 12
             for _ in range(50):
@@ -436,7 +421,7 @@ async def test_node_manager_monitor_loop_and_exceptions(
         await original_check_hb(lost_threshold=300, stale_threshold=80000)
 
     finally:
-        nm.get_db_conn = original_get_db
+        pass
 
 
 @pytest.mark.asyncio

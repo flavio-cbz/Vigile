@@ -49,7 +49,16 @@ SUPPORTED: dict[str, list[str]] = {
 
 _manifest_cache: dict = {"data": None, "fetched_at": 0.0}
 _revocation_cache: dict = {"data": None, "fetched_at": 0.0}
-_cache_lock: asyncio.Lock = asyncio.Lock()
+_platform_locks: dict[str, asyncio.Lock] = {}
+_platform_locks_meta: asyncio.Lock = asyncio.Lock()
+
+
+async def _get_platform_lock(os_name: str, arch: str) -> asyncio.Lock:
+    key = f"{os_name}/{arch}"
+    async with _platform_locks_meta:
+        if key not in _platform_locks:
+            _platform_locks[key] = asyncio.Lock()
+        return _platform_locks[key]
 
 
 def _validate_os_arch(os_name: str, arch: str) -> None:
@@ -115,7 +124,16 @@ async def _github_api_download(url: str, token: str, timeout: int) -> bytes:
 
 async def _fetch_url(url: str, settings: Settings, timeout: int = 30) -> bytes:
     if url.startswith("file://"):
-        file_path = Path(url[7:])
+        file_path = Path(url[7:]).resolve()
+        allowed_roots = [
+            Path(settings.worker_binary_local_dir).resolve(),
+            Path(settings.worker_binary_cache_dir).resolve(),
+        ]
+        if not any(str(file_path).startswith(str(root)) for root in allowed_roots):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Path traversal blocked: {file_path} outside allowed directories",
+            )
         try:
             return file_path.read_bytes()
         except FileNotFoundError as exc:
@@ -161,13 +179,13 @@ async def _fetch_url(url: str, settings: Settings, timeout: int = 30) -> bytes:
         )
 
 
-def verify_minisign(
+async def verify_minisign_async(
     binary_path: Path,
     sig_content: str,
     public_key: str,
 ) -> bool:
     """
-    Verify a minisign (Ed25519) signature using the minisign CLI.
+    Verify a minisign (Ed25519) signature asynchronously using thread-pool executor.
     Falls back to accepting the binary if no public key is configured (dev mode).
     """
     if not public_key:
@@ -184,19 +202,23 @@ def verify_minisign(
             sig_file = tmp / "worker.sig"
             sig_file.write_text(sig_content, encoding="utf-8")
 
-            result = subprocess.run(
-                [
-                    "minisign",
-                    "-Vm",
-                    str(binary_path),
-                    "-P",
-                    public_key,
-                    "-x",
-                    str(sig_file),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    [
+                        "minisign",
+                        "-Vm",
+                        str(binary_path),
+                        "-P",
+                        public_key,
+                        "-x",
+                        str(sig_file),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ),
             )
             if result.returncode == 0:
                 return True
@@ -205,6 +227,28 @@ def verify_minisign(
     except Exception as exc:
         logger.error("Signature verification error: %s", exc)
         return False
+
+
+def verify_minisign(
+    binary_path: Path,
+    sig_content: str,
+    public_key: str,
+) -> bool:
+    """Legacy synchronous signature verification helper (deprecated in async handlers)."""
+    return asyncio.run(verify_minisign_async(binary_path, sig_content, public_key))
+
+
+def _get_etag(binary_path: Path) -> str:
+    """Return cached SHA256 as ETag if available, falling back to mtime."""
+    sha256_path = binary_path.parent / "worker.sha256"
+    if sha256_path.exists():
+        try:
+            val = sha256_path.read_text().strip().split()[0]
+            if val:
+                return f'"{val}"'
+        except Exception:
+            pass
+    return f'"{binary_path.stat().st_mtime}"'
 
 
 async def _fetch_and_cache(
@@ -238,7 +282,8 @@ async def _fetch_and_cache(
     sig_path = cache_dir / "worker.sig"
 
     tmp_dir = cache_dir / ".tmp"
-    async with _cache_lock:
+    lock = await _get_platform_lock(os_name, arch)
+    async with lock:
         try:
             binary_data = await _fetch_url(binary_info["url"], settings)
             sha256_data = await _fetch_url(binary_info["url"] + ".sha256", settings)
@@ -259,7 +304,7 @@ async def _fetch_and_cache(
                 )
 
             sig_text = sig_data.decode().strip()
-            if not verify_minisign(tmp_bin, sig_text, settings.worker_binary_public_key):
+            if not await verify_minisign_async(tmp_bin, sig_text, settings.worker_binary_public_key):
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Minisign signature verification failed — binary may be tampered",
@@ -310,12 +355,12 @@ async def _fetch_revocations(settings) -> dict:
         _revocation_cache["data"] = parsed
         _revocation_cache["fetched_at"] = now
         return parsed
-    except HTTPException as e:
-        logger.warning("Failed to fetch revocation list (network): %s. Failing open.", e.detail)
+    except Exception as e:
+        if _revocation_cache.get("data"):
+            logger.warning("Failed to fetch revocation list (%s) — serving stale cache.", e)
+            return _revocation_cache["data"]
+        logger.error("Failed to fetch revocation list (%s) — no cache available. Failing open.", e)
         return {"revoked": [], "revoked_at": {}}
-    except json.JSONDecodeError as e:
-        logger.error("Revocation list is malformed JSON: %s. Failing closed.", e)
-        return {"revoked": ["*"], "revoked_at": {}}
 
 
 async def refresh_binary_cache() -> dict:
@@ -356,6 +401,7 @@ async def get_worker_binary(
             binary_path,
             media_type="application/octet-stream",
             filename=filename,
+            headers={"ETag": _get_etag(binary_path)},
         )
 
     cache_dir = Path(settings.worker_binary_cache_dir) / os / arch
@@ -380,7 +426,7 @@ async def get_worker_binary(
                 binary_path,
                 media_type="application/octet-stream",
                 filename=filename,
-                headers={"ETag": f'"{hashlib.sha256(binary_path.read_bytes()).hexdigest()}"'},
+                headers={"ETag": _get_etag(binary_path)},
             )
 
     binary_path = await _fetch_and_cache(settings, os, arch)
@@ -399,7 +445,7 @@ async def get_worker_binary(
         binary_path,
         media_type="application/octet-stream",
         filename=filename,
-        headers={"ETag": f'"{hashlib.sha256(binary_path.read_bytes()).hexdigest()}"'},
+        headers={"ETag": _get_etag(binary_path)},
     )
 
 

@@ -16,7 +16,7 @@ const (
 	scanTimeout        = 45 * time.Second
 	maxScanResultBytes = 2 * 1024 * 1024  // 2 MB output cap
 	maxChildrenPerNode = 50               // cap children per directory
-	defaultMinSize     = 10 * 1024 * 1024 // 10 MB default min file size
+	defaultMinSize     = 1 * 1024 * 1024  // 1 MB default min file size
 )
 
 // DiskNode matches master/schemas/disk_scan.py DiskNode schema exactly.
@@ -247,6 +247,14 @@ func walkDir(ctx context.Context, path string, depth, maxDepth, minSizeBytes, ma
 		}
 	}
 
+	var dirSize int64
+	for _, child := range children {
+		dirSize += child.Size
+	}
+	if dirSize > 0 {
+		node.Size = dirSize
+	}
+
 	node.Children = aggregateChildren(children, minSizeBytes, maxChildren, path)
 	return node
 }
@@ -302,12 +310,12 @@ func aggregateChildren(children []DiskNode, minSizeBytes, maxChildren int, paren
 	return result
 }
 
-// allocatedSize returns the allocated size on disk using stat.Blocks * stat.Blksize.
+// allocatedSize returns the allocated size on disk using stat.Blocks * 512 (POSIX 512-byte blocks).
 // Falls back to info.Size() if syscall.Stat_t is unavailable.
 func allocatedSize(info os.FileInfo) int64 {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return info.Size()
 	}
-	return stat.Blocks * int64(stat.Blksize)
+	return stat.Blocks * 512
 }
