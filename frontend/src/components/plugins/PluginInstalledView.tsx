@@ -2,7 +2,7 @@ import React from 'react';
 import { Package } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { PluginCard } from './PluginCard';
-import type { PluginInfo } from '../../pages/PluginsPage';
+import type { PluginInfo } from '../../hooks/usePluginsData';
 
 interface PluginInstalledViewProps {
   plugins: PluginInfo[];

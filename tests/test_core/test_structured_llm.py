@@ -120,3 +120,23 @@ async def test_structured_max_retries_zero(structured_llm):
             ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=0
         )
     assert "loop completed without return or raise" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_default_max_retries():
+    """StructuredLLM uses default_max_retries when create() omits max_retries."""
+    client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
+    sllm = StructuredLLM(client, default_max_retries=2)
+
+    calls = 0
+
+    async def always_invalid(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return {"choices": [{"message": {"content": "not valid json"}}]}
+
+    client.complete = always_invalid
+    with pytest.raises(ValueError) as exc_info:
+        await sllm.create(ResponseSchemaModel, [{"role": "user", "content": "Extract"}])
+    assert calls == 2
+    assert "failed after" in str(exc_info.value)

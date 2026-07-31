@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from master.core.plugin_engine import PluginEngine
 from master.core.hook_bus import HookBus
 from master.core.scheduler import Scheduler
@@ -107,3 +109,30 @@ class TestPluginEngine:
 
         asyncio.run(do())
         assert engine.loaded_plugins == []
+
+    @pytest.mark.asyncio
+    async def test_shutdown_does_not_persist_disabled_state(self, db):
+        """shutdown() arrête le runtime mais ne doit PAS écrire enabled=0/status=DISABLED
+        en DB : l'état activé/désactivé est une décision de l'opérateur, pas un état
+        runtime. Sans ce garde-fou, tout redémarrage propre désactive tous les plugins."""
+        engine = PluginEngine(db=db, scheduler=Scheduler())
+        await db.execute(
+            "INSERT INTO plugins (id, version, enabled, status, config_json) "
+            "VALUES ('fake', '1.0.0', 1, 'ACTIVE', '{}')"
+        )
+        await db.commit()
+
+        engine._instances["fake"] = object()  # simule un plugin chargé au runtime
+        engine._set_state("fake", "active")
+
+        await engine.shutdown()
+
+        assert engine.loaded_plugins == []
+
+        async with db.execute(
+            "SELECT enabled, status FROM plugins WHERE id = 'fake'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == 1, "shutdown() ne doit pas désactiver le plugin en DB"
+        assert row[1] == "ACTIVE", "shutdown() ne doit pas marquer le plugin DISABLED en DB"

@@ -46,14 +46,15 @@ class StructuredLLM:
         # result.name == "John", result.age == 30
     """
 
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(self, llm_client: LLMClient, default_max_retries: int = 2) -> None:
         self._client = llm_client
+        self._default_max_retries = default_max_retries
 
     async def create(
         self,
         response_model: type[T],
         messages: list[dict[str, Any]],
-        max_retries: int = 3,
+        max_retries: int | None = None,
         **kwargs: Any,
     ) -> T:
         """
@@ -62,7 +63,9 @@ class StructuredLLM:
         Args:
             response_model: Pydantic model to validate against.
             messages: Chat messages (will have system prompt prepended).
-            max_retries: Number of attempts before giving up.
+            max_retries: Number of attempts before giving up. When ``None``
+                (the default), uses the instance-level ``default_max_retries``
+                set at construction time.
             **kwargs: Additional kwargs passed to LLMClient.complete().
 
         Returns:
@@ -72,6 +75,8 @@ class StructuredLLM:
             ValueError: If the LLM fails to produce valid output after all retries.
             LLMError: If the LLM provider returns an error.
         """
+        if max_retries is None:
+            max_retries = self._default_max_retries
         schema = response_model.model_json_schema()
         from master.core.prompts import load_prompt
 

@@ -159,12 +159,17 @@ async def transaction(db: aiosqlite.Connection) -> AsyncGenerator[aiosqlite.Conn
     """
     Async context manager that wraps operations in an explicit transaction.
     Uses BEGIN IMMEDIATE to serialize writing transactions at file level in WAL mode.
+    Reentrant: if a transaction is already active on the connection, yields directly.
     Rolls back automatically on exception.
 
     Usage:
         async with transaction(db) as conn:
             await conn.execute(...)
     """
+    if db.in_transaction:
+        yield db
+        return
+
     await db.execute("BEGIN IMMEDIATE")
     try:
         yield db

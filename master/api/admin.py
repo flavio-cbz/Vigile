@@ -881,10 +881,9 @@ async def toggle_plugin(
             active_pm._disabled_plugins.discard(plugin_id_canonical)
             active_pm._disabled_plugins.discard(plugin_stem)
             active_pm._disabled_plugins.discard(raw_plugin_id)
-        # Unload any existing instance across candidates first
-        for k in {plugin_id_canonical, plugin_stem, raw_plugin_id, target_load_id}:
-            if k in getattr(active_pm, "loaded_plugins", []):
-                await active_pm.unload_plugin(k)
+        # Unload existing instance if loaded (single targeted call)
+        if target_load_id in getattr(active_pm, "loaded_plugins", []):
+            await active_pm.unload_plugin(target_load_id)
 
         success = await active_pm.load_plugin(target_load_id, settings.plugins_dir)
         if not success:
@@ -893,8 +892,8 @@ async def toggle_plugin(
                 detail=f"Plugin '{plugin_id_canonical}' enabled in DB but failed to load in runtime.",
             )
     else:
-        for k in {plugin_id_canonical, plugin_stem, raw_plugin_id, target_load_id}:
-            await active_pm.unload_plugin(k)
+        # Single targeted unload — engine handles hooks, scheduler, routes, pages, DB
+        await active_pm.unload_plugin(target_load_id)
 
     return JSONResponse(
         {

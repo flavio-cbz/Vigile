@@ -25,6 +25,7 @@ from master.api.rate_limits import LOGIN_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityError, SecurityManager
+from master.db.database import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -219,27 +220,27 @@ async def login(
     now = time.time()
     expires_at = now + sec.jwt_refresh_token_ttl
 
-    await db.execute(
-        """
-        INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, issued_at, expires_at, revoked)
-        VALUES (?, ?, ?, ?, ?, ?, 0)
-        """,
-        (token_id, user["id"], token_hash, family_id, now, expires_at),
-    )
+    async with transaction(db):
+        await db.execute(
+            """
+            INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, issued_at, expires_at, revoked)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (token_id, user["id"], token_hash, family_id, now, expires_at),
+        )
 
-    # Update last_login
-    await db.execute(
-        "UPDATE users SET last_login = ? WHERE id = ?",
-        (time.time(), user["id"]),
-    )
+        # Update last_login
+        await db.execute(
+            "UPDATE users SET last_login = ? WHERE id = ?",
+            (time.time(), user["id"]),
+        )
 
-    await log_action(
-        db,
-        user_id=user["id"],
-        action=AuditAction.USER_LOGIN,
-        details={"username": user["username"]},
-    )
-    await db.commit()
+        await log_action(
+            db,
+            user_id=user["id"],
+            action=AuditAction.USER_LOGIN,
+            details={"username": user["username"]},
+        )
 
     logger.info("User '%s' (role=%s) logged in.", user["username"], user["role"])
 

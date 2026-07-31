@@ -44,3 +44,25 @@ def canonical_plugin_id(name: str, plugins_dir: str | None = None) -> str:
 def plugin_file_stem(plugin_id: str) -> str:
     """Resolve the on-disk file stem for a public canonical plugin id."""
     return _BUILTIN_ID_TO_FILE.get(plugin_id, plugin_id)
+
+
+def is_plugin_active(plugin_id: str) -> bool:
+    """Helper global de vérification de l'état actif d'un plugin dans le runtime."""
+    try:
+        import master.core.plugin_manager as _pm_mod
+        engine = _pm_mod.plugin_engine if _pm_mod.plugin_engine is not None else _pm_mod.plugin_manager
+        if engine is None:
+            return False
+        if hasattr(engine, "is_plugin_loaded"):
+            return engine.is_plugin_loaded(plugin_id)
+
+        canon = canonical_plugin_id(plugin_id)
+        stem = plugin_file_stem(plugin_id)
+        disabled = getattr(engine, "_disabled_plugins", set())
+        if canon in disabled or stem in disabled or plugin_id in disabled:
+            return False
+        loaded = getattr(engine, "loaded_plugins", [])
+        return canon in loaded or stem in loaded or plugin_id in loaded
+    except Exception:
+        return False
+

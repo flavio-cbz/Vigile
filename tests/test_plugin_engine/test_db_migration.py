@@ -161,7 +161,7 @@ class TestPluginsSeedData:
             rows = {r["id"]: r for r in await _plugins_rows(conn)}
             for pid in DEFAULT_PLUGIN_IDS:
                 assert rows[pid]["version"] == "1.0.0", f"{pid} version mismatch"
-                assert rows[pid]["status"] == "RUNNING", f"{pid} status mismatch"
+                assert rows[pid]["status"] == "ACTIVE", f"{pid} status mismatch"
                 assert rows[pid]["enabled"] == 1, f"{pid} not enabled"
             await close_db()
         finally:

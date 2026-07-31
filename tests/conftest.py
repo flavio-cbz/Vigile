@@ -68,6 +68,28 @@ def node_manager() -> NodeManager:
     return NodeManager()
 
 
+_BUILTIN_PLUGIN_IDS = frozenset(
+    {"metrics", "systemd", "docker", "disk_analysis", "clean_logs", "plex"}
+)
+
+
+@pytest.fixture(autouse=True)
+def _plugin_gates_for_builtins(monkeypatch):
+    """Les tests unitaires n'ont pas de runtime plugins chargé : laisse passer les
+    gates `is_plugin_active` pour les plugins intégrés, sans toucher aux plugins
+    personnalisés (le comportement de gate reste testable)."""
+
+    from master.core.plugin_ids import is_plugin_active as _real_is_plugin_active
+
+    def _fake(plugin_id: str) -> bool:
+        if plugin_id in _BUILTIN_PLUGIN_IDS:
+            return True
+        return _real_is_plugin_active(plugin_id)
+
+    monkeypatch.setattr("master.api.services.is_plugin_active", _fake)
+    monkeypatch.setattr("master.api.nodes.is_plugin_active", _fake)
+
+
 @pytest.fixture
 def plugin_manager() -> PluginManager:
     return PluginManager()

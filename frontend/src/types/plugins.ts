@@ -23,6 +23,18 @@ export interface PluginPagesResponse {
   pages: PluginPageEntry[];
 }
 
+export interface AdminPluginInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  schema: Record<string, unknown>;
+  enabled: boolean;
+  loaded: boolean;
+  config: Record<string, unknown>;
+  version?: string;
+}
+
 export interface PluginAPI {
   /** Fetch call automatically prefixed to /api/plugins/<id>/ */
   fetch<T = unknown>(path: string, options?: RequestInit): Promise<T>;

@@ -14,6 +14,7 @@ import { VigileLogo } from '../ui/VigileLogo';
 import { useLocale } from '../../i18n';
 import { SidebarNavItem } from './SidebarNavItem';
 import type { NavItem } from '../../types';
+import type { AdminPluginInfo } from '../../types/plugins';
 
 export const Sidebar: React.FC = () => {
   const { isAdmin, isOperator } = usePermission();
@@ -25,26 +26,24 @@ export const Sidebar: React.FC = () => {
 
   const [isMobile, setIsMobile] = useState(false);
   const pendingCount = useLayoutStore((s) => s.pendingCount);
-  const [isPlexActive, setIsPlexActive] = useState(false);
+  const [activePlugins, setActivePlugins] = useState<string[]>(['systemd', 'docker', 'metrics', 'disk_analysis', 'clean_logs', 'plex']);
   const [isAdminExpanded, setIsAdminExpanded] = useState(() => localStorage.getItem('vigile_admin_expanded') !== 'false');
   const [nonRunningContainerCount, setNonRunningContainerCount] = useState(0);
 
   useEffect(() => {
-    const checkPlex = async () => {
+    const checkActivePlugins = async () => {
       try {
-        const response = await api<any>('/api/admin/plugins');
+        const response = await api<AdminPluginInfo[] | { plugins: AdminPluginInfo[] }>('/api/admin/plugins');
         const list = Array.isArray(response) ? response : (response?.plugins || []);
-        const plex = list.find((p: any) => p.id === 'plex' || p.name === 'plex');
-        if (plex) {
-          setIsPlexActive(Boolean(plex.enabled && plex.loaded));
-        } else if (response && Array.isArray(response.loaded_plugins)) {
-          setIsPlexActive(response.loaded_plugins.includes('plex'));
-        }
+        const activeIds = list
+          .filter((p) => Boolean(p.enabled && p.loaded))
+          .map((p) => p.id);
+        setActivePlugins(activeIds);
       } catch (err) {
-        console.error('Failed to check Plex active status:', err);
+        console.error('Failed to check active plugins:', err);
       }
     };
-    void checkPlex();
+    void checkActivePlugins();
   }, [location.pathname]);
 
   useEffect(() => {
@@ -135,21 +134,36 @@ export const Sidebar: React.FC = () => {
     const activeNodeId = nodeMatch ? nodeMatch[1] : (nodes[0]?.id || '');
     const currentTab = new URLSearchParams(location.search).get('tab');
 
+    const isSystemdActive = activePlugins.includes('systemd');
+    const isDockerActive = activePlugins.includes('docker');
+    const isPlexActive = activePlugins.includes('plex');
+
     const primaryItems: NavItem[] = [
       { to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, exact: true },
       { to: '/servers', label: t('nav.servers'), icon: Server },
-      { to: activeNodeId ? `/nodes/${activeNodeId}?tab=services` : '#', label: t('nav.services'), icon: Activity },
-      { to: '/proposals', label: t('nav.proposals'), icon: CheckSquare, badge: pendingCount > 0 ? pendingCount : undefined },
-      { to: '/chat/new', label: t('nav.chat'), icon: MessageSquareCode, dot: true },
     ];
 
-    if (isPlexActive) primaryItems.push({ to: '/plugins?open=plex', label: 'Plex', icon: Play });
-    primaryItems.push({
-      to: activeNodeId ? `/nodes/${activeNodeId}?tab=containers` : '#',
-      label: t('nav.docker'),
-      icon: Container,
-      badge: nonRunningContainerCount > 0 ? nonRunningContainerCount : undefined,
-    });
+    if (isSystemdActive) {
+      primaryItems.push({ to: activeNodeId ? `/nodes/${activeNodeId}?tab=services` : '/servers', label: t('nav.services'), icon: Activity });
+    }
+
+    primaryItems.push(
+      { to: '/proposals', label: t('nav.proposals'), icon: CheckSquare, badge: pendingCount > 0 ? pendingCount : undefined },
+      { to: '/chat/new', label: t('nav.chat'), icon: MessageSquareCode, dot: true }
+    );
+
+    if (isPlexActive) {
+      primaryItems.push({ to: '/plugins?open=plex', label: 'Plex', icon: Play });
+    }
+
+    if (isDockerActive) {
+      primaryItems.push({
+        to: activeNodeId ? `/nodes/${activeNodeId}?tab=containers` : '/servers',
+        label: t('nav.docker'),
+        icon: Container,
+        badge: nonRunningContainerCount > 0 ? nonRunningContainerCount : undefined,
+      });
+    }
 
     const adminItems: NavItem[] = [
       { to: '/automations', label: t('nav.automations'), icon: Zap },
@@ -157,9 +171,9 @@ export const Sidebar: React.FC = () => {
       { to: '/settings', label: t('nav.settings'), icon: SettingsIcon },
     ];
 
-    const renderLink = (item: NavItem) => {
+    const renderLink = (item: NavItem, index: number) => {
       const isActive = item.to === '/chat/new' ? false : computeActive(item, currentTab);
-      return <SidebarNavItem key={item.to} item={item} collapsed={collapsed} isActive={isActive} currentTab={currentTab} pathname={location.pathname} onNavClick={handleNavClick} t={t} />;
+      return <SidebarNavItem key={`${item.to}-${item.label}-${index}`} item={item} collapsed={collapsed} isActive={isActive} currentTab={currentTab} pathname={location.pathname} onNavClick={handleNavClick} t={t} />;
     };
 
     return (
@@ -171,7 +185,7 @@ export const Sidebar: React.FC = () => {
             </div>
           )}
           <div className={`flex flex-col gap-1 ${collapsed ? 'items-center' : ''}`}>
-            {primaryItems.map(renderLink)}
+            {primaryItems.map((item, i) => renderLink(item, i))}
           </div>
         </div>
 
@@ -181,7 +195,7 @@ export const Sidebar: React.FC = () => {
               <>
                 <div className="border-t border-border-strong/30 my-2 w-5/6 mx-auto" />
                 <div className="flex flex-col gap-1 items-center">
-                  {adminItems.map(renderLink)}
+                  {adminItems.map((item, i) => renderLink(item, i))}
                 </div>
               </>
             ) : (
@@ -195,7 +209,7 @@ export const Sidebar: React.FC = () => {
                 </button>
                 {isAdminExpanded && (
                   <div className="flex flex-col gap-1 pl-1.5 mt-1 animate-fade-in">
-                    {adminItems.map(renderLink)}
+                    {adminItems.map((item, i) => renderLink(item, i))}
                   </div>
                 )}
               </>

@@ -22,7 +22,9 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
   const [showStable, setShowStable] = useState(false);
 
   const allInsights = insights;
-  const activeInsights = showStable
+  const hasActiveAlerts = allInsights.some((item) => item.insight.severity !== 'ok');
+  const displayStables = !hasActiveAlerts || showStable;
+  const activeInsights = displayStables
     ? allInsights
     : allInsights.filter((item) => item.insight.severity !== 'ok');
 
@@ -53,14 +55,14 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
         icon={Sparkles}
         layout="grid"
         subtitle={
-          stableMetricsCount > 0 && !showStable
+          stableMetricsCount > 0 && !displayStables
             ? `${activeInsights.length} alerte${activeInsights.length > 1 ? 's' : ''} active${activeInsights.length > 1 ? 's' : ''}`
             : stableMetricsCount > 0
             ? `${stableMetricsCount} stable${stableMetricsCount > 1 ? 's' : ''}`
             : undefined
         }
         onSeeAll={
-          stableMetricsCount > 0
+          hasActiveAlerts && stableMetricsCount > 0
             ? () => setShowStable(!showStable)
             : undefined
         }

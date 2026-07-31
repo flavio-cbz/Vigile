@@ -21,7 +21,6 @@ export const SidebarNavItem: React.FC<SidebarNavItemProps> = ({
 
   return (
     <NavLink
-      key={item.to}
       to={item.to === '/chat/new' ? '#' : item.to}
       end={item.exact}
       onClick={(e) => {

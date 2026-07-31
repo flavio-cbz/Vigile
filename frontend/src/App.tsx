@@ -8,6 +8,7 @@ import { ProposalsPage } from './pages/ProposalsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ServersPage } from './pages/ServersPage';
 import { PluginsPage } from './pages/PluginsPage';
+import { PluginRouter } from './plugins/PluginRouter';
 import { AutomationsPage } from './pages/AutomationsPage';
 
 import { useTheme } from './hooks/useTheme';
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="servers" element={<ServersPage />} />
         <Route path="plugins" element={<PluginsPage />} />
+        <Route path="plugins/*" element={<PluginRouter />} />
         <Route path="automations" element={<AutomationsPage />} />
         <Route path="chat" element={<ChatRedirect />} />
         <Route path="chat/new" element={<ChatRedirect />} />

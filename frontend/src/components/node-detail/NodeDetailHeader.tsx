@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router';
-import { Cpu, ArrowLeft, Calendar } from 'lucide-react';
+import { Cpu, ArrowLeft, Calendar, Monitor, HardDrive, Tag } from 'lucide-react';
 import { StatusDot } from '../primitives/StatusDot';
 import { MetricPill } from '../primitives/MetricPill';
 import { TimeAgo } from '../primitives/TimeAgo';
@@ -36,19 +36,36 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
               <Badge severity={node.online ? 'ok' : 'offline'} className="text-[8px] px-1 py-0" />
             </div>
 
-            <div className="flex items-center gap-3 text-text-3 text-[10px] font-mono mt-1">
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3 opacity-60" /> {t('node_detail.enrolled_label')} <TimeAgo timestamp={node.enrolled_at} />
-              </span>
-              <span>·</span>
-              <span>{t('node_detail.os_label', { os: node.os || t('node_detail.os_default'), arch: node.arch || t('node_detail.arch_default') })}</span>
-              <span>·</span>
-              <span>{t('node_detail.hostname_label', { hostname: node.hostname || t('common.unknown') })}</span>
+            <div className="flex flex-wrap items-center gap-3 mt-2">
+              {/* Enrolled Chip */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
+                <Calendar className="w-4 h-4 text-accent shrink-0" />
+                <span className="text-text-3 font-normal">{t('node_detail.enrolled_chip_prefix', { defaultValue: 'Enregistré' })}</span>
+                <TimeAgo timestamp={node.enrolled_at} className="font-semibold text-text-1" />
+              </div>
+
+              {/* OS & Arch Chip */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
+                <Monitor className="w-4 h-4 text-accent shrink-0" />
+                <span className="text-text-1 font-semibold">
+                  {node.os || t('node_detail.os_default')}
+                  <span className="text-text-3 font-normal text-[10px] ml-1">({node.arch || t('node_detail.arch_default')})</span>
+                </span>
+              </div>
+
+              {/* Hostname Chip */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
+                <HardDrive className="w-4 h-4 text-accent shrink-0" />
+                <span className="text-text-3 font-normal">{t('node_detail.hostname_chip_prefix', { defaultValue: 'Host:' })}</span>
+                <span className="font-mono text-text-1 font-semibold">{node.hostname || t('common.unknown')}</span>
+              </div>
+
+              {/* Version Chip */}
               {node.version && (
-                <>
-                  <span>·</span>
-                  <span>{t('node_detail.version_label', { version: node.version })}</span>
-                </>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-accent-muted/25 to-accent-muted/10 border border-l-2 border-l-accent/60 border-accent/20 text-accent text-[11px] font-mono font-medium whitespace-nowrap shadow-2xs hover:bg-accent-muted/35 hover:border-accent/40 hover:shadow-[0_2px_8px_rgba(245,158,11,0.10)] transition-all duration-200">
+                  <Tag className="w-3.5 h-3.5 shrink-0" />
+                  <span>v{node.version}</span>
+                </div>
               )}
             </div>
           </div>

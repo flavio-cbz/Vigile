@@ -283,6 +283,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     cleanup_alerts = asyncio.create_task(alert_cleanup_loop())
 
+    # 11. Outbox dispatch loop (toutes les 15 s) — at-least-once delivery
+    async def outbox_dispatch_loop() -> None:
+        while True:
+            await asyncio.sleep(15)
+            try:
+                await outbox.process_pending(db, batch_size=100)
+            except Exception:
+                logger.exception("Outbox dispatch task failed.")
+
+    outbox_dispatch = asyncio.create_task(outbox_dispatch_loop())
+
+    # 12. Outbox cleanup loop (toutes les heures) — purge processed entries
+    #     older than 7 days so the outbox table stays bounded.
+    async def outbox_cleanup_loop() -> None:
+        while True:
+            await asyncio.sleep(3600)
+            try:
+                await outbox.cleanup_old(time.time() - 7 * 86400, db)
+            except Exception:
+                logger.exception("Outbox cleanup task failed.")
+
+    outbox_cleanup = asyncio.create_task(outbox_cleanup_loop())
+
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
@@ -293,6 +316,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     auto_update_task.cancel()
     proposal_expiry.cancel()
     cleanup_alerts.cancel()
+    outbox_dispatch.cancel()
+    outbox_cleanup.cancel()
     try:
         await engine.shutdown()
     except Exception:
@@ -303,10 +328,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             auto_update_task,
             proposal_expiry,
             cleanup_alerts,
+            outbox_dispatch,
+            outbox_cleanup,
             return_exceptions=True
         )
     except Exception:
         pass
     await node_manager.stop()
+
+    # Close shared httpx client pool
+    try:
+        from master.core.llm_http_pool import close_shared_client
+
+        await close_shared_client()
+    except Exception:
+        logger.exception("Failed to close shared httpx client")
+
     await close_db()
     logger.info("Shutdown complete.")

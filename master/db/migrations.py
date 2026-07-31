@@ -155,6 +155,9 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         logger.info("Created investigations table.")
         await db.commit()
 
+    # Migration 010: allow investigations.status='dropped' (queue-full drops)
+    await _add_dropped_status_to_investigations_if_present(db)
+
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_disabled ON nodes(disabled)")
     await db.commit()
@@ -239,6 +242,43 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
     logger.info("Legacy FK dropped successfully.")
 
 
+async def _add_dropped_status_to_investigations_if_present(db: aiosqlite.Connection) -> None:
+    """
+    Migration 010: add 'dropped' to the investigations.status CHECK constraint.
+
+    SQLite cannot ALTER a CHECK constraint, so the table is rebuilt following
+    the _drop_join_tokens_fk_if_present precedent. Old rows all satisfy the
+    new constraint ('dropped' is added, not removed). Idempotent: no-op once
+    the live table DDL already contains 'dropped'.
+    """
+    async with db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='investigations'"
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if row is None or "dropped" in (row[0] or ""):
+        return
+
+    logger.info("Migration 010: rebuilding investigations to accept status='dropped'.")
+    new_ddl = CREATE_INVESTIGATIONS.replace(
+        "CREATE TABLE IF NOT EXISTS investigations",
+        "CREATE TABLE IF NOT EXISTS investigations_new",
+        1,
+    )
+    await db.execute("PRAGMA foreign_keys=OFF")
+    await db.execute("DROP TABLE IF EXISTS investigations_new")
+    await db.execute(new_ddl)
+    await db.execute("INSERT INTO investigations_new SELECT * FROM investigations")
+    await db.execute("DROP TABLE investigations")
+    await db.execute("ALTER TABLE investigations_new RENAME TO investigations")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_node ON investigations(node_id, created_at DESC)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations(alert_id)")
+    await db.execute("PRAGMA foreign_keys=ON")
+    await db.commit()
+    logger.info("Migration 010: investigations table rebuilt successfully.")
+
+
 async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
     """
     Seed default plugins in the plugins table if not present.
@@ -254,7 +294,7 @@ async def _seed_default_plugins(db: aiosqlite.Connection) -> None:
         await db.execute(
             """
             INSERT INTO plugins (id, version, enabled, status, config_json)
-            VALUES (?, ?, 1, 'RUNNING', '{}')
+            VALUES (?, ?, 1, 'ACTIVE', '{}')
             ON CONFLICT(id) DO UPDATE SET
                 version = CASE WHEN plugins.version IS NULL OR plugins.version = ''
                                THEN excluded.version

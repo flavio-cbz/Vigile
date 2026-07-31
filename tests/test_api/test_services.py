@@ -114,6 +114,18 @@ async def mock_intent_timeout(node_id, intent, *, timeout=30.0):
     raise TimeoutError("Worker did not respond")
 
 
+@pytest.fixture(autouse=True)
+def connected_node(monkeypatch):
+    """WorkerQueryPort exige is_connected=True avant d'envoyer l'intent ;
+    les tests mockent _send_intent mais pas l'état de connexion (lignes
+    orig_connected mortes dans chaque test)."""
+
+    async def _is_connected(node_id) -> bool:
+        return True
+
+    monkeypatch.setattr(node_manager, "is_connected", _is_connected)
+
+
 async def _setup_node(db, name: str = "test-svc") -> str:
     node_id = await node_manager.create_node(db, name=name)
     await node_manager.transition_state(db, node_id, NodeState.ENROLLING)

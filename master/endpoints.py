@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
+from master.core.investigation_manager import investigation_manager
 from master.core.node_manager import node_manager
 from master.api.metrics import render_prometheus
 
@@ -26,17 +27,31 @@ async def health_check(request: Request) -> JSONResponse:
     """
     Basic health check endpoint.
 
-    Returns uptime, connected node count, and version.
+    Returns uptime, connected node count, version, investigation drops,
+    and LLM circuit breaker status.
     """
     uptime = time.time() - getattr(request.app.state, "startup_time", time.time())
-    return JSONResponse(
-        {
-            "status": "ok",
-            "version": "0.7.0",
-            "uptime_seconds": round(uptime, 1),
-            "connected_nodes": len(node_manager.connected_node_ids()),
-        }
-    )
+    health: dict = {
+        "status": "ok",
+        "version": "0.7.0",
+        "uptime_seconds": round(uptime, 1),
+        "connected_nodes": len(node_manager.connected_node_ids()),
+        "investigations_dropped": investigation_manager.dropped_count,
+    }
+
+    # Add LLM health status if configured
+    try:
+        from master.api.deps import get_llm_client
+
+        llm_client = get_llm_client()
+        health["llm"] = llm_client.get_health_status()
+    except RuntimeError:
+        health["llm"] = {"configured": False}
+    except Exception:
+        logger.exception("Failed to retrieve LLM health status")
+        health["llm"] = {"configured": True, "error": "health check failed"}
+
+    return JSONResponse(health)
 
 
 async def metrics(request: Request) -> PlainTextResponse:

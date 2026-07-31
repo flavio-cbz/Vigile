@@ -78,7 +78,7 @@ def test_sync_call_skips_async_hook(caplog):
     with caplog.at_level(logging.WARNING):
         res = pm.call("mixed_hook")
         assert res == []
-        assert "skipped in sync call()" in caplog.text
+        assert "skipped in call()" in caplog.text
 
     # call_first should also skip it
     res_first = pm.call_first("mixed_hook")

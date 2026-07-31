@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 # Receives the full outbox row (as dict) and an aiosqlite connection.
 OutboxHandler = Callable[[Dict[str, Any], aiosqlite.Connection], Awaitable[Any]]
 
+# Default dead-letter cap: after this many handler failures an entry is marked
+# as processed with a "PERMANENTLY FAILED" error instead of being retried
+# forever on every sweep.
+DEFAULT_MAX_RETRIES = 5
 
 
 class Outbox:
@@ -63,18 +67,31 @@ class Outbox:
     once delivery: if the handler crashes between marking ``processed=1`` and
     completing side effects, the event may be re-processed on the next sweep.
 
+    Delivery is capped: an entry whose handler keeps failing is dead-lettered
+    after ``max_retries`` attempts — it is marked ``processed=1`` with an error
+    suffix ``"PERMANENTLY FAILED after N retries"`` so the poison entry stops
+    consuming sweeps while staying visible/queryable for diagnosis.
+
     Lightweight constructor — no I/O, no settings/env reads.  For production use,
     rely on the module-level singleton ``outbox = Outbox()``.
     """
 
-    def __init__(self, db: aiosqlite.Connection | None = None) -> None:
+    def __init__(
+        self,
+        db: aiosqlite.Connection | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> None:
         """
         Args:
             db: Optional fixed DB connection.  When ``None`` (the default for
                 the module singleton), every method falls back to
                 ``get_db_conn()``.
+            max_retries: Dead-letter cap — an entry is permanently failed
+                after this many handler failures (default
+                ``DEFAULT_MAX_RETRIES``).
         """
         self._db: aiosqlite.Connection | None = db
+        self._max_retries: int = max_retries
         # event_type → list of async handlers
         self._handlers: dict[str, list[OutboxHandler]] = defaultdict(list)
 
@@ -145,11 +162,11 @@ class Outbox:
             )
 
         logger.debug(
-            "Outbox entry published",
-            entry_id=entry_id,
-            event_type=event_type,
-            aggregate_id=aggregate_id,
-            aggregate_type=aggregate_type,
+            "Outbox entry published: entry_id=%s event_type=%s aggregate_id=%s aggregate_type=%s",
+            entry_id,
+            event_type,
+            aggregate_id,
+            aggregate_type,
         )
         return entry_id
 
@@ -165,7 +182,9 @@ class Outbox:
           3. On success → mark the entry as processed (``processed=1``,
              ``processed_at=now``).
           4. On failure → increment ``retry_count`` and store the error
-             message; the entry will be retried on the next sweep.
+             message; the entry will be retried on the next sweep.  After
+             ``max_retries`` failures it is dead-lettered (marked processed
+             with a ``PERMANENTLY FAILED`` error) instead of retrying forever.
 
         Handlers are awaited sequentially per entry (entries are processed in
         FIFO order) to preserve event ordering for the same aggregate.
@@ -214,10 +233,10 @@ class Outbox:
                     await handler(entry, conn)
                 except Exception:
                     logger.exception(
-                        "Outbox handler failed",
-                        entry_id=entry["id"],
-                        event_type=event_type,
-                        handler=handler.__name__,
+                        "Outbox handler failed: entry_id=%s event_type=%s handler=%s",
+                        entry["id"],
+                        event_type,
+                        handler.__name__,
                     )
                     success = False
                     error_msg = f"{handler.__name__}: handler raised"
@@ -232,9 +251,9 @@ class Outbox:
 
         if processed_count:
             logger.info(
-                "Outbox processed pending entries",
-                count=processed_count,
-                batch_size=batch_size,
+                "Outbox processed pending entries: count=%d batch_size=%d",
+                processed_count,
+                batch_size,
             )
 
         return processed_count
@@ -260,9 +279,9 @@ class Outbox:
         """
         self._handlers[event_type].append(handler)
         logger.debug(
-            "Outbox handler registered",
-            event_type=event_type,
-            handler=handler.__name__,
+            "Outbox handler registered: event_type=%s handler=%s",
+            event_type,
+            handler.__name__,
         )
 
     async def replay_unprocessed(
@@ -317,9 +336,9 @@ class Outbox:
 
         if deleted:
             logger.info(
-                "Outbox cleaned old entries",
-                deleted=deleted,
-                processed_before_ts=processed_before_ts,
+                "Outbox cleaned old entries: deleted=%d processed_before_ts=%.3f",
+                deleted,
+                processed_before_ts,
             )
 
         return deleted
@@ -347,13 +366,35 @@ class Outbox:
                 )
         else:
             current_retry = await self._get_retry_count(conn, entry_id)
-            async with transaction(conn) as tx_db:
-                await tx_db.execute(
-                    """UPDATE outbox
-                       SET retry_count = ?, error = ?, processed_at = ?
-                       WHERE id = ?""",
-                    (current_retry + 1, error, now, entry_id),
+            if current_retry + 1 >= self._max_retries:
+                # Dead-letter cap reached — stop retrying, keep the entry
+                # visible/queryable as a poisoned entry via processed=1.
+                async with transaction(conn) as tx_db:
+                    await tx_db.execute(
+                        """UPDATE outbox
+                           SET processed = 1, processed_at = ?, retry_count = ?,
+                               error = ?
+                           WHERE id = ?""",
+                        (
+                            now,
+                            current_retry + 1,
+                            f"{error} | PERMANENTLY FAILED after {self._max_retries} retries",
+                            entry_id,
+                        ),
+                    )
+                logger.warning(
+                    "Outbox entry permanently failed — retry cap reached: entry_id=%s max_retries=%d",
+                    entry_id,
+                    self._max_retries,
                 )
+            else:
+                async with transaction(conn) as tx_db:
+                    await tx_db.execute(
+                        """UPDATE outbox
+                           SET retry_count = ?, error = ?, processed_at = ?
+                           WHERE id = ?""",
+                        (current_retry + 1, error, now, entry_id),
+                    )
 
     @staticmethod
     async def _get_retry_count(conn: aiosqlite.Connection, entry_id: str) -> int:

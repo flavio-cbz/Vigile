@@ -115,21 +115,48 @@ export const ProposalCard: React.FC<ProposalCardProps> = ({
 
       <div className="flex flex-wrap gap-2 pt-3 border-t border-border/40 shrink-0 justify-between items-center w-full">
         {proposal.status !== 'PENDING' ? (
-          <div className="flex-1 text-center py-1.5 font-bold font-interface text-[9px] uppercase tracking-wider select-none w-full">
+          <div className="w-full select-none">
             {proposal.status === 'APPROVED' || proposal.status === 'EXECUTED' ? (
-              <div className="text-severity-ok bg-severity-ok/10 border border-severity-ok/20 rounded py-1 flex items-center justify-center gap-1">
-                <Check className="w-3 h-3" />
-                <span>{t('prop.status_executed')} {formatDateTime(proposal.executed_at || proposal.updated_at)}</span>
+              <div className="w-full px-3 py-1.5 rounded-lg bg-gradient-to-r from-severity-ok/15 to-severity-ok/5 border border-severity-ok/25 text-severity-ok flex items-center justify-between gap-2 shadow-[0_0_12px_rgba(34,197,94,0.15)]">
+                <div className="flex items-center gap-1.5 font-bold font-interface text-xs uppercase tracking-wide">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-severity-ok opacity-75 animate-ping"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-severity-ok"></span>
+                  </span>
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('prop.status_executed')}</span>
+                </div>
+                <span className="text-[10px] font-mono text-severity-ok/70 whitespace-nowrap">
+                  {formatDateTime(proposal.executed_at || proposal.updated_at)}
+                </span>
               </div>
             ) : proposal.status === 'FAILED' ? (
-              <div className="text-severity-critical bg-severity-critical/10 border border-severity-critical/20 rounded py-1 flex items-center justify-center gap-1">
-                <span className="text-[10px]">⚠</span>
-                <span>{t('prop.status_failed')} {formatDateTime(proposal.executed_at || proposal.updated_at)}</span>
+              <div className="w-full px-3 py-1.5 rounded-lg bg-gradient-to-r from-severity-critical/15 to-severity-critical/5 border border-severity-critical/25 text-severity-critical flex items-center justify-between gap-2 shadow-[0_0_12px_rgba(239,68,68,0.15)]">
+                <div className="flex items-center gap-1.5 font-bold font-interface text-xs uppercase tracking-wide">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-severity-critical opacity-75 animate-ping"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-severity-critical"></span>
+                  </span>
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('prop.status_failed')}</span>
+                </div>
+                <span className="text-[10px] font-mono text-severity-critical/70 whitespace-nowrap">
+                  {formatDateTime(proposal.executed_at || proposal.updated_at)}
+                </span>
               </div>
             ) : (
-              <div className="text-text-3 bg-text-3/10 border border-border rounded py-1 flex items-center justify-center gap-1">
-                <X className="w-3 h-3" />
-                <span>{t('prop.status_rejected')} {formatDateTime(proposal.updated_at)}</span>
+              <div className="w-full px-3 py-1.5 rounded-lg bg-gradient-to-r from-surface-3/50 to-surface-3/25 border border-border text-text-3 flex items-center justify-between gap-2 hover:border-border-strong transition-all duration-200">
+                <div className="flex items-center gap-1.5 font-bold font-interface text-xs uppercase tracking-wide">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-text-3 opacity-50"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-text-3"></span>
+                  </span>
+                  <X className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('prop.status_rejected')}</span>
+                </div>
+                <span className="text-[10px] font-mono text-text-3/70 whitespace-nowrap">
+                  {formatDateTime(proposal.updated_at)}
+                </span>
               </div>
             )}
           </div>

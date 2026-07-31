@@ -50,7 +50,7 @@ export interface NodeDetailData {
   setRestartingContainer: (v: string | null) => void;
 }
 
-export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
+export function useNodeDetailData(nodeId: string | undefined, activePlugins: string[] | null): NodeDetailData {
   const { insights, loading: loadingInsights, refresh: refreshInsights } = useNodeInsights(nodeId || null);
 
   const [node, setNode] = useState<NodeRecord | null>(null);
@@ -155,16 +155,19 @@ export function useNodeDetailData(nodeId: string | undefined): NodeDetailData {
     }
   }, [nodeId, logsLimit, logsService]);
 
+  const servicesEnabled = activePlugins !== null && activePlugins.includes('systemd');
+  const containersEnabled = activePlugins !== null && activePlugins.includes('docker');
+
   useEffect(() => {
     const init = async () => {
       setLoadingNode(true);
       await fetchNodeDetails();
       setLoadingNode(false);
-      fetchServicesList();
-      fetchContainersList();
+      if (servicesEnabled) fetchServicesList();
+      if (containersEnabled) fetchContainersList();
     };
     init();
-  }, [fetchNodeDetails, fetchServicesList, fetchContainersList]);
+  }, [fetchNodeDetails, fetchServicesList, fetchContainersList, servicesEnabled, containersEnabled]);
 
   const displayInsights: InsightRecord[] = [...insights];
   if (node && !node.online) {

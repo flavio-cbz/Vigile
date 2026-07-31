@@ -4,9 +4,5 @@
   "version": "0.1.0",
   "description": "Visualisation treemap de l'utilisation disque des nœuds (GrandPerspective-like)",
   "trusted": true,
-  "author": "Vigile",
-  "type": "frontend",
-  "entry": "__init__.py",
-  "requires": [],
-  "permissions": ["read"]
+  "author": "Vigile"
 }

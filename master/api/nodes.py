@@ -49,7 +49,7 @@ from master.core.node_manager import NodeManager, NodeState
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityManager
-from master.core.worker_query_port import WorkerQueryPort
+from master.core.plugin_ids import is_plugin_active
 from master.db.disk_scan_cache import get_cached_disk_scan, set_cached_disk_scan
 from master.schemas.disk_scan import DiskScanResult
 
@@ -1731,6 +1731,12 @@ async def get_disk_scan(
     Results are cached for 5 minutes per node. Pass ``force=true``
     (admin only) to bypass the cache and trigger a fresh scan.
     """
+    if not is_plugin_active("disk_analysis"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plugin 'disk_analysis' est désactivé.",
+        )
+
     if claims is None:
         claims = {}
     if force:

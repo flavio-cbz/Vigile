@@ -25,6 +25,7 @@ from typing import Any
 import aiosqlite
 
 from master.core.node_manager import NodeManager
+from master.db.database import database_session
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,19 @@ class InvestigationManager:
     def __init__(self, max_concurrent: int = 3) -> None:
         self._insights: Any = None  # InsightsManager — lazy-loaded from DI
         self._max_concurrent = max_concurrent
-        self._active_count = 0
+        # Hard concurrency cap: at most `max_concurrent` investigations run at
+        # the same time. `_reserved` is the synchronous reservation counter —
+        # incremented before ANY await in on_alert_fired so concurrent alerts
+        # can never both pass the cap check (the old `_active_count` race).
+        self._sem = asyncio.Semaphore(max_concurrent)
+        self._reserved = 0
+        self._dropped_count = 0
         self._background_tasks: set[asyncio.Task] = set()
+
+    @property
+    def dropped_count(self) -> int:
+        """Number of investigations dropped because the queue was full."""
+        return self._dropped_count
 
     def _spawn_task(self, coro: Any, name: str) -> asyncio.Task:
         """Spawn a supervised background task tracked for graceful shutdown."""
@@ -99,13 +111,6 @@ class InvestigationManager:
         Creates an investigation record and queues Phase 3 analysis.
         Returns investigation ID or None if queued (concurrency cap).
         """
-        if self._active_count >= self._max_concurrent:
-            logger.warning(
-                "Investigation queue full (%d/%d) — dropping investigation for %s/%s",
-                self._active_count, self._max_concurrent, node_id, alert_name,
-            )
-            return None
-
         investigation_id = str(uuid.uuid4())
         now = time.time()
 
@@ -116,6 +121,37 @@ class InvestigationManager:
             "message": message,
             "details": details or {},
         }
+
+        # Check + reserve are synchronous with NO await in between — atomic in
+        # the single-threaded event loop, unlike the old `_active_count` check.
+        if self._reserved >= self._max_concurrent:
+            self._dropped_count += 1
+            drop_reason = (
+                f"investigation queue full ({self._reserved}/{self._max_concurrent})"
+            )
+            logger.warning(
+                "Investigation queue full (%d/%d) — dropping investigation for %s/%s",
+                self._reserved, self._max_concurrent, node_id, alert_name,
+            )
+            try:
+                await db.execute(
+                    """INSERT INTO investigations
+                       (id, alert_id, node_id, alert_name, severity, status,
+                        context_json, result, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 'dropped', ?, ?, ?, ?)""",
+                    (
+                        investigation_id, alert_id, node_id, alert_name, severity,
+                        json.dumps(context),
+                        json.dumps({"status": "dropped", "reason": drop_reason}),
+                        now, now,
+                    ),
+                )
+                await db.commit()
+            except Exception as exc:
+                logger.error("Failed to persist dropped investigation: %s", exc)
+            return None
+
+        self._reserved += 1
 
         try:
             await db.execute(
@@ -131,6 +167,7 @@ class InvestigationManager:
             await db.commit()
         except Exception as exc:
             logger.error("Failed to create investigation: %s", exc)
+            self._reserved -= 1
             return None
 
         logger.info(
@@ -140,7 +177,7 @@ class InvestigationManager:
 
         # Launch Phase 3 analysis asynchronously
         self._spawn_task(
-            self._run_investigation(investigation_id, node_id, db),
+            self._run_investigation(investigation_id, node_id),
             name=f"investigation:{investigation_id[:12]}",
         )
 
@@ -154,79 +191,85 @@ class InvestigationManager:
         self,
         investigation_id: str,
         node_id: str,
-        db: aiosqlite.Connection,
     ) -> None:
-        """Execute Phase 3 LLM diagnostic and persist the result."""
-        self._active_count += 1
-        inv_start = time.time()
+        """Execute Phase 3 LLM diagnostic and persist the result.
 
+        The semaphore is the hard concurrency cap; each investigation opens
+        its OWN pooled connection so concurrent runs never share the caller's
+        aiosqlite connection (the shared-connection P0 hazard).
+        """
         try:
-            # Mark in_progress
-            await db.execute(
-                "UPDATE investigations SET status = 'in_progress', updated_at = ? WHERE id = ?",
-                (time.time(), investigation_id),
-            )
-            await db.commit()
+            async with self._sem:
+                async with database_session() as db:
+                    inv_start = time.time()
 
-            # Run Phase 3 analysis
-            if self._insights is None or not self._insights._sllm:
-                result = {
-                    "status": "skipped",
-                    "reason": "LLM not configured on this Master",
-                }
-            else:
-                try:
-                    report = await self._insights.analyze_anomaly(
-                        node_id=node_id,
-                        db=db,
-                        nm=self._get_node_manager(),
-                        locale="fr",
-                    )
-                    result = {
-                        "status": "completed",
-                        "report": report.model_dump(),
-                    }
-                except Exception as exc:
-                    logger.exception("Investigation %s Phase 3 failed", investigation_id[:12])
-                    result = {
-                        "status": "failed",
-                        "error": str(exc),
-                    }
+                    try:
+                        # Mark in_progress
+                        await db.execute(
+                            "UPDATE investigations SET status = 'in_progress', updated_at = ? WHERE id = ?",
+                            (time.time(), investigation_id),
+                        )
+                        await db.commit()
 
-            # Persist result
-            await db.execute(
-                """UPDATE investigations SET
-                    status = ?, result = ?, completed_at = ?, updated_at = ?
-                   WHERE id = ?""",
-                (
-                    "completed" if result.get("status") == "completed" else "failed",
-                    json.dumps(result),
-                    time.time(),
-                    time.time(),
-                    investigation_id,
-                ),
-            )
-            await db.commit()
+                        # Run Phase 3 analysis
+                        if self._insights is None or not self._insights._sllm:
+                            result = {
+                                "status": "skipped",
+                                "reason": "LLM not configured on this Master",
+                            }
+                        else:
+                            try:
+                                report = await self._insights.analyze_anomaly(
+                                    node_id=node_id,
+                                    db=db,
+                                    nm=self._get_node_manager(),
+                                    locale="fr",
+                                )
+                                result = {
+                                    "status": "completed",
+                                    "report": report.model_dump(),
+                                }
+                            except Exception as exc:
+                                logger.exception("Investigation %s Phase 3 failed", investigation_id[:12])
+                                result = {
+                                    "status": "failed",
+                                    "error": str(exc),
+                                }
 
-            duration = time.time() - inv_start
-            logger.info(
-                "Investigation %s completed in %.1fs with status=%s",
-                investigation_id[:12], duration, result.get("status", "unknown"),
-            )
+                        # Persist result
+                        await db.execute(
+                            """UPDATE investigations SET
+                                status = ?, result = ?, completed_at = ?, updated_at = ?
+                               WHERE id = ?""",
+                            (
+                                "completed" if result.get("status") == "completed" else "failed",
+                                json.dumps(result),
+                                time.time(),
+                                time.time(),
+                                investigation_id,
+                            ),
+                        )
+                        await db.commit()
 
-        except Exception as exc:
-            logger.exception("Investigation %s crashed", investigation_id[:12])
-            try:
-                await db.execute(
-                    """UPDATE investigations SET status = 'failed', result = ?,
-                        completed_at = ?, updated_at = ? WHERE id = ?""",
-                    (json.dumps({"error": str(exc)}), time.time(), time.time(), investigation_id),
-                )
-                await db.commit()
-            except Exception:
-                pass
+                        duration = time.time() - inv_start
+                        logger.info(
+                            "Investigation %s completed in %.1fs with status=%s",
+                            investigation_id[:12], duration, result.get("status", "unknown"),
+                        )
+
+                    except Exception as exc:
+                        logger.exception("Investigation %s crashed", investigation_id[:12])
+                        try:
+                            await db.execute(
+                                """UPDATE investigations SET status = 'failed', result = ?,
+                                    completed_at = ?, updated_at = ? WHERE id = ?""",
+                                (json.dumps({"error": str(exc)}), time.time(), time.time(), investigation_id),
+                            )
+                            await db.commit()
+                        except Exception:
+                            pass
         finally:
-            self._active_count -= 1
+            self._reserved -= 1
 
     # -------------------------------------------------------------------
     # Query helpers

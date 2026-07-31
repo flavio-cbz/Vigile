@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from master.core.hook_bus import HookBus
 from master.core.plugin_base import PluginBase, PluginContext, RedactingAdapter
 from master.core.plugin_lifecycle import PluginLifecycleManager
 from master.core.plugin_manifest import PluginManifest
@@ -55,8 +56,6 @@ STATE_INSTALLED  = "INSTALLED"
 STATE_ACTIVE     = "ACTIVE"
 STATE_DEACTIVATED = "DEACTIVATED"
 STATE_UNINSTALL  = "UNINSTALL"
-
-DEFAULT_TIMEOUT: float = 30.0
 
 _LoaderKind = Literal["class_based", "sandbox", "legacy"]
 
@@ -260,90 +259,6 @@ class PluginRegistry:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception as e:
             self._errors[basename] = f"ZIP invalide: {e}"
-
-
-# ---------------------------------------------------------------------------
-# HookBus
-# ---------------------------------------------------------------------------
-
-class HookBus:
-    """Gestion des souscriptions et du dispatch de hooks sync et async."""
-
-    def __init__(self) -> None:
-        self._hooks: dict[str, list[tuple[str, Callable]]] = {}
-
-    def register(self, hook_name: str, fn: Callable, *, plugin_name: str = "anonymous") -> None:
-        self._hooks.setdefault(hook_name, []).append((plugin_name, fn))
-
-    def unregister(self, hook_name: str, plugin_name: str) -> int:
-        if hook_name not in self._hooks:
-            return 0
-        before = len(self._hooks[hook_name])
-        self._hooks[hook_name] = [(pn, fn) for pn, fn in self._hooks[hook_name] if pn != plugin_name]
-        removed = before - len(self._hooks[hook_name])
-        if not self._hooks[hook_name]:
-            del self._hooks[hook_name]
-        return removed
-
-    def has_hook(self, hook_name: str) -> bool:
-        """Lecture pure — ne mute jamais le bus."""
-        return bool(self._hooks.get(hook_name))
-
-    def get_hooks(self) -> dict[str, list[str]]:
-        return {h: [pn for pn, _ in impls] for h, impls in self._hooks.items()}
-
-    def call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        results: list[Any] = []
-        for plugin_name, fn in self._hooks.get(hook_name, []):
-            if inspect.iscoroutinefunction(fn):
-                logger.warning("Hook '%s' dans '%s' est async — ignoré en call() sync.", hook_name, plugin_name)
-                continue
-            try:
-                res = fn(**kwargs)
-                if res is not None:
-                    results.append(res)
-            except Exception as e:
-                logger.exception("Hook '%s' dans '%s' a levé une exception: %s", hook_name, plugin_name, e)
-        return results
-
-    def call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        for plugin_name, fn in self._hooks.get(hook_name, []):
-            if inspect.iscoroutinefunction(fn):
-                continue
-            try:
-                res = fn(**kwargs)
-                if res is not None:
-                    return res
-            except Exception as e:
-                logger.exception("Hook '%s' dans '%s' a levé une exception: %s", hook_name, plugin_name, e)
-        return None
-
-    async def _run_hook(self, plugin_name: str, fn: Callable, hook_name: str, **kwargs: Any) -> Any:
-        try:
-            if inspect.iscoroutinefunction(fn):
-                return await fn(**kwargs)
-            return await asyncio.get_running_loop().run_in_executor(None, lambda: fn(**kwargs))
-        except BaseException as exc:
-            logger.exception("Async hook '%s' dans '%s' a levé: %s", hook_name, plugin_name, exc)
-            return exc
-
-    async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        impls = self._hooks.get(hook_name, [])
-        if not impls:
-            return []
-        tasks = [
-            asyncio.wait_for(self._run_hook(pn, fn, hook_name, **kwargs), timeout=DEFAULT_TIMEOUT)
-            for pn, fn in impls
-        ]
-        results = []
-        for res in await asyncio.gather(*tasks, return_exceptions=True):
-            if not isinstance(res, BaseException) and res is not None:
-                results.append(res)
-        return results
-
-    async def async_call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        res = await self.async_call(hook_name, **kwargs)
-        return res[0] if res else None
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +535,13 @@ class PluginEngine:
     def get_all_manifests(self) -> dict[str, PluginManifest]:
         return self._registry.get_all_manifests()
 
+    def is_plugin_loaded(self, plugin_id: str) -> bool:
+        """Indique si un plugin est actuellement chargé et actif dans le runtime."""
+        for candidate in {plugin_id, canonical_plugin_id(plugin_id), plugin_file_stem(plugin_id)}:
+            if candidate in self._instances or candidate in self._wrappers:
+                return True
+        return False
+
     # ------------------------------------------------------------------
     # Initialisation
     # ------------------------------------------------------------------
@@ -655,7 +577,7 @@ class PluginEngine:
                     "INSERT INTO plugins (id, version, enabled, status, config_json) VALUES (?, ?, 1, 'DISCOVERED', '{}')",
                     (plugin_id, manifest.version),
                 )
-                db_states[plugin_id] = False
+                db_states[plugin_id] = True
 
             if db_states.get(plugin_id):
                 try:
@@ -717,8 +639,12 @@ class PluginEngine:
             except Exception:
                 pass
 
-        # Check sandbox execution
-        p_dir = plugins_dir or self._manifest_dirs.get(plugin_id) or (getattr(self._settings, "plugins_dir", "master/plugins") if self._settings else "master/plugins")
+        # Resolve plugin directory — single source of truth
+        p_dir = (
+            plugins_dir
+            or self._registry.get_plugin_dir(plugin_id)
+            or (getattr(self._settings, "plugins_dir", "master/plugins") if self._settings else "master/plugins")
+        )
         plugin_dir = os.path.join(p_dir, plugin_id)
         init_file = os.path.join(plugin_dir, "__init__.py")
         if not os.path.exists(init_file):
@@ -737,13 +663,6 @@ class PluginEngine:
             and is_package
             and not manifest.trusted
             and not _is_class_based(plugin_id, init_file)
-        )
-        
-        # Setup tables if database schema defined in manifest
-        p_dir = (
-            plugins_dir
-            or self._registry.get_plugin_dir(plugin_id)
-            or (getattr(self._settings, "plugins_dir", "master/plugins") if self._settings else "master/plugins")
         )
 
         loader_kind = self._registry.resolve_loader(manifest)
@@ -829,43 +748,60 @@ class PluginEngine:
     # ------------------------------------------------------------------
 
     async def load_plugin(self, plugin_id: str, plugins_dir: str | None = None) -> bool:
-        if plugin_id in self.loaded_plugins:
+        manifest = self._registry.get_manifest(plugin_id)
+        if not manifest:
+            await self.scan(plugins_dir)
+            manifest = self._registry.get_manifest(plugin_id)
+        if not manifest:
+            # Fallback : résolution par forme canonique/stem (ex: "test_pkg"
+            # demandé alors que le manifest enregistre l'id "test_pkg_plugin").
+            for form in {canonical_plugin_id(plugin_id), plugin_file_stem(plugin_id)}:
+                manifest = manifest or self._registry.get_manifest(form)
+            if not manifest:
+                for mid, m in self._registry.get_all_manifests().items():
+                    if canonical_plugin_id(mid) == canonical_plugin_id(plugin_id):
+                        manifest = m
+                        break
+        if not manifest:
+            logger.error("Impossible de charger '%s': manifest introuvable", plugin_id)
             return False
 
-        async with self._get_lock(plugin_id):
+        # La forme canonique peut tronquer l'id ("test_pkg_plugin" -> "test_pkg") :
+        # charger sous manifest.id évite un FileNotFoundError sur le fichier réel.
+        target_id = manifest.id
+
+        if target_id in self.loaded_plugins:
+            return False
+
+        async with self._get_lock(target_id):
             # Double-check après acquisition du lock
-            if plugin_id in self.loaded_plugins:
+            if target_id in self.loaded_plugins:
                 return False
 
-            manifest = self._registry.get_manifest(plugin_id)
-            if not manifest:
-                await self.scan(plugins_dir)
-                manifest = self._registry.get_manifest(plugin_id)
-            if not manifest:
-                logger.error("Impossible de charger '%s': manifest introuvable", plugin_id)
-                return False
             try:
-                await self._load(plugin_id, manifest, plugins_dir)
+                await self._load(target_id, manifest, plugins_dir)
                 if self.db:
                     await self.db.commit()
                 return True
             except Exception as e:
-                logger.exception("Échec du chargement de '%s'", plugin_id)
-                self._set_state(plugin_id, "error", error=str(e))
+                logger.exception("Échec du chargement de '%s'", target_id)
+                self._set_state(target_id, "error", error=str(e))
                 try:
-                    await self.unload_plugin(plugin_id)
+                    await self.unload_plugin(target_id)
                 except Exception:
                     pass
                 if self.db:
                     try:
-                        await self.db.execute("UPDATE plugins SET status = 'ERROR', enabled = 1 WHERE id = ?", (plugin_id,))
+                        await self.db.execute("UPDATE plugins SET status = 'ERROR', enabled = 1 WHERE id = ?", (target_id,))
                         await self.db.commit()
                     except Exception:
                         pass
                 return False
 
-    async def unload_plugin(self, plugin_id: str) -> None:
+    async def unload_plugin(self, plugin_id: str, *, persist: bool = True) -> None:
         logger.info("Déchargement du plugin '%s'...", plugin_id)
+
+        await self.hook_bus.wait_for_drain(plugin_id)
 
         for hook_name in list(self.hook_bus.get_hooks().keys()):
             self.hook_bus.unregister(hook_name, plugin_id)
@@ -893,7 +829,7 @@ class PluginEngine:
                 del self._states[k]
             self._errors.pop(k, None)
 
-        if self.db:
+        if self.db and persist:
             await self.db.execute("UPDATE plugins SET status = 'DISABLED', enabled = 0 WHERE id = ?", (plugin_id,))
             await self.db.commit()
 
@@ -968,7 +904,12 @@ class PluginEngine:
     def call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
         return self.hook_bus.call_first(hook_name, **kwargs)
 
-    async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
+    async def async_call(self, hook_name: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Invoke every subscription for *hook_name* concurrently.
+
+        Delegates to the full-featured :class:`HookBus`, returning structured
+        result dicts (``{"success", "result", "error", "plugin_name"}``).
+        """
         return await self.hook_bus.async_call(hook_name, **kwargs)
 
     async def async_call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
@@ -981,7 +922,10 @@ class PluginEngine:
     async def shutdown(self) -> None:
         for plugin_id in list(self._wrappers.keys()) + list(self._instances.keys()):
             try:
-                await self.unload_plugin(plugin_id)
+                # persist=False : un arrêt propre du serveur n'est PAS une
+                # désactivation opérateur — l'état enabled/status en DB est
+                # préservé pour être rechargé au prochain démarrage.
+                await self.unload_plugin(plugin_id, persist=False)
             except Exception:
                 pass
         if self.scheduler:

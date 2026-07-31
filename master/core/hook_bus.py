@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -65,11 +66,14 @@ class HookBus:
     consecutive failures and stays open for 60s.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, default_timeout: float = _DEFAULT_ASYNC_TIMEOUT) -> None:
         # hook_name -> [(plugin_name, callable)]
         self._hooks: dict[str, list[tuple[str, Callable]]] = {}
         # plugin_name -> CircuitBreaker
         self._circuit_breakers: dict[str, CircuitBreaker] = {}
+        self._default_timeout: float = default_timeout
+        self._inflight: dict[str, int] = {}
+        self._metrics: dict[str, dict[str, float | int]] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -130,6 +134,8 @@ class HookBus:
                     plugin_name,
                 )
                 continue
+            start = time.monotonic()
+            error = False
             try:
                 result = fn(**kwargs)
             except Exception:
@@ -138,7 +144,10 @@ class HookBus:
                     hook_name,
                     plugin_name,
                 )
+                error = True
                 continue
+            finally:
+                self._record_metric(hook_name, plugin_name, time.monotonic() - start, error)
             if result is not None:
                 results.append(result)
         return results
@@ -154,6 +163,8 @@ class HookBus:
                     plugin_name,
                 )
                 continue
+            start = time.monotonic()
+            error = False
             try:
                 result = fn(**kwargs)
             except Exception:
@@ -162,7 +173,10 @@ class HookBus:
                     hook_name,
                     plugin_name,
                 )
+                error = True
                 continue
+            finally:
+                self._record_metric(hook_name, plugin_name, time.monotonic() - start, error)
             if result is not None:
                 return result
         return None
@@ -185,58 +199,68 @@ class HookBus:
         never escape the bus.
         """
         cb = self._get_circuit_breaker(plugin_name)
-
+        self._inflight[plugin_name] = self._inflight.get(plugin_name, 0) + 1
+        start = time.monotonic()
+        error = False
         try:
-            if inspect.iscoroutinefunction(fn):
-                # Async function — cb.call() handles state check & recording
-                result = await cb.call(fn, **kwargs)
-            else:
-                # Sync function — check CB, run in executor, record outcome
-                await cb.check()
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(None, lambda: fn(**kwargs))
-                await cb.record_success()
-        except CircuitBreakerOpenError:
-            logger.warning(
-                "HookBus: circuit breaker '%s' is OPEN for hook '%s' — skipping",
-                plugin_name,
-                hook_name,
-            )
+            try:
+                if inspect.iscoroutinefunction(fn):
+                    result = await cb.call(fn, **kwargs)
+                else:
+                    await cb.check()
+                    loop = asyncio.get_running_loop()
+                    result = await loop.run_in_executor(None, lambda: fn(**kwargs))
+                    await cb.record_success()
+            except CircuitBreakerOpenError:
+                error = True
+                logger.warning(
+                    "HookBus: circuit breaker '%s' is OPEN for hook '%s' — skipping",
+                    plugin_name,
+                    hook_name,
+                )
+                return {
+                    "success": False,
+                    "result": None,
+                    "error": f"Circuit breaker '{plugin_name}' is OPEN",
+                    "plugin_name": plugin_name,
+                }
+            except asyncio.CancelledError:
+                raise
+            except BaseException as exc:
+                error = True
+                logger.exception(
+                    "HookBus: async hook '%s' impl from '%s' raised: %s",
+                    hook_name,
+                    plugin_name,
+                    exc,
+                )
+                if not inspect.iscoroutinefunction(fn):
+                    await cb.record_failure()
+                return {
+                    "success": False,
+                    "result": None,
+                    "error": str(exc),
+                    "plugin_name": plugin_name,
+                }
+
             return {
-                "success": False,
-                "result": None,
-                "error": f"Circuit breaker '{plugin_name}' is OPEN",
+                "success": True,
+                "result": result,
+                "error": None,
                 "plugin_name": plugin_name,
             }
-        except BaseException as exc:
-            logger.exception(
-                "HookBus: async hook '%s' impl from '%s' raised: %s",
-                hook_name,
-                plugin_name,
-                exc,
-            )
-            # cb.call already recorded failure for async fns; record for sync
-            if not inspect.iscoroutinefunction(fn):
-                await cb.record_failure()
-            return {
-                "success": False,
-                "result": None,
-                "error": str(exc),
-                "plugin_name": plugin_name,
-            }
+        finally:
+            self._record_metric(hook_name, plugin_name, time.monotonic() - start, error)
+            self._inflight[plugin_name] -= 1
 
-        return {
-            "success": True,
-            "result": result,
-            "error": None,
-            "plugin_name": plugin_name,
-        }
-
-    async def async_call(self, hook_name: str, **kwargs: Any) -> list[dict[str, Any]]:
+    async def async_call(
+        self, hook_name: str, *, timeout: float | None = None, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         """Invoke every subscription for ``hook_name`` concurrently.
 
         Async hooks are awaited; sync hooks are run in the default executor.
-        Each hook is enveloped in a 30s timeout via ``asyncio.wait_for`` and a
+        Each hook is enveloped in a timeout via ``asyncio.wait_for`` (default
+        ``self._default_timeout``, overridable per-call) and a
         ``BaseException`` guard.  Hooks that time out or raise are captured in
         the returned result dict rather than dropped silently.
 
@@ -254,37 +278,32 @@ class HookBus:
         if not impls:
             return []
 
-        # Wrap each hook body in wait_for(timeout=30). _run_async_hook itself
-        # catches BaseException and returns structured dicts, so the only thing
-        # wait_for surfaces beyond a normal return is asyncio.TimeoutError.
+        effective_timeout = timeout if timeout is not None else self._default_timeout
+
         tasks: list[asyncio.Future] = []
         for plugin_name, fn in impls:
             inner = self._run_async_hook(plugin_name, fn, hook_name, **kwargs)
             tasks.append(
-                asyncio.ensure_future(
-                    asyncio.wait_for(inner, timeout=_DEFAULT_ASYNC_TIMEOUT)
-                )
+                asyncio.ensure_future(asyncio.wait_for(inner, timeout=effective_timeout))
             )
 
         results_raw = await asyncio.gather(*tasks, return_exceptions=True)
         results: list[dict[str, Any]] = []
         for i, res in enumerate(results_raw):
             if isinstance(res, BaseException):
-                # TimeoutError from wait_for — other exceptions are already
-                # caught by _run_async_hook and returned as structured dicts.
                 plugin_name = impls[i][0] if i < len(impls) else "unknown"
                 logger.error(
                     "HookBus: async hook '%s' task %d (plugin '%s') timed out after %.1fs",
                     hook_name,
                     i,
                     plugin_name,
-                    _DEFAULT_ASYNC_TIMEOUT,
+                    effective_timeout,
                 )
                 results.append(
                     {
                         "success": False,
                         "result": None,
-                        "error": f"Timeout after {_DEFAULT_ASYNC_TIMEOUT}s",
+                        "error": f"Timeout after {effective_timeout}s",
                         "plugin_name": plugin_name,
                     }
                 )
@@ -298,13 +317,15 @@ class HookBus:
 
         return results
 
-    async def async_call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
+    async def async_call_first(
+        self, hook_name: str, *, timeout: float | None = None, **kwargs: Any
+    ) -> Any | None:
         """Async first-non-None: delegates to :meth:`async_call`.
 
         Returns the **result value** of the first successful subscription
         whose result is not None, or ``None`` if no hook returned a value.
         """
-        results = await self.async_call(hook_name, **kwargs)
+        results = await self.async_call(hook_name, timeout=timeout, **kwargs)
         for r in results:
             if r.get("success") and r.get("result") is not None:
                 return r["result"]
@@ -336,6 +357,27 @@ class HookBus:
         if plugin_name not in self._circuit_breakers:
             self._circuit_breakers[plugin_name] = CircuitBreaker(name=plugin_name)
         return self._circuit_breakers[plugin_name]
+
+    def _record_metric(self, hook_name: str, plugin_name: str, duration: float, error: bool) -> None:
+        key = f"{hook_name}:{plugin_name}"
+        if key not in self._metrics:
+            self._metrics[key] = {"invocations": 0, "errors": 0, "total_duration": 0.0}
+        self._metrics[key]["invocations"] += 1
+        if error:
+            self._metrics[key]["errors"] += 1
+        self._metrics[key]["total_duration"] += duration
+
+    def get_metrics(self) -> dict[str, dict[str, Any]]:
+        """Return per-hook metrics: invocations, errors, avg_duration (seconds)."""
+        result: dict[str, dict[str, Any]] = {}
+        for key, metrics in self._metrics.items():
+            invocations = metrics["invocations"]
+            result[key] = {
+                "invocations": invocations,
+                "errors": metrics["errors"],
+                "avg_duration": metrics["total_duration"] / invocations if invocations > 0 else 0.0,
+            }
+        return result
 
     async def _publish_outbox_event(
         self,
@@ -387,3 +429,24 @@ class HookBus:
                 agg_type,
                 aggregate_id,
             )
+
+    async def wait_for_drain(self, plugin_name: str, timeout: float = 30.0) -> bool:
+        """Wait for all in-flight async hooks for *plugin_name* to complete.
+
+        Used by PluginEngine.unload_plugin() to drain in-flight hooks before
+        unregistering them during hot-reload.  Returns ``True`` if the plugin
+        drained within *timeout*, ``False`` if the timeout expired.
+        """
+        deadline = asyncio.get_running_loop().time() + timeout
+        while self._inflight.get(plugin_name, 0) > 0:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                logger.warning(
+                    "HookBus: timed out waiting for plugin '%s' to drain "
+                    "(in-flight: %d)",
+                    plugin_name,
+                    self._inflight.get(plugin_name, 0),
+                )
+                return False
+            await asyncio.sleep(min(0.05, remaining))
+        return True

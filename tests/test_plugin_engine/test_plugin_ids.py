@@ -29,10 +29,11 @@ def test_custom_plugin_id_resolution():
 
 def test_plugin_engine_loaded_plugins_no_duplicates():
     engine = PluginEngine()
-    engine._loaded_plugins = ["docker", "legacy_plugin"]
+    engine._set_state("docker", "active")
+    engine._set_state("legacy_plugin", "active")
     engine._wrappers = {"docker": None} # type: ignore
 
-    # "docker" is in wrappers AND _loaded_plugins -> should only appear once
+    # "docker" is in wrappers AND _states -> should only appear once
     loaded = engine.loaded_plugins
     assert loaded.count("docker") == 1
     assert "legacy_plugin" in loaded
@@ -41,9 +42,9 @@ def test_plugin_engine_loaded_plugins_no_duplicates():
 @pytest.mark.asyncio
 async def test_plugin_engine_unload_cleans_loaded_plugins():
     engine = PluginEngine()
-    engine._loaded_plugins = ["my_plugin"]
+    engine._set_state("my_plugin", "active")
 
     await engine.unload_plugin("my_plugin")
 
-    assert "my_plugin" not in engine._loaded_plugins
+    assert "my_plugin" not in engine._states
     assert "my_plugin" not in engine.loaded_plugins

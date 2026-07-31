@@ -18,7 +18,6 @@ Sandbox Isolation:
 
 import asyncio
 import importlib.util
-import inspect
 import json
 import logging
 import os
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 from master.core.plugin_ids import canonical_plugin_id, plugin_file_stem
+from master.core.hook_bus import HookBus
 
 
 
@@ -247,9 +247,15 @@ class PluginManager:
     Supports in-process (sandbox=False) and out-of-process (sandbox=True) runners.
     """
 
-    def __init__(self, engine: Any | None = None) -> None:
-        # { hook_name: [(plugin_name, callable)] }
-        self._hooks: dict[str, list[tuple[str, Callable]]] = {}
+    def __init__(self, engine: Any | None = None, hook_bus: HookBus | None = None) -> None:
+        self._engine: Any = engine
+        if hook_bus is not None:
+            self._hook_bus: HookBus = hook_bus
+        elif engine is not None and getattr(engine, "hook_bus", None) is not None:
+            self._hook_bus = engine.hook_bus
+        else:
+            self._hook_bus = HookBus()
+        self._hooks: dict[str, list[tuple[str, Callable]]] = self._hook_bus._hooks
         self._loaded_plugins: list[str] = []
         self._db: Any | None = None
         self._active_calls: dict[str, int] = {}
@@ -258,7 +264,6 @@ class PluginManager:
         self._disabled_plugins: set[str] | None = None
         self._sandbox: bool = False
         self._wrappers: dict[str, PluginProcessWrapper] = {}
-        self._engine: Any = engine
 
     def set_engine(self, engine: Any) -> None:
         self._engine = engine
@@ -314,131 +319,65 @@ class PluginManager:
     # -----------------------------------------------------------------------
 
     def register(self, hook_name: str, fn: Callable, *, plugin_name: str = "anonymous") -> None:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            self._engine.hook_bus.register(hook_name, fn, plugin_name=plugin_name)
-            return
-        self._hooks.setdefault(hook_name, []).append((plugin_name, fn))
+        """Subscribe ``fn`` to ``hook_name`` under ``plugin_name``.
+
+        Delegates to the :class:`HookBus` — single source of truth for hook
+        registration.  Validates ``hook_name`` against the :class:`HookName`
+        enum — a warning is logged for unknown hook names so that typos are
+        surfaced early without breaking compatibility.
+        """
+        self._hook_bus.register(hook_name, fn, plugin_name=plugin_name)
         logger.debug("Plugin '%s' registered hook '%s'", plugin_name, hook_name)
 
     def unregister(self, hook_name: str, plugin_name: str) -> int:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return self._engine.hook_bus.unregister(hook_name, plugin_name)
-        if hook_name not in self._hooks:
-            return 0
-        before = len(self._hooks[hook_name])
-        self._hooks[hook_name] = [
-            (pn, fn) for pn, fn in self._hooks[hook_name] if pn != plugin_name
-        ]
-        removed = before - len(self._hooks[hook_name])
-        return removed
+        """Remove every subscription from ``plugin_name`` on ``hook_name``.
+
+        Delegates to the :class:`HookBus`.
+        Returns the number of subscriptions removed.
+        """
+        return self._hook_bus.unregister(hook_name, plugin_name)
 
     # -----------------------------------------------------------------------
     # Synchronous dispatch
     # -----------------------------------------------------------------------
 
     def call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return self._engine.hook_bus.call(hook_name, **kwargs)
-        results: list[Any] = []
-        for plugin_name, fn in self._hooks.get(hook_name, []):
-            if inspect.iscoroutinefunction(fn):
-                logger.warning(
-                    "Hook '%s' impl from '%s' is async — skipped in sync call(). "
-                    "Use async_call() instead.",
-                    hook_name,
-                    plugin_name,
-                )
-                continue
+        """Invoke every sync subscription for ``hook_name`` in registration order.
 
-            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
-                continue
-
-            self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
-            try:
-                result = fn(**kwargs)
-                if result is not None:
-                    results.append(result)
-            except Exception:
-                logger.exception(
-                    "Hook '%s' impl from '%s' raised an exception", hook_name, plugin_name
-                )
-            finally:
-                self._active_calls[plugin_name] -= 1
-        return results
+        Delegates to the :class:`HookBus`.  Async callables are skipped with a
+        warning.  Exceptions raised by a hook are caught and logged; dispatch
+        continues to the next subscription.  Returns the list of non-None
+        results, in registration order.
+        """
+        return self._hook_bus.call(hook_name, **kwargs)
 
     def call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return self._engine.hook_bus.call_first(hook_name, **kwargs)
-        for plugin_name, fn in self._hooks.get(hook_name, []):
-            if inspect.iscoroutinefunction(fn):
-                continue
+        """Like :meth:`call` but stops at the first non-None result.
 
-            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
-                continue
-
-            self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
-            try:
-                result = fn(**kwargs)
-                if result is not None:
-                    return result
-            except Exception:
-                logger.exception(
-                    "Hook '%s' impl from '%s' raised an exception", hook_name, plugin_name
-                )
-            finally:
-                self._active_calls[plugin_name] -= 1
-        return None
+        Delegates to the :class:`HookBus`.
+        """
+        return self._hook_bus.call_first(hook_name, **kwargs)
 
     # -----------------------------------------------------------------------
     # Async dispatch
     # -----------------------------------------------------------------------
 
-    async def _run_async_hook(
-        self, plugin_name: str, fn: Callable, hook_name: str, **kwargs: Any
-    ) -> Any:
-        self._active_calls[plugin_name] = self._active_calls.get(plugin_name, 0) + 1
-        try:
-            if inspect.iscoroutinefunction(fn):
-                return await fn(**kwargs)
-            else:
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(None, lambda: fn(**kwargs))
-        finally:
-            self._active_calls[plugin_name] -= 1
-
     async def async_call(self, hook_name: str, **kwargs: Any) -> list[Any]:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return await self._engine.hook_bus.async_call(hook_name, **kwargs)
-        tasks: list[asyncio.Future] = []
+        """Invoke every subscription for ``hook_name`` concurrently.
 
-        for plugin_name, fn in self._hooks.get(hook_name, []):
-            if self._disabled_plugins is not None and plugin_name in self._disabled_plugins:
-                continue
-
-            fut = asyncio.create_task(
-                self._run_async_hook(plugin_name, fn, hook_name, **kwargs),
-                name=f"{plugin_name}.{hook_name}",
-            )
-            tasks.append(fut)
-
-        if not tasks:
-            return []
-
-        results_raw = await asyncio.gather(*tasks, return_exceptions=True)
-        results: list[Any] = []
-        for i, res in enumerate(results_raw):
-            if isinstance(res, Exception):
-                logger.exception("Async hook '%s' task %d raised: %s", hook_name, i, res)
-            elif res is not None:
-                results.append(res)
-
-        return results
+        Delegates to the :class:`HookBus`.  Returns a list of non-None
+        results from successful hooks.
+        """
+        results = await self._hook_bus.async_call(hook_name, **kwargs)
+        return [r["result"] for r in results if r.get("success") and r.get("result") is not None]
 
     async def async_call_first(self, hook_name: str, **kwargs: Any) -> Any | None:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return await self._engine.hook_bus.async_call_first(hook_name, **kwargs)
-        results = await self.async_call(hook_name, **kwargs)
-        return results[0] if results else None
+        """Async first-non-None: delegates to :meth:`async_call`.
+
+        Returns the **result value** of the first successful subscription
+        whose result is not None, or ``None`` if no hook returned a value.
+        """
+        return await self._hook_bus.async_call_first(hook_name, **kwargs)
 
     # -----------------------------------------------------------------------
     # Dynamic plugin loading
@@ -594,11 +533,7 @@ class PluginManager:
             self._engine.route_registrar.unmount(plugin_id)
 
         # Unregister all hooks
-        hooks_to_check = (
-            list(self._engine.hook_bus.get_hooks().keys())
-            if (self._engine is not None and self._engine.hook_bus is not None)
-            else list(self._hooks.keys())
-        )
+        hooks_to_check = list(self._hooks.keys())
         for hook_name in hooks_to_check:
             self.unregister(hook_name, plugin_id)
 
@@ -632,9 +567,8 @@ class PluginManager:
     # -----------------------------------------------------------------------
 
     def get_hooks(self) -> dict[str, list[str]]:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return self._engine.hook_bus.get_hooks()
-        return {hook: [pn for pn, _ in impls] for hook, impls in self._hooks.items()}
+        """Return a {hook_name: [plugin_name, ...]} snapshot of the registry."""
+        return self._hook_bus.get_hooks()
 
     @property
     def loaded_plugins(self) -> list[str]:
@@ -643,9 +577,7 @@ class PluginManager:
         return list(self._loaded_plugins)
 
     def has_hook(self, hook_name: str) -> bool:
-        if self._engine is not None and self._engine.hook_bus is not None:
-            return self._engine.hook_bus.has_hook(hook_name)
-        return bool(self._hooks.get(hook_name))
+        return self._hook_bus.has_hook(hook_name)
 
 
 # Module-level singleton

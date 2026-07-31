@@ -12,6 +12,7 @@ interface PluginCardProps {
     path?: string;
     hooks: string[];
     error?: string;
+    enabled?: boolean;
   };
   isLoaded: boolean;
   isAdmin: boolean;
@@ -52,9 +53,9 @@ export const PluginCard: React.FC<PluginCardProps> = ({
             <h3 className="text-sm font-bold text-text-1 truncate">{plugin.name}</h3>
             <span className={clsx(
               'text-[9px] font-mono font-bold uppercase',
-              isLoaded ? 'text-severity-ok' : 'text-text-3'
+              isLoaded ? 'text-severity-ok' : plugin.error ? 'text-severity-critical' : 'text-text-3'
             )}>
-              {isLoaded ? t('plugins.loaded') : t('plugins.unloaded')}
+              {isLoaded ? t('plugins.loaded') : plugin.error ? t('plugins.error') || 'ERROR' : t('plugins.unloaded')}
             </span>
           </div>
         </div>

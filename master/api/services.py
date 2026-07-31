@@ -37,6 +37,7 @@ from master.api.deps import DB, get_node_manager, require_role
 from master.api.rate_limits import WORKER_CONTROL_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
+from master.core.plugin_ids import is_plugin_active
 from master.core.rate_limiter import rate_limiter
 from master.core.worker_query_port import WorkerQueryPort
 from master.core.plugin_utils import (
@@ -171,6 +172,12 @@ async def list_services(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceListResponse:
     """Fetch the list of all systemd services from a Worker."""
+    if not is_plugin_active("systemd"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plugin 'systemd' est désactivé.",
+        )
+
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -209,6 +216,12 @@ async def get_service_status(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceStatusResponse:
     """Fetch the status of a specific systemd service on a Worker."""
+    if not is_plugin_active("systemd"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plugin 'systemd' est désactivé.",
+        )
+
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -262,6 +275,12 @@ async def restart_service(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ServiceActionResponse:
     """Restart a systemd service on a Worker (requires admin role)."""
+    if not is_plugin_active("systemd"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plugin 'systemd' est désactivé.",
+        )
+
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -310,6 +329,12 @@ async def list_containers(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerListResponse:
     """Fetch the list of all Docker containers from a Worker."""
+    if not is_plugin_active("docker"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plugin 'docker' est désactivé.",
+        )
+
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -352,6 +377,12 @@ async def restart_container(
     nm: NodeManager = Depends(get_node_manager),
 ) -> ContainerActionResponse:
     """Restart a Docker container on a Worker (requires admin role)."""
+    if not is_plugin_active("docker"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plugin 'docker' est désactivé.",
+        )
+
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")

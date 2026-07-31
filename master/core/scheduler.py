@@ -135,6 +135,7 @@ class Scheduler:
         handler_name: str = spec["handler"]
         interval: float = float(spec["interval_secs"])
         loop = asyncio.get_running_loop()
+        next_tick = loop.time() + interval
 
         while True:
             method = getattr(instance, handler_name, None)
@@ -170,7 +171,14 @@ class Scheduler:
                 if current > 0:
                     self._active_callbacks[plugin_id] = current - 1
 
+            # Fixed-cadence sleep (anti-drift): sleep until the next absolute tick
+            next_tick += interval
+            now = loop.time()
+            if next_tick <= now:
+                # Handler overran one or more intervals: skip missed ticks
+                # (no catch-up burst, no spin), re-anchor to now + interval
+                next_tick = now + interval
             try:
-                await asyncio.sleep(interval)
+                await asyncio.sleep(next_tick - now)
             except asyncio.CancelledError:
                 raise

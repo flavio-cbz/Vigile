@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { usePolling } from '../hooks/usePolling';
 import { Spinner } from '../components/primitives/Spinner';
@@ -20,6 +20,7 @@ import { NodeDetailContainersTab } from '../components/node-detail/NodeDetailCon
 import { NodeDetailInsightsTab } from '../components/node-detail/NodeDetailInsightsTab';
 import { NodeDetailDiskTab } from '../components/node-detail/NodeDetailDiskTab';
 import type { NodeDetailTabId } from '../components/node-detail/types';
+import type { AdminPluginInfo } from '../types/plugins';
 
 export const NodeDetail: React.FC = () => {
   const { t } = useLocale();
@@ -30,7 +31,26 @@ export const NodeDetail: React.FC = () => {
   const { canRestartDirectly, can } = usePermission();
   const isAdminOrOperator = can('approve-action');
 
-  const data = useNodeDetailData(id);
+  const [activePlugins, setActivePlugins] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    const fetchActivePlugins = async () => {
+      try {
+        const response = await api<AdminPluginInfo[] | { plugins: AdminPluginInfo[] }>('/api/admin/plugins');
+        const list = Array.isArray(response) ? response : (response?.plugins || []);
+        const activeIds = list
+          .filter((p) => Boolean(p.enabled && p.loaded))
+          .map((p) => p.id);
+        setActivePlugins(activeIds);
+      } catch {
+        // Viewer sans accès admin : fallback tous actifs pour ne pas masquer de tabs
+        setActivePlugins(['systemd', 'docker', 'metrics', 'disk_analysis', 'clean_logs', 'plex']);
+      }
+    };
+    void fetchActivePlugins();
+  }, []);
+
+  const data = useNodeDetailData(id, activePlugins);
   const {
     node,
     loadingNode,
@@ -61,23 +81,31 @@ export const NodeDetail: React.FC = () => {
     setRestartingContainer,
   } = data;
 
+  const tabs = useNodeDetailTabs({
+    insightsCount: displayInsights?.length ?? 0,
+    servicesCount: services?.length ?? 0,
+    containersCount: containers?.length ?? 0,
+    activePlugins: activePlugins ?? undefined,
+  });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromParams = searchParams.get('tab');
   const activeTab = tabFromParams && ['insights', 'metrics', 'services', 'containers', 'logs', 'disk', 'settings'].includes(tabFromParams)
     ? (tabFromParams as NodeDetailTabId)
     : 'insights';
+  const effectiveTab = tabs.some((t) => t.id === activeTab) ? activeTab : 'insights';
   const handleTabChange = useCallback(
     (tab: NodeDetailTabId) => setSearchParams({ tab }, { replace: true }),
     [setSearchParams],
   );
 
   useEffect(() => {
-    if (activeTab === 'services' && !loadingServices) fetchServicesList();
-    if (activeTab === 'containers' && !loadingContainers) fetchContainersList();
-  }, [activeTab, id, fetchServicesList, fetchContainersList, loadingServices, loadingContainers]);
+    if (effectiveTab === 'services' && activePlugins?.includes('systemd') && !loadingServices) fetchServicesList();
+    if (effectiveTab === 'containers' && activePlugins?.includes('docker') && !loadingContainers) fetchContainersList();
+  }, [effectiveTab, activePlugins, id, fetchServicesList, fetchContainersList, loadingServices, loadingContainers]);
 
-  usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 20000, activeTab === 'metrics');
-  usePolling('detail_logs_poll', () => fetchNodeLogs(true), 15000, activeTab === 'logs');
+  usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 20000, effectiveTab === 'metrics');
+  usePolling('detail_logs_poll', () => fetchNodeLogs(true), 15000, effectiveTab === 'logs');
 
   const handleRestartService = async (serviceName: string) => {
     if (!id || !canRestartDirectly) return;
@@ -117,12 +145,6 @@ export const NodeDetail: React.FC = () => {
     }
   };
 
-  const tabs = useNodeDetailTabs({
-    insightsCount: displayInsights?.length ?? 0,
-    servicesCount: services?.length ?? 0,
-    containersCount: containers?.length ?? 0,
-  });
-
   if (loadingNode) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 text-text-3 font-interface text-xs select-none">
@@ -152,10 +174,10 @@ export const NodeDetail: React.FC = () => {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
       <NodeDetailHeader node={node} />
 
-      <NodeDetailTabs tabs={tabs} activeTab={activeTab} onChange={handleTabChange} />
+      <NodeDetailTabs tabs={tabs} activeTab={effectiveTab} onChange={handleTabChange} />
 
       <div className="min-h-96">
-        {activeTab === 'insights' && (
+        {effectiveTab === 'insights' && (
           <NodeDetailInsightsTab
             insights={displayInsights}
             loading={loadingInsights}
@@ -164,7 +186,7 @@ export const NodeDetail: React.FC = () => {
           />
         )}
 
-        {activeTab === 'metrics' && (
+        {effectiveTab === 'metrics' && (
           <NodeDetailMetricsTab
             statsHistory={statsHistory}
             loading={loadingStats}
@@ -172,7 +194,7 @@ export const NodeDetail: React.FC = () => {
           />
         )}
 
-        {activeTab === 'services' && (
+        {effectiveTab === 'services' && (
           <NodeDetailServicesTab
             services={services}
             loading={loadingServices}
@@ -184,7 +206,7 @@ export const NodeDetail: React.FC = () => {
           />
         )}
 
-        {activeTab === 'containers' && (
+        {effectiveTab === 'containers' && (
           <NodeDetailContainersTab
             containers={containers}
             loading={loadingContainers}
@@ -196,7 +218,7 @@ export const NodeDetail: React.FC = () => {
           />
         )}
 
-        {activeTab === 'logs' && (
+        {effectiveTab === 'logs' && (
           <NodeDetailLogsTab
             logs={logs}
             loading={loadingLogs}
@@ -211,7 +233,7 @@ export const NodeDetail: React.FC = () => {
           />
         )}
 
-        {activeTab === 'disk' && (() => {
+        {effectiveTab === 'disk' && (() => {
           const diskMounts = node?.cached_disks_json
             ? (() => {
                 try {
@@ -232,7 +254,7 @@ export const NodeDetail: React.FC = () => {
           );
         })()}
 
-        {activeTab === 'settings' && <NodeSettingsTab node={node} />}
+        {effectiveTab === 'settings' && <NodeSettingsTab node={node} />}
       </div>
     </div>
   );
