@@ -22,17 +22,17 @@ var nodeID string
 // ALLOWED_ACTIONS is the hardcoded whitelist of actions this Worker can execute.
 // Every incoming INTENT is checked against this map before execution.
 var ALLOWED_ACTIONS = map[string]bool{
-		"GET_STATS":           true,
-		"READ_LOGS":           true,
-		"RESTART_CONTAINER":   true,
-		"LIST_CONTAINERS":     true,
-		"LIST_SERVICES":       true,
-		"STATUS_SERVICE":      true,
-		"RESTART_SERVICE":     true,
-		"READ_LOGS_SERVICE":   true,
-		"UPDATE_WORKER":       true,
-		"TOKEN_ROTATION":      true,
-		"DISK_SCAN":           true,
+		"GET_STATS":         true,
+		"READ_LOGS":         true,
+		"RESTART_CONTAINER": true,
+		"LIST_CONTAINERS":   true,
+		"LIST_SERVICES":     true,
+		"STATUS_SERVICE":    true,
+		"RESTART_SERVICE":   true,
+		"READ_LOGS_SERVICE": true,
+		"UPDATE_WORKER":     true,
+		"TOKEN_ROTATION":    true,
+		"DISK_SCAN":         true,
 	}
 
 // Intent describes a command sent by the Master.
@@ -93,7 +93,7 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 	case "TOKEN_ROTATION":
 		result = handleTokenRotation(wc.ctx, wc, msg)
 	case "DISK_SCAN":
-		result = handleDiskScan(wc.ctx, msg) // TODO: implemented in disk_scan.go
+		result = handleDiskScan(wc.ctx, msg)
 	default:
 		result = IntentResult{
 			IntentID: msg.IntentID,

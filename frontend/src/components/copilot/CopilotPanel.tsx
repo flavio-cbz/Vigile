@@ -14,25 +14,25 @@ import { MessageSquare, Zap, Terminal } from 'lucide-react';
 
 export const CopilotPanel: React.FC = () => {
   const { t } = useLocale();
-  const { copilotOpen, copilotContext, closeCopilot } = useUiStore();
-  const { nodes } = useNodeStore();
-  const {
-    activeSession,
-    isStreaming,
-    activeSteps,
-    activeTools,
-    activeMeta,
-    suggestions,
-    sendMessage,
-    createSession,
-    fetchSessions,
-    selectSession,
-    fetchSuggestions,
-    approveProposal,
-    rejectProposal,
-    abortStreaming,
-    pendingProposalsCount,
-  } = useChatStore();
+  const copilotOpen = useUiStore((s) => s.copilotOpen);
+  const copilotContext = useUiStore((s) => s.copilotContext);
+  const closeCopilot = useUiStore((s) => s.closeCopilot);
+  const nodes = useNodeStore((s) => s.nodes);
+  const activeSession = useChatStore(s => s.activeSession);
+  const isStreaming = useChatStore(s => s.isStreaming);
+  const activeSteps = useChatStore(s => s.activeSteps);
+  const activeTools = useChatStore(s => s.activeTools);
+  const activeMeta = useChatStore(s => s.activeMeta);
+  const suggestions = useChatStore(s => s.suggestions);
+  const sendMessage = useChatStore(s => s.sendMessage);
+  const createSession = useChatStore(s => s.createSession);
+  const fetchSessions = useChatStore(s => s.fetchSessions);
+  const selectSession = useChatStore(s => s.selectSession);
+  const fetchSuggestions = useChatStore(s => s.fetchSuggestions);
+  const approveProposal = useChatStore(s => s.approveProposal);
+  const rejectProposal = useChatStore(s => s.rejectProposal);
+  const abortStreaming = useChatStore(s => s.abortStreaming);
+  const pendingProposalsCount = useChatStore(s => s.pendingProposalsCount);
 
   const [loadingSession, setLoadingSession] = useState(false);
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
@@ -206,20 +206,19 @@ export const CopilotPanel: React.FC = () => {
   const turns = useMemo(() => groupByTurns(history), [history]);
 
   return (
-    <div
-      data-copilot-root
-      ref={(el) => {
-        // Expose root via data attribute for outside-click handling.
-        if (el) el.setAttribute('data-copilot-root', '');
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="copilot-title"
-      className={`fixed top-14 right-0 bottom-0 flex z-20 transition-transform duration-300 shadow-2xl bg-bg/85 backdrop-blur-2xl ${
-        copilotOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
-      }`}
-      style={{ width: 'var(--copilot-width-expanded)' }}
-    >
+      <div
+       data-copilot-root
+       ref={(el) => {
+         // Expose root via data attribute for outside-click handling.
+         if (el) el.setAttribute('data-copilot-root', '');
+       }}
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="copilot-title"
+        className={`fixed top-14 sm:top-[var(--topbar-height)] right-0 bottom-0 flex z-20 transition-transform duration-300 shadow-2xl bg-bg/95 backdrop-blur-xs w-full max-w-full sm:w-[520px] ${
+          copilotOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
+        }`}
+      >
       <span id="copilot-desc" className="sr-only">
         {t('copilot.aria_description')}
       </span>

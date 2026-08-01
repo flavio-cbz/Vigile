@@ -123,7 +123,7 @@ export const ProposalsPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 p-3 sm:p-4 bg-surface border border-border rounded-lg text-xs">
         <div className="flex items-center gap-1.5 relative">
           <span className="text-text-3 font-semibold uppercase tracking-wider text-[10px]">{t('prop_page.status_label')}</span>
           <button
@@ -134,7 +134,7 @@ export const ProposalsPage: React.FC = () => {
             <ChevronDown className={`w-3 h-3 transition-transform ${filterDropdownOpen ? 'rotate-180' : ''}`} />
           </button>
           {filterDropdownOpen && (
-            <div className="absolute left-0 mt-1 top-full w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_var(--shadow-dropdown)] py-1.5 z-50 animate-fade-in">
+            <div className="absolute left-0 mt-1 top-full w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[var(--shadow-dropdown)] py-1.5 z-50 animate-fade-in">
               {statusOptions.map((option) => (
                 <button
                   key={option.value}

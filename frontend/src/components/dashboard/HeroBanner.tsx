@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { AlertTriangle, CheckCircle, AlertOctagon, RefreshCw } from 'lucide-react';
 import { useLocale } from '../../i18n';
 import type { Node } from '../../store/nodeStore';
@@ -13,7 +13,7 @@ interface HeroBannerProps {
   } | null;
 }
 
-export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated, topInsight }) => {
+const LastUpdatedBadge: React.FC<{ lastUpdated: number | null }> = memo(({ lastUpdated }) => {
   const { t } = useLocale();
   const [secondsAgo, setSecondsAgo] = useState<number>(0);
 
@@ -24,6 +24,29 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated, topI
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [lastUpdated]);
+
+  if (!lastUpdated) {
+    return (
+      <span className="text-[11px] font-mono text-ink-secondary">
+        {t('hero.waiting_update')}
+      </span>
+    );
+  }
+
+  const isStale = secondsAgo > 60;
+
+  return (
+    <span className={`text-[11px] font-mono flex items-center gap-1.5 ${isStale ? 'text-danger font-bold' : 'text-ink-secondary'}`}>
+      <RefreshCw size={12} className={isStale ? 'animate-spin' : ''} />
+      {isStale ? t('dash.stale_warning') : t('dash.last_updated', { time: secondsAgo })}
+    </span>
+  );
+});
+
+LastUpdatedBadge.displayName = 'LastUpdatedBadge';
+
+export const HeroBanner: React.FC<HeroBannerProps> = memo(({ nodes, lastUpdated, topInsight }) => {
+  const { t } = useLocale();
 
   const total = nodes.length;
   const online = nodes.filter((n) => n.online).length;
@@ -100,11 +123,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated, topI
   };
 
   const current = statusStyles[status];
-  const isStale = secondsAgo > 60;
 
   return (
     <div
-      className={`p-6 rounded-xl border ${current.border} flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all duration-300 animate-fade-in`}
+      className={`p-4 sm:p-6 rounded-xl border ${current.border} flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 transition-all duration-300 animate-fade-in`}
       style={{ background: current.gradient }}
     >
       <div className="flex items-center gap-4">
@@ -119,17 +141,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ nodes, lastUpdated, topI
         </div>
       </div>
       <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
-        {lastUpdated ? (
-          <span className={`text-[11px] font-mono flex items-center gap-1.5 ${isStale ? 'text-danger font-bold' : 'text-ink-secondary'}`}>
-            <RefreshCw size={12} className={isStale ? 'animate-spin' : ''} />
-            {isStale ? t('dash.stale_warning') : t('dash.last_updated', { time: secondsAgo })}
-          </span>
-        ) : (
-          <span className="text-[11px] font-mono text-ink-secondary">
-            {t('hero.waiting_update')}
-          </span>
-        )}
+        <LastUpdatedBadge lastUpdated={lastUpdated} />
       </div>
     </div>
   );
-};
+});
+
+HeroBanner.displayName = 'HeroBanner';

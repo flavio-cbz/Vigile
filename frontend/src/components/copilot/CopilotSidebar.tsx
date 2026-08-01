@@ -26,7 +26,12 @@ const sessionHasPending = (session: ChatSession): boolean =>
 
 export const CopilotSidebar: React.FC<CopilotSidebarProps> = ({ nodeId, onOpenSearch }) => {
   const { t } = useLocale();
-  const { sessions, activeSessionId, selectSession, createSession, abortStreaming, isStreaming } = useChatStore();
+  const sessions = useChatStore(s => s.sessions);
+  const activeSessionId = useChatStore(s => s.activeSessionId);
+  const isStreaming = useChatStore(s => s.isStreaming);
+  const selectSession = useChatStore(s => s.selectSession);
+  const createSession = useChatStore(s => s.createSession);
+  const abortStreaming = useChatStore(s => s.abortStreaming);
   const { nodes } = useNodeStore();
   const [expanded, setExpanded] = useState(true);
 

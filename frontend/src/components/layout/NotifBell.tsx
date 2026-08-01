@@ -59,7 +59,7 @@ export const NotifBell: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_var(--shadow-dropdown)] py-2 z-50 animate-fade-in text-xs">
+        <div className="absolute right-0 mt-2 w-80 rounded-lg bg-surface-2/95 backdrop-blur-xs border border-border-strong/60 shadow-[var(--shadow-dropdown)] py-2 z-50 animate-fade-in text-xs">
           <div className="px-4 py-2 flex items-center justify-between border-b border-border-strong/30">
             <span className="font-bold tracking-wider uppercase text-text-3 font-mono text-[10px]">{t('notif.title')}</span>
             {count > 0 && (

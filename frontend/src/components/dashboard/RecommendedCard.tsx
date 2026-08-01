@@ -79,7 +79,7 @@ export const RecommendedCard: React.FC<RecommendedCardProps> = ({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-border/40">
+      <div className="flex flex-col sm:flex-row flex-wrap items-center justify-end gap-2 sm:gap-3 pt-2 border-t border-border/40">
         <button
           onClick={onUnderstand}
           className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold font-interface uppercase tracking-wider bg-surface-2 hover:bg-surface-3 text-text-1 border border-border rounded-lg transition-colors cursor-pointer"

@@ -392,6 +392,93 @@ CREATE TABLE IF NOT EXISTS outbox (
 """
 
 # ---------------------------------------------------------------------------
+# Plex Plugin Tables
+# ---------------------------------------------------------------------------
+CREATE_PLEX_SESSIONS = """
+CREATE TABLE IF NOT EXISTS plex_sessions (
+    id                TEXT PRIMARY KEY,
+    node_id           TEXT NOT NULL,
+    session_key       TEXT NOT NULL,
+    user              TEXT NOT NULL,
+    title             TEXT NOT NULL,
+    grandparent_title TEXT,
+    media_type        TEXT,
+    progress_percent  REAL DEFAULT 0.0,
+    state             TEXT DEFAULT 'playing',
+    player_device     TEXT,
+    quality_profile   TEXT,
+    bandwidth_kbps    INTEGER DEFAULT 0,
+    transcode         INTEGER DEFAULT 0,
+    details_json      TEXT,
+    updated_at        REAL NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+CREATE_PLEX_WATCH_HISTORY = """
+CREATE TABLE IF NOT EXISTS plex_watch_history (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id            TEXT NOT NULL,
+    user               TEXT NOT NULL,
+    title              TEXT NOT NULL,
+    grandparent_title  TEXT,
+    media_type         TEXT DEFAULT 'movie',
+    viewed_at          REAL NOT NULL,
+    duration_watched_s INTEGER DEFAULT 0,
+    progress_percent   REAL DEFAULT 100.0,
+    device             TEXT,
+    quality            TEXT,
+    details_json       TEXT,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+CREATE_PLEX_LIBRARIES = """
+CREATE TABLE IF NOT EXISTS plex_libraries (
+    id               TEXT PRIMARY KEY,
+    node_id          TEXT NOT NULL,
+    section_key      TEXT NOT NULL,
+    title            TEXT NOT NULL,
+    type             TEXT NOT NULL,
+    count            INTEGER DEFAULT 0,
+    total_size_bytes INTEGER DEFAULT 0,
+    last_scanned_at  REAL,
+    updated_at       REAL NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+CREATE_PLEX_MEDIA_CACHE = """
+CREATE TABLE IF NOT EXISTS plex_media_cache (
+    id               TEXT PRIMARY KEY,
+    node_id          TEXT NOT NULL,
+    rating_key       TEXT NOT NULL,
+    title            TEXT NOT NULL,
+    year             INTEGER,
+    media_type       TEXT,
+    duration_ms      INTEGER DEFAULT 0,
+    file_size_bytes  INTEGER DEFAULT 0,
+    added_at         REAL,
+    thumb_path       TEXT,
+    updated_at       REAL NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+CREATE_PLEX_EVENTS = """
+CREATE TABLE IF NOT EXISTS plex_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id     TEXT NOT NULL,
+    event_type  TEXT NOT NULL,
+    user        TEXT,
+    title       TEXT,
+    payload_json TEXT,
+    created_at  REAL NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+# ---------------------------------------------------------------------------
 # Indexes for common query patterns
 # ---------------------------------------------------------------------------
 CREATE_INDEXES = [
@@ -425,6 +512,12 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)",
     "CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations(alert_id)",
     "CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed ON outbox(processed, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_plex_sessions_node ON plex_sessions(node_id, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_plex_watch_history_node_time ON plex_watch_history(node_id, viewed_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_plex_watch_history_user ON plex_watch_history(user, viewed_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_plex_libraries_node ON plex_libraries(node_id)",
+    "CREATE INDEX IF NOT EXISTS idx_plex_media_cache_node_key ON plex_media_cache(node_id, rating_key)",
+    "CREATE INDEX IF NOT EXISTS idx_plex_events_node_time ON plex_events(node_id, created_at DESC)",
 ]
 
 # All CREATE statements in dependency order
@@ -445,4 +538,10 @@ ALL_TABLES = [
     CREATE_ALERTS,
     CREATE_INVESTIGATIONS,
     CREATE_OUTBOX,
+    CREATE_PLEX_SESSIONS,
+    CREATE_PLEX_WATCH_HISTORY,
+    CREATE_PLEX_LIBRARIES,
+    CREATE_PLEX_MEDIA_CACHE,
+    CREATE_PLEX_EVENTS,
 ]
+

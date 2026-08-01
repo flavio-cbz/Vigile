@@ -285,7 +285,7 @@ async def test_stream_accumulates_multiple_tool_calls():
         f"data: {json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 0, 'function': {'name': 'list_containers'}}]}}]})}",
         f"data: {json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 1, 'function': {'name': 'read_logs'}}]}}]})}",
         f"data: {json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 0, 'function': {'arguments': '_containers'}}]}}]})}",
-        f"data: {json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 1, 'function': {'arguments': '("/var/log/syslog")'}}]}}]})}",
+        "data: " + json.dumps({'choices': [{'delta': {'tool_calls': [{'index': 1, 'function': {'arguments': '("/var/log/syslog")'}}]}}]}),
         "data: [DONE]",
     ]
     mock_resp = _MockStreamResponse(chunks, 200)

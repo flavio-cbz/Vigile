@@ -132,7 +132,7 @@ export const ServersPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold uppercase tracking-wider text-text-1 flex items-center gap-2">

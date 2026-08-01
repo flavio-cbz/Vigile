@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from './useApi';
 import { usePolling } from './usePolling';
@@ -48,6 +48,33 @@ const RELEVANT_ACTIONS = new Set<string>([
 ]);
 
 /**
+ * Runs `fn` over `items` with at most `limit` concurrent invocations,
+ * preserving input order in the results (worker-pool pattern).
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await fn(items[index]);
+    }
+  };
+
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker()),
+  );
+  return results;
+}
+
+/**
  * Encapsulates all Dashboard data fetching, polling, and the imperative
  * proposal approval/rejection flows. The component consumes the returned
  * state and helpers to render.
@@ -65,6 +92,8 @@ export function useDashboardData() {
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [loadingContainers, setLoadingContainers] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+
+  const containersRef = useRef<ContainerItem[]>([]);
 
   const fetchBulkMetrics = async () => {
     try {
@@ -107,12 +136,20 @@ export function useDashboardData() {
     const currentNodes = useNodeStore.getState().nodes;
     const onlineNodes = currentNodes.filter((n) => n.online);
     if (onlineNodes.length === 0) {
-      setContainers([]);
+      if (containersRef.current.length > 0) {
+        containersRef.current = [];
+        setContainers([]);
+      }
       return;
     }
-    setLoadingContainers(true);
+    // Loading skeleton only meaningful on the initial (empty) load; background
+    // polls with existing data skip the flag to avoid 2 churn re-renders/cycle.
+    const showLoading = containersRef.current.length === 0;
+    if (showLoading) {
+      setLoadingContainers(true);
+    }
     try {
-      const containerPromises = onlineNodes.map(async (node) => {
+      const results = await mapWithConcurrency(onlineNodes, 3, async (node) => {
         try {
           const res = await api<{ containers: Omit<ContainerItem, 'nodeId' | 'nodeName'>[] }>(
             `/api/nodes/${node.id}/containers`,
@@ -131,7 +168,6 @@ export function useDashboardData() {
         return [];
       });
 
-      const results = await Promise.all(containerPromises);
       const flattened = results.flat();
 
       // Sort exited/stopped first, then running
@@ -147,11 +183,22 @@ export function useDashboardData() {
         return (a.name ?? '').localeCompare(b.name ?? '');
       });
 
+      const prev = containersRef.current;
+      const unchanged =
+        prev.length === sorted.length &&
+        prev.every((c, i) =>
+          c.id === sorted[i].id && c.state === sorted[i].state && c.status === sorted[i].status
+        );
+      if (unchanged) return;
+
+      containersRef.current = sorted;
       setContainers(sorted);
     } catch (err) {
       console.error('Failed to aggregate containers:', err);
     } finally {
-      setLoadingContainers(false);
+      if (showLoading) {
+        setLoadingContainers(false);
+      }
     }
   }, []);
 

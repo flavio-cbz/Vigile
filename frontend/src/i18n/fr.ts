@@ -387,6 +387,9 @@ export const fr = {
   "plugins.activated": "Plugin activé.",
   "plugins.deactivated": "Plugin désactivé.",
   "plugins.toggle_error": "Impossible de basculer le plugin.",
+  "plugins.error": "Erreur",
+  "plugins.config_saved": "Configuration enregistrée",
+  "plugins.config_failed": "Échec de la configuration",
   "plugins.uploaded": "Plugin \"{name}\" uploadé avec succès.",
   "plugins.upload_failed": "Échec de l'upload du plugin.",
   "plugins.tabs.installed": "Installés",
@@ -540,6 +543,8 @@ export const fr = {
   "node_detail.admin_required": "Droits administrateur requis",
   "node_detail.image_label": "Image: {image}",
   "node_detail.id_label": "ID: {id}",
+  "node_detail.enrolled_chip_prefix": "Enregistré :",
+  "node_detail.hostname_chip_prefix": "Hostname :",
 
   // Prédiction Disque
   "metrics.prediction_title": "Prédiction d'utilisation disque",
@@ -658,6 +663,7 @@ export const fr = {
   "sidebar.brand": "Vigile",
   "sidebar.default_username": "Utilisateur",
   "sidebar.default_role": "visiteur",
+  "sidebar.open_menu": "Ouvrir le menu",
   "sidebar.toggle_expand": "Étendre la sidebar",
   "sidebar.toggle_collapse": "Réduire la sidebar",
   "sidebar.new_activity": "Nouvelle activité",
@@ -883,7 +889,7 @@ export const fr = {
   "automations.test.success": "Règle déclenchée sur {node} — vérifiez l'historique.",
 
   // Chat toasts
-  "chat.toast.session_create_error": "Impossible de créer la session de chat.",
+  "chat.toast.create_error": "Impossible de créer la session de chat.",
   "chat.toast.session_deleted": "Conversation supprimée.",
   "chat.toast.session_delete_error": "Impossible de supprimer la conversation.",
   "chat.toast.ai_error": "Erreur IA",
@@ -905,8 +911,8 @@ export const fr = {
   // API toasts
   "api.toast.session_expired": "Session expirée",
   "api.toast.session_expired_msg": "Veuillez vous reconnecter.",
+  "api.toast.rate_limit": "Trop de requêtes. Veuillez patienter quelques secondes.",
   "api.toast.rate_limit_title": "Limite de débit atteinte",
-  "api.toast.rate_limit_msg": "Trop de requêtes. Veuillez patienter quelques secondes.",
   "api.toast.server_error": "Erreur serveur",
 
   // Automations toasts
@@ -934,10 +940,24 @@ export const fr = {
   "automations.form.updated": "Règle mise à jour.",
   "automations.form.created": "Règle créée avec succès.",
   "automations.form.error": "Erreur : {message}",
+  "automations.form.actions": "Actions",
+  "automations.form.add_action": "+ Ajouter une action",
+  "automations.form.trigger": "Déclencheur",
+  "automations.form.scope": "Portée",
+  "automations.form.target_node": "Nœud cible (optionnel)",
+  "automations.form.all_nodes": "Tous les nœuds",
+  "automations.form.target_group": "Groupe cible (optionnel)",
+  "automations.form.cooldown": "Cooldown",
+  "automations.form.conditions": "Conditions",
+  "automations.form.no_conditions": "Aucune condition configurée",
+  "automations.form.always": "Toujours",
+  "automations.form.time_window": "Fenêtre horaire",
+  "automations.form.add_condition": "+ Ajouter une condition",
 
   // Container toasts
   "container.toast.restarting": "Redémarrage en cours",
   "container.toast.error": "Erreur",
+  "container.toast.success": "Succès",
 
   // Node Detail Restarts
   "node_detail.toast.service_restarted": "Le service {name} a été redémarré avec succès.",

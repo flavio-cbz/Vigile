@@ -224,7 +224,7 @@ export const Sidebar: React.FC = () => {
     return (
       <>
         {isSidebarOpen && <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40" onClick={() => setSidebarOpen(false)} />}
-        <nav className={`fixed top-0 left-0 h-full w-[260px] bg-surface/85 backdrop-blur-md z-50 flex flex-col transition-transform duration-300 ease-in-out overflow-hidden border-r border-border-strong/30 shadow-[0_0_24px_var(--shadow-sidebar)] ${
+        <nav className={`fixed top-0 left-0 h-full w-[260px] bg-surface/95 backdrop-blur-xs z-50 flex flex-col transition-transform duration-300 ease-in-out overflow-hidden border-r border-border-strong/30 shadow-[var(--shadow-sidebar)] ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}>
           <div className="flex items-center gap-2.5 h-14 px-4 border-b border-border-strong/30 shrink-0">
@@ -255,7 +255,7 @@ export const Sidebar: React.FC = () => {
   }
 
   return (
-    <div className={`relative h-full bg-surface/75 backdrop-blur-md border-r border-border-strong/30 flex flex-col shrink-0 select-none z-40 transition-[width] duration-250 ease-out shadow-[4px_0_24px_var(--shadow-sidebar)] ${collapsed ? 'sidebar-collapsed' : ''}`} style={{ width: 'var(--sidebar-width)' }}>
+    <div className={`relative h-full bg-surface/95 backdrop-blur-xs border-r border-border-strong/30 flex flex-col shrink-0 select-none z-40 transition-[width] duration-250 ease-out shadow-[4px_0_32px_rgba(0,0,0,0.5)] ${collapsed ? 'sidebar-collapsed' : ''}`} style={{ width: 'var(--sidebar-width)' }}>
       <div className="w-full h-full flex flex-col overflow-hidden">
         <div className={`flex items-center h-[var(--topbar-height)] border-b border-border-strong/30 shrink-0 overflow-hidden ${collapsed ? 'justify-center' : 'gap-2.5 px-4'}`}>
           <Link to="/" className={`flex items-center gap-2.5 hover:opacity-80 transition-opacity cursor-pointer text-text-1 hover:text-text-1 shrink-0 ${collapsed ? '' : 'animate-fade-in'}`}>
@@ -285,7 +285,7 @@ export const Sidebar: React.FC = () => {
           )}
         </Link>
       </div>
-      <button onClick={toggleSidebarCollapse} className="absolute top-7 right-0 translate-x-1/2 z-50 w-6 h-6 rounded-full border border-border-strong/80 bg-surface-2/95 backdrop-blur-md flex items-center justify-center text-text-3 hover:text-text-1 hover:border-accent/40 shadow-[0_2px_8px_var(--shadow-toggle)] hover:scale-105 cursor-pointer transition-all duration-200" title={collapsed ? t('sidebar.toggle_expand') : t('sidebar.toggle_collapse')}>
+      <button onClick={toggleSidebarCollapse} className="absolute top-7 right-0 translate-x-1/2 z-50 w-6 h-6 rounded-full border border-border-strong/80 bg-surface-2/95 backdrop-blur-xs flex items-center justify-center text-text-3 hover:text-text-1 hover:border-accent/40 shadow-[var(--shadow-toggle)] hover:scale-105 cursor-pointer transition-colors duration-200" title={collapsed ? t('sidebar.toggle_expand') : t('sidebar.toggle_collapse')}>
         {collapsed ? <ChevronsRight className="w-3 h-3 text-accent" /> : <ChevronsLeft className="w-3 h-3" />}
       </button>
     </div>

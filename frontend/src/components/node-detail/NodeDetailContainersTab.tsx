@@ -24,6 +24,12 @@ export const NodeDetailContainersTab: React.FC<{
     );
   }, [containers, containerSearch]);
 
+  const [limit, setLimit] = useState(50);
+
+  const displayedContainers = useMemo(() => {
+    return filteredContainers.slice(0, limit);
+  }, [filteredContainers, limit]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg">
@@ -33,7 +39,10 @@ export const NodeDetailContainersTab: React.FC<{
             type="text"
             placeholder={t('node_detail.containers_search_placeholder')}
             value={containerSearch}
-            onChange={(e) => setContainerSearch(e.target.value)}
+            onChange={(e) => {
+              setContainerSearch(e.target.value);
+              setLimit(50);
+            }}
             className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded pl-10 pr-3.5 py-1.5 text-xs text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
           />
         </div>
@@ -41,7 +50,7 @@ export const NodeDetailContainersTab: React.FC<{
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="p-1.5 rounded hover:bg-surface-2 text-text-2 hover:text-text-1 cursor-pointer transition-colors ml-auto font-interface"
+          className="p-1.5 rounded hover:bg-surface-2 text-text-2 hover:text-text-1 cursor-pointer transition-colors self-end sm:self-auto"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
@@ -69,7 +78,7 @@ export const NodeDetailContainersTab: React.FC<{
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredContainers.map((cnt) => (
+              {displayedContainers.map((cnt) => (
                 <tr key={cnt.id} className="hover:bg-surface-2/20">
                   <td className="px-5 py-3.5 font-interface text-xs text-text-1 font-bold truncate max-w-[160px]" title={cnt.name}>
                     {cnt.name}
@@ -94,7 +103,7 @@ export const NodeDetailContainersTab: React.FC<{
                       <button
                         onClick={() => onRestart(cnt.id)}
                         disabled={restartingContainer !== null || !isAdmin}
-                        className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer disabled:opacity-50 transition-all duration-150"
+                        className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer disabled:opacity-50 transition-colors duration-150"
                         title={isAdmin ? t('node_detail.restart_container_title') : t('node_detail.admin_required')}
                       >
                         {restartingContainer === cnt.id ? t('card.restarting') : t('card.restart')}
@@ -105,6 +114,16 @@ export const NodeDetailContainersTab: React.FC<{
               ))}
             </tbody>
           </table>
+          {filteredContainers.length > limit && (
+            <div className="p-3 text-center border-t border-border bg-surface-2/20">
+              <button
+                onClick={() => setLimit((l) => l + 50)}
+                className="px-4 py-1.5 text-xs font-semibold text-accent hover:text-accent-hover transition-colors"
+              >
+                + {filteredContainers.length - limit} conteneurs (Afficher plus)
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

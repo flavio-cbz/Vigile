@@ -161,7 +161,7 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
         </div>
       ) : scanResult ? (
         /* Treemap */
-        <div className="border border-border rounded-xl bg-surface overflow-hidden shadow">
+          <div className="border border-border rounded-xl bg-surface overflow-hidden shadow min-h-[280px] sm:min-h-[380px] lg:min-h-[460px]">
           <div className="p-3 border-b border-border flex items-center justify-between">
             <span className="font-interface text-[9px] font-extrabold uppercase tracking-widest text-text-3">
               {t('node_detail.disk.title')}

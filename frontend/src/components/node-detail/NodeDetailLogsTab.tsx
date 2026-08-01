@@ -32,7 +32,11 @@ export const NodeDetailLogsTab: React.FC<{
 
   useEffect(() => {
     if (logsAutoScroll && consoleRef.current) {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+      const el = consoleRef.current;
+      const rafId = requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
+      return () => cancelAnimationFrame(rafId);
     }
   }, [logs, logsAutoScroll]);
 

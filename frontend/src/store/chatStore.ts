@@ -274,10 +274,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? [...currentHistory.slice(0, -1), { ...assistantMessage }]
           : [{ ...assistantMessage }];
         const updatedSession = { ...state.activeSession, history: updatedHistory };
-        set({
-          activeSession: updatedSession,
-          sessions: state.sessions.map(s => s.id === updatedSession.id ? updatedSession : s)
-        });
+        // Per-token hot path: only touch activeSession. Re-creating the whole
+        // sessions array on every frame re-renders the sidebar for nothing —
+        // the list is refreshed by fetchSessions() after streaming and by the
+        // meta event handler (lastModel) during the stream.
+        set({ activeSession: updatedSession });
       };
 
       // Throttle per-token setState via requestAnimationFrame to avoid

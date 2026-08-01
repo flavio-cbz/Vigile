@@ -22,31 +22,31 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
         <span>{t('node_detail.back_button')}</span>
       </button>
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-xl border border-border bg-surface relative overflow-hidden shadow">
-        <div className="flex items-center gap-4 z-10 min-w-0">
-          <div className="w-12 h-12 bg-accent-muted border border-accent/20 rounded-xl flex items-center justify-center text-accent">
-            <Cpu className="w-6 h-6 text-accent animate-pulse" />
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 p-4 sm:p-6 rounded-xl border border-border bg-surface relative overflow-hidden shadow">
+        <div className="flex items-start sm:items-center gap-3 sm:gap-4 z-10 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-accent-muted border border-accent/20 rounded-xl flex items-center justify-center text-accent shrink-0 mt-0.5 sm:mt-0">
+            <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-accent animate-pulse" />
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
               <StatusDot state={node.state} />
-              <h1 className="font-interface text-lg font-bold text-text-1 truncate">
+              <h1 className="font-interface text-base sm:text-lg font-bold text-text-1 truncate">
                 {node.name}
               </h1>
               <Badge severity={node.online ? 'ok' : 'offline'} className="text-[8px] px-1 py-0" />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 mt-2">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2">
               {/* Enrolled Chip */}
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
-                <Calendar className="w-4 h-4 text-accent shrink-0" />
+                <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent shrink-0" />
                 <span className="text-text-3 font-normal">{t('node_detail.enrolled_chip_prefix', { defaultValue: 'Enregistré' })}</span>
                 <TimeAgo timestamp={node.enrolled_at} className="font-semibold text-text-1" />
               </div>
 
               {/* OS & Arch Chip */}
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
-                <Monitor className="w-4 h-4 text-accent shrink-0" />
+                <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent shrink-0" />
                 <span className="text-text-1 font-semibold">
                   {node.os || t('node_detail.os_default')}
                   <span className="text-text-3 font-normal text-[10px] ml-1">({node.arch || t('node_detail.arch_default')})</span>
@@ -55,7 +55,7 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
 
               {/* Hostname Chip */}
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
-                <HardDrive className="w-4 h-4 text-accent shrink-0" />
+                <HardDrive className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent shrink-0" />
                 <span className="text-text-3 font-normal">{t('node_detail.hostname_chip_prefix', { defaultValue: 'Host:' })}</span>
                 <span className="font-mono text-text-1 font-semibold">{node.hostname || t('common.unknown')}</span>
               </div>
@@ -71,7 +71,7 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0 z-10">
+        <div className="flex flex-wrap items-center gap-2 shrink-0 z-10 w-full xl:w-auto justify-start xl:justify-end">
           {node.online && (
             <MetricPill
               cpu={node.cpu_percent}

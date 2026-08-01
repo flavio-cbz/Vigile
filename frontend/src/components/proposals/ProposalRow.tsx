@@ -102,7 +102,7 @@ export const ProposalRow: React.FC<{
       </div>
 
       {prop.status === 'PENDING' && isOperator && (
-        <div className="flex sm:flex-col gap-2 shrink-0 sm:w-28 font-interface">
+          <div className="flex flex-col sm:flex-row gap-2 shrink-0 sm:w-28 font-interface">
           <button
             onClick={() => handleRejectInit(prop.id)}
             disabled={executing}

@@ -42,15 +42,22 @@ export const DiskTreemap: React.FC<DiskTreemapProps> = ({ root, onDrill }) => {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    let rafId: number | null = null;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry) {
-        const { width } = entry.contentRect;
-        setDimensions({ width: Math.max(width, 200), height: Math.max(Math.round(width * 0.55), 200) });
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          const { width } = entry.contentRect;
+          setDimensions({ width: Math.max(width, 200), height: Math.max(Math.round(width * 0.55), 200) });
+        });
       }
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
   }, []);
 
   const nodes = useMemo(() => {

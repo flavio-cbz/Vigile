@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useNodeStore } from '../store/nodeStore';
@@ -24,17 +24,12 @@ import { RecommendedCard } from '../components/dashboard/RecommendedCard';
 // Helper to resolve the highest priority active insight for a node: critical > warning > info
 const getTopInsight = (insights?: InsightItem[] | null): InsightItem | null => {
   if (!insights || insights.length === 0) return null;
-  const severityOrder: Record<string, number> = { critical: 3, warning: 2, info: 1 };
-
-  // Filter for insights that deserve attention (critical, warning, info)
-  const activeInsights = insights.filter((ins) => ins.severity in severityOrder);
-  if (activeInsights.length === 0) return null;
-
-  return [...activeInsights].sort((a, b) => {
-    const aVal = severityOrder[a.severity] || 0;
-    const bVal = severityOrder[b.severity] || 0;
-    return bVal - aVal; // Descending
-  })[0] || null;
+  const critical = insights.find((i) => i.severity === 'critical');
+  if (critical) return critical;
+  const warning = insights.find((i) => i.severity === 'warning');
+  if (warning) return warning;
+  const info = insights.find((i) => i.severity === 'info');
+  return info || null;
 };
 
 const formatUptime = (seconds: number | undefined): string => {
@@ -53,9 +48,10 @@ export const Dashboard: React.FC = () => {
   const { t } = useLocale();
   usePageTitle(t('page_title.dashboard'));
   const navigate = useNavigate();
-  const { nodes, isLoading: loadingNodes } = useNodeStore();
-  const { openCopilot } = useUiStore();
-  const { insightsByNode } = useInsightsStore();
+  const nodes = useNodeStore((s) => s.nodes);
+  const loadingNodes = useNodeStore((s) => s.isLoading);
+  const openCopilot = useUiStore((s) => s.openCopilot);
+  const insightsByNode = useInsightsStore((s) => s.insightsByNode);
 
   const {
     bulkStatus,
@@ -78,59 +74,62 @@ export const Dashboard: React.FC = () => {
   const [removingProposalId, setRemovingProposalId] = useState<string | null>(null);
 
   // Combine all insights into a flat list (includes real + synthetic offline insights)
-  const allInsightsList: Array<{ insight: InsightItem; nodeName: string; nodeId: string }> = [];
-  let stableMetricsCount = 0;
+  const { allInsightsList, stableMetricsCount } = useMemo(() => {
+    const listArr: Array<{ insight: InsightItem; nodeName: string; nodeId: string }> = [];
+    let stableCount = 0;
 
-  Object.entries(insightsByNode).forEach(([nodeId, list]) => {
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) return;
-    list.forEach((insight) => {
-      allInsightsList.push({ insight, nodeName: node.name, nodeId });
-      if (insight.severity === 'ok') {
-        stableMetricsCount++;
-      }
-    });
-  });
-
-  nodes
-    .filter((n) => !n.online)
-    .forEach((n) => {
-      const hbTime = n.last_heartbeat;
-      const hbLabel = hbTime
-        ? new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR')
-        : null;
-
-      allInsightsList.unshift({
-        insight: {
-          type: 'offline',
-          severity: 'offline',
-          icon: '📡',
-          headline: hbTime
-            ? t('dash.insight_offline_headline', { time: hbLabel ?? '' })
-            : t('dash.insight_offline_headline_no_hb'),
-          detail: hbTime
-            ? t('dash.insight_offline_detail', { time: hbLabel ?? '' })
-            : t('dash.insight_offline_detail_no_hb'),
-          raw: {
-            last_heartbeat: hbTime,
-          },
-        },
-        nodeName: n.name,
-        nodeId: n.id,
+    Object.entries(insightsByNode).forEach(([nodeId, list]) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      list.forEach((insight) => {
+        listArr.push({ insight, nodeName: node.name, nodeId });
+        if (insight.severity === 'ok') {
+          stableCount++;
+        }
       });
     });
+
+    nodes
+      .filter((n) => !n.online)
+      .forEach((n) => {
+        const hbTime = n.last_heartbeat;
+        const hbLabel = hbTime
+          ? new Date(hbTime < 9999999999 ? hbTime * 1000 : hbTime).toLocaleString('fr-FR')
+          : null;
+
+        listArr.unshift({
+          insight: {
+            type: 'offline',
+            severity: 'offline',
+            icon: '📡',
+            headline: hbTime
+              ? t('dash.insight_offline_headline', { time: hbLabel ?? '' })
+              : t('dash.insight_offline_headline_no_hb'),
+            detail: hbTime
+              ? t('dash.insight_offline_detail', { time: hbLabel ?? '' })
+              : t('dash.insight_offline_detail_no_hb'),
+            raw: {
+              last_heartbeat: hbTime,
+            },
+          },
+          nodeName: n.name,
+          nodeId: n.id,
+        });
+      });
+
+    return { allInsightsList: listArr, stableMetricsCount: stableCount };
+  }, [insightsByNode, nodes, t]);
+
+  // Find top actionable insight (critical > warning)
+  const topActionableEntry = useMemo(() => allInsightsList.find(
+    (item) => item.insight.severity === 'critical' || item.insight.severity === 'warning'
+  ) || null, [allInsightsList]);
 
   if (loadingDashboard || loadingNodes || nodes.length === 0) {
     return <DashboardSkeleton loading={loadingDashboard || loadingNodes} hasNodes={nodes.length > 0} />;
   }
 
   const hasInsightContent = allInsightsList.length > 0 || stableMetricsCount > 0;
-
-  // Find top actionable insight (critical > warning)
-  const topActionableEntry = allInsightsList.find(
-    (item) => item.insight.severity === 'critical' || item.insight.severity === 'warning'
-  ) || null;
-
   const topInsightForBanner = topActionableEntry ? topActionableEntry.insight : null;
 
   return (

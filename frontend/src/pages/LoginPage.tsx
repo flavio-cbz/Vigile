@@ -198,7 +198,7 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-bg flex flex-col lg:flex-row overflow-hidden relative">
+    <div className="min-h-screen w-screen bg-bg flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden relative">
       <div className="hidden lg:flex lg:w-1/2 xl:w-3/5 bg-gradient-to-br from-surface-2 to-surface-3 border-r border-border flex-col p-12 justify-between relative overflow-hidden shrink-0">
         <ParticleCanvas />
 

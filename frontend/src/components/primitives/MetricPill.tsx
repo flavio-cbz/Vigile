@@ -72,7 +72,7 @@ export const MetricPill: React.FC<MetricPillProps> = ({
 
   return (
     <span
-      className={`inline-flex items-center gap-2.5 px-2 py-1 rounded bg-surface-2 border border-border text-xs font-mono ${className}`}
+      className={`inline-flex flex-wrap items-center gap-2 sm:gap-2.5 px-2.5 py-1.5 rounded bg-surface-2 border border-border text-xs font-mono max-w-full ${className}`}
     >
       {cpu != null && <MiniGauge label="CPU" value={cpu} />}
       {mem != null && <MiniGauge label="RAM" value={mem} />}

@@ -57,7 +57,7 @@ export const ServerCard: React.FC<ServerCardProps> = ({ node, metrics, topInsigh
               <AlertTriangle
                 size={13}
                 className={
-                  topInsight.severity === 'critical' ? 'text-severity-critical animate-pulse' :
+                   topInsight.severity === 'critical' ? 'text-severity-critical' :
                   topInsight.severity === 'warning' ? 'text-severity-warning' : 'text-severity-info'
                 }
               />

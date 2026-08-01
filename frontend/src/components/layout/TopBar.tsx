@@ -7,7 +7,7 @@ import { useNodeStore } from '../../store/nodeStore';
 import { NodeSelector } from './NodeSelector';
 import { NotifBell } from './NotifBell';
 import { useLocale } from '../../i18n';
-import { LogOut, Settings, User, Compass, Palette, Search } from 'lucide-react';
+import { LogOut, Settings, User, Compass, Palette, Search, Menu } from 'lucide-react';
 import { VigileLogo } from '../ui/VigileLogo';
 import { themes, type ThemeKey } from '../../design/themes';
 
@@ -52,8 +52,16 @@ export const TopBar: React.FC = () => {
   };
 
   return (
-    <header className="h-[var(--topbar-height)] bg-surface/75 backdrop-blur-md border-b border-border-strong/30 flex items-center justify-between px-6 shrink-0 relative z-30 font-interface select-none shadow-[0_4px_20px_var(--shadow-topbar)]">
-      <div className="flex items-center gap-6">
+    <header className="h-[var(--topbar-height)] bg-surface/95 backdrop-blur-xs border-b border-border-strong/30 flex items-center justify-between px-6 shrink-0 relative z-30 font-interface select-none shadow-[var(--shadow-topbar)]">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => useLayoutStore.getState().setSidebarOpen(true)}
+          className="md:hidden p-1.5 rounded-md hover:bg-surface-2/60 text-text-2 hover:text-text-1 cursor-pointer transition-colors"
+          title={t('sidebar.open_menu')}
+          aria-label={t('sidebar.open_menu')}
+        >
+          <Menu className="w-5 h-5" />
+        </button>
         <Link to="/" className="flex items-center gap-2 group md:hidden">
           <VigileLogo className="w-7 h-7 xl:w-8.5 xl:h-8.5" />
         </Link>
@@ -125,7 +133,7 @@ export const TopBar: React.FC = () => {
           </button>
 
           {isMenuOpen && (
-            <div className="absolute right-0 mt-2 w-56 rounded-lg bg-surface-2/95 backdrop-blur-md border border-border-strong/60 shadow-[0_8px_32px_var(--shadow-dropdown)] py-1.5 z-50 animate-fade-in text-xs">
+            <div className="absolute right-0 mt-2 w-56 rounded-lg bg-surface-2/95 backdrop-blur-xs border border-border-strong/60 shadow-[var(--shadow-dropdown)] py-1.5 z-50 animate-fade-in text-xs">
               <div className="px-4 py-2.5 border-b border-border-strong/30">
                 <p className="font-bold text-text-1 truncate">{user?.username || t('sidebar.default_username')}</p>
                 <p className="text-[9px] font-mono text-accent uppercase tracking-wider mt-0.5 flex items-center gap-1">

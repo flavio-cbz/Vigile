@@ -387,6 +387,9 @@ export const en = {
   "plugins.activated": "Plugin activated.",
   "plugins.deactivated": "Plugin deactivated.",
   "plugins.toggle_error": "Unable to toggle plugin.",
+  "plugins.error": "Error",
+  "plugins.config_saved": "Configuration saved",
+  "plugins.config_failed": "Configuration failed",
   "plugins.uploaded": "Plugin \"{name}\" uploaded successfully.",
   "plugins.upload_failed": "Plugin upload failed.",
   "plugins.tabs.installed": "Installed",
@@ -540,6 +543,8 @@ export const en = {
   "node_detail.admin_required": "Administrator permissions required",
   "node_detail.image_label": "Image: {image}",
   "node_detail.id_label": "ID: {id}",
+  "node_detail.enrolled_chip_prefix": "Enrolled:",
+  "node_detail.hostname_chip_prefix": "Host:",
 
   // Disk Prediction
   "metrics.prediction_title": "Disk Usage Forecast",
@@ -658,6 +663,7 @@ export const en = {
   "sidebar.brand": "Vigile",
   "sidebar.default_username": "User",
   "sidebar.default_role": "visitor",
+  "sidebar.open_menu": "Open menu",
   "sidebar.toggle_expand": "Expand sidebar",
   "sidebar.toggle_collapse": "Collapse sidebar",
   "sidebar.new_activity": "New activity",
@@ -884,17 +890,17 @@ export const en = {
 
   // Chat toasts
   "chat.toast.create_error": "Failed to create chat session.",
-  "chat.toast.delete_success": "Conversation deleted.",
-  "chat.toast.delete_error": "Failed to delete conversation.",
+  "chat.toast.session_deleted": "Conversation deleted.",
+  "chat.toast.session_delete_error": "Failed to delete conversation.",
   "chat.toast.ai_error": "AI Error",
   "chat.toast.ai_error_unknown": "Unknown error",
   "chat.toast.network_error": "Network Error",
-  "chat.toast.network_error_detail": "AI connection interrupted.",
+  "chat.toast.network_error_disconnected": "AI connection interrupted.",
   "chat.toast.update_error": "Failed to update conversation.",
-  "chat.toast.approve_success": "Proposal approved and executed successfully.",
-  "chat.toast.approve_error": "Failed",
-  "chat.toast.reject_info": "Proposal rejected.",
-  "chat.toast.reject_error": "Failed",
+  "chat.toast.proposal_approved": "Proposal approved and executed successfully.",
+  "chat.toast.proposal_execute_error": "Execution failed",
+  "chat.toast.proposal_rejected": "Proposal rejected.",
+  "chat.toast.proposal_reject_error": "Failed",
 
   // Generic toast titles
   "chat.toast.success": "Success",
@@ -902,14 +908,9 @@ export const en = {
   "chat.toast.failure": "Failed",
   "chat.toast.rejected": "Rejected",
 
-  // Session create error (alias for create_error)
-  "chat.toast.session_create_error": "Failed to create chat session.",
-  "chat.toast.session_deleted": "Conversation deleted.",
-  "chat.toast.session_delete_error": "Failed to delete conversation.",
-
   // API toasts
   "api.toast.session_expired": "Session expired",
-  "api.toast.session_expired_detail": "Please sign in again.",
+  "api.toast.session_expired_msg": "Please sign in again.",
   "api.toast.rate_limit": "Too many requests. Please wait a few seconds.",
   "api.toast.rate_limit_title": "Rate limit reached",
   "api.toast.server_error": "Server error",
@@ -939,10 +940,24 @@ export const en = {
   "automations.form.updated": "Rule updated.",
   "automations.form.created": "Rule created successfully.",
   "automations.form.error": "Error: {message}",
+  "automations.form.actions": "Actions",
+  "automations.form.add_action": "+ Add Action",
+  "automations.form.trigger": "Trigger",
+  "automations.form.scope": "Scope",
+  "automations.form.target_node": "Target Node (optional)",
+  "automations.form.all_nodes": "All nodes",
+  "automations.form.target_group": "Target Group (optional)",
+  "automations.form.cooldown": "Cooldown",
+  "automations.form.conditions": "Conditions",
+  "automations.form.no_conditions": "No conditions configured",
+  "automations.form.always": "Always",
+  "automations.form.time_window": "Time Window",
+  "automations.form.add_condition": "+ Add Condition",
 
   // Container toasts
   "container.toast.restarting": "Restarting",
   "container.toast.error": "Error",
+  "container.toast.success": "Success",
 
   // Node Detail Restarts
   "node_detail.toast.service_restarted": "Service {name} restarted successfully.",

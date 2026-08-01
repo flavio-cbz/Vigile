@@ -54,6 +54,7 @@ export function usePolling(
         }
       }, intervalMs);
       activeIntervals.set(key, id);
+      if (import.meta.env.DEV) console.debug(`[usePolling] ${key}: interval started (${activeIntervals.size} active)`);
     }
 
     return () => {
@@ -66,6 +67,10 @@ export function usePolling(
           if (id) {
             clearInterval(id);
             activeIntervals.delete(key);
+            if (import.meta.env.DEV) console.debug(`[usePolling] ${key}: interval cleaned (${activeIntervals.size} remaining)`);
+            if (import.meta.env.DEV && activeIntervals.size > 20) {
+              console.warn(`[usePolling] ${key}: WARNING - ${activeIntervals.size} active intervals (possible leak)`);
+            }
           }
           activeRuns.delete(key);
         }

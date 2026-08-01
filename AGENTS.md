@@ -58,6 +58,66 @@ docs/                    # Planning, known limits, and session logs
 
 ## CONVENTIONS
 - **No ORM**: Raw SQL text queries via `aiosqlite`.
+# PROJECT KNOWLEDGE BASE
+
+**Generated:** 2026-07-23T00:00:00+00:00
+**Commit:** da42dbc
+**Branch:** refactor/plugin-engine-v2
+**Updated by /init-deep:** root updated, subdirectory files (re)created.
+
+## OVERVIEW
+Vigile is a zero-trust fleet management server and agent system. The Python/FastAPI Master node coordinates authenticated operator commands via an LLM agent with human-in-the-loop validation, communicating with autonomous, zero-dependency Go Workers over WebSocket.
+
+## STRUCTURE
+```text
+master/                  # Control plane FastAPI server
+├── api/                 # REST API layer (auth, nodes, services, chat)
+├── core/                # Trusted domain logic (state, crypto, LLM, audit)
+├── db/                  # Raw SQL SQLite database & Alembic migrations
+├── plugins/             # OS systemd/Docker/metrics/disk_analysis telemetry plugins
+├── ws/                  # Two-phase WebSocket enrollment & operational connection handler
+├── static/              # Compiled React SPA files served directly by FastAPI
+worker/                  # Zero-dependency autonomous Go agent binary (DISK_SCAN handler)
+frontend/                # React Vite SPA for operator interaction & Copilot (d3-hierarchy treemap)
+tests/                   # Pytest test suite (93% coverage)
+scripts/                 # Dev launcher and Docker-based simulation tests
+docs/                    # Planning, known limits, and session logs
+```
+
+## WHERE TO LOOK
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Core logic (state machine, crypto, audit, LLM, insights, plugin engine) | [master/core/](master/core/) | See [master/core/AGENTS.md](master/core/AGENTS.md) |
+| REST API endpoints (auth, nodes, services, chat, admin, audit, demo) | [master/api/](master/api/) | See [master/api/AGENTS.md](master/api/AGENTS.md) |
+| Go Worker binary | [worker/](worker/) | See [worker/AGENTS.md](worker/AGENTS.md) |
+| Database (pure SQL, migrations, alembic) | [master/db/](master/db/) | Single small dir; see root CODE MAP for `run_migrations`. |
+| Plugins (metrics, systemd, docker, disk_analysis, plex, clean_logs) | [master/plugins/](master/plugins/) | See [master/plugins/AGENTS.md](master/plugins/AGENTS.md) |
+| WebSocket protocol handler | [master/ws/](master/ws/) | Single dir: `worker_handler.py` (`worker_join_handler`), see root CODE MAP. |
+| Pytest test suite | [tests/](tests/) | See [tests/AGENTS.md](tests/AGENTS.md) |
+| Simulation & dev launcher | [scripts/](scripts/) | Single dir; see root COMMANDS for invocation. |
+| React SPA | [frontend/](frontend/) | See [frontend/AGENTS.md](frontend/AGENTS.md) |
+
+## CODE MAP
+
+| Symbol | Type | Location | Refs | Role |
+|--------|------|----------|------|------|
+| `SecurityManager` | Class | [security_manager.py](master/core/security_manager.py) | High | Cryptography, JOIN_TOKEN (HMAC), JWT, Ed25519 challenge/response verification |
+| `NodeManager` | Class | [node_manager.py](master/core/node_manager.py) | High | Worker lifecycle state machine and active WebSocket registries |
+| `PluginManager` | Class | [plugin_manager.py](master/core/plugin_manager.py) | Medium | Hook-based plugin loading and sync/async hook dispatching |
+| `RateLimiter` | Class | [rate_limiter.py](master/core/rate_limiter.py) | Medium | Sliding window rate limiting per IP + endpoint with lifespan cleanups |
+| `LLMClient` | Class | [llm_client.py](master/core/llm_client.py) | Medium | Native HTTP client for OpenAI-compatible chat completion & streams |
+| `StructuredLLM` | Class | [structured_llm.py](master/core/structured_llm.py) | Medium | System prompts for JSON schema validation & LLM retry feedback loops |
+| `ActionProposal` | Class | [action_proposal.py](master/core/action_proposal.py) | Medium | Operator-approved action model (PENDING to APPROVED to EXECUTED/FAILED) |
+| `DiskScanResult` | Class | [disk_scan.py](master/schemas/disk_scan.py) | Medium | Pydantic v2 schema validating Worker DISK_SCAN output before cache write (fail-closed against malicious workers) |
+| `handleDiskScan` | Function | [disk_scan.go](worker/disk_scan.go) | Medium | Go stdlib disk-scan intent handler — dynamic whitelist via `params.mounts`, allocated size via `stat.Blocks×stat.Blksize`, 45s timeout, 2 MB payload cap |
+| `DiskAnalysisPlugin` | Class | [disk_analysis/__init__.py](master/plugins/disk_analysis/__init__.py) | Low | Frontend-only plugin for the GrandPerspective-style treemap view |
+| `worker_join_handler` | Function | [worker_handler.py](master/ws/worker_handler.py) | High | Entry point router `/ws/worker/join` for worker connections |
+| `verify_chain` | Function | [audit.py](master/core/audit.py) | Medium | Full SHA256 chain verification walking the entire audit log table |
+| `run_migrations` | Function | [migrations.py](master/db/migrations.py) | Medium | Idempotent table creation, indexes registration, and admin seeder |
+
+## CONVENTIONS
+- **No ORM**: Raw SQL text queries via `aiosqlite`.
 - **No pyproject.toml**: Only bare `requirements.txt`. Execution relies on setting `PYTHONPATH="."`.
 - **DI at edge**: Domain logic constructors in `master/core/` are lightweight and receive raw configuration/arguments, never reading env vars or settings directly.
 - **WebSocket Handshake**: Ed25519 challenge-response sequence over raw WS frames implemented from scratch in both Python and Go (zero external WS libraries in Go worker).
@@ -66,6 +126,7 @@ docs/                    # Planning, known limits, and session logs
 - **HITL Exception (`trust_level="auto"`)**: Rule-based automation configured with `trust_level="auto"` automatically creates an `ActionProposal` in `APPROVED` status with `approved_by="system"` and dispatches it via `ApprovedProposalDispatcher`. This automated pathway bypasses human operator approval by design for operator-configured rules, while maintaining full auditability (`ActionProposal` + `audit_log`).
 - **Read-Only Queries (`WorkerQueryPort`)**: Read-only queries (`LIST_SERVICES`, `LIST_CONTAINERS`, `READ_LOGS`, `DISK_SCAN`) are routed through `WorkerQueryPort` rather than calling `NodeManager` directly, guaranteeing zero mutation side-effects and preventing direct `send_intent` calls.
 - **Declarative Plugin Sandbox**: Built-in system plugins set `"trusted": true` in their `manifest.json`, allowing in-process execution without relying on hard-coded plugin ID strings.
+- **Worker Generic Capability Executor**: The Go Worker is a lightweight, paranoid capability executor that ONLY exposes generic OS primitives (`RESTART_SERVICE`, `RESTART_CONTAINER`, `READ_LOGS`, `DISK_SCAN`, `PURGE_MANAGED_PATH`). Plugins live entirely on the Master side (Python/FastAPI) and map domain actions to generic primitives via the Master's Capabilities Registry.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - **CORS Wildcard**: CORS origins allow wildcards mapped dynamically via echoing middleware, but must be configured securely in production.
@@ -74,6 +135,7 @@ docs/                    # Planning, known limits, and session logs
 - **Database transaction locks**: Shared single aiosqlite Connection; multi-statement mutations must be wrapped in `transaction()` context to prevent sequence conflicts.
 - **Dynamic execution**: `compile()` and `exec()` inside `master/api/admin.py:337` allow dynamic python running; access must remain strictly role-gated.
 - **DELETE_* intent without fail-closed guardrails**: A future `DELETE_FILES` intent MUST follow the same fail-closed pattern as DISK_SCAN (dynamic `mounts` whitelist, symlink-resolve, Pydantic schema validation of worker output) plus double-confirm operator approval, trash-bin staging, and explicit audit chain entry. Never bypass `ActionProposal` (PENDING → APPROVED → EXECUTED) for any mutation.
+- **Per-Plugin Go Binaries / Worker Code Pollution**: Never create per-plugin Go files (e.g. `worker/plex.go`, `worker/nextcloud.go`). The Go worker binary must remain stable, generic, and plugin-agnostic.
 
 ## UNIQUE STYLES
 - **Hash Chain Audit Trail**: Cryptographically linked logs where each entry contains `SHA256(previous_hash + sequence + data)`.

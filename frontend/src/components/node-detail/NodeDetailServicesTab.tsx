@@ -29,6 +29,12 @@ export const NodeDetailServicesTab: React.FC<{
     });
   }, [services, serviceSearch, serviceFilter]);
 
+  const [limit, setLimit] = useState(50);
+
+  const displayedServices = useMemo(() => {
+    return filteredServices.slice(0, limit);
+  }, [filteredServices, limit]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-surface border border-border rounded-lg">
@@ -38,7 +44,10 @@ export const NodeDetailServicesTab: React.FC<{
             type="text"
             placeholder={t('node_detail.services_search_placeholder')}
             value={serviceSearch}
-            onChange={(e) => setServiceSearch(e.target.value)}
+            onChange={(e) => {
+              setServiceSearch(e.target.value);
+              setLimit(50);
+            }}
             className="w-full bg-surface-2 border border-border focus:border-accent/40 rounded pl-10 pr-3.5 py-1.5 text-xs text-text-1 focus:outline-none placeholder:text-text-3 font-normal"
           />
         </div>
@@ -46,7 +55,10 @@ export const NodeDetailServicesTab: React.FC<{
         <div className="flex items-center gap-2 font-interface text-xs">
           <select
             value={serviceFilter}
-            onChange={(e) => setServiceFilter(e.target.value)}
+            onChange={(e) => {
+              setServiceFilter(e.target.value);
+              setLimit(50);
+            }}
             className="bg-surface-2 border border-border rounded px-3 py-1.5 focus:outline-none text-text-2 font-semibold"
           >
             <option value="">{t('node_detail.services_filter_all')}</option>
@@ -85,7 +97,7 @@ export const NodeDetailServicesTab: React.FC<{
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredServices.map((srv) => (
+              {displayedServices.map((srv) => (
                 <tr key={srv.name} className="hover:bg-surface-2/20">
                   <td className="px-5 py-3.5 font-mono text-[11.5px] text-text-1 font-bold truncate max-w-[280px]" title={srv.name}>
                     {srv.name}
@@ -98,10 +110,11 @@ export const NodeDetailServicesTab: React.FC<{
                         ? 'bg-severity-critical/10 text-severity-critical border-severity-critical/20 animate-pulse'
                         : 'bg-text-3/15 text-text-2 border-border'
                     }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${srv.state === 'running' ? 'bg-severity-ok' : srv.state === 'failed' ? 'bg-severity-critical' : 'bg-text-3'}`} />
                       {srv.state}
                     </span>
                   </td>
-                  <td className="px-5 py-3.5 font-mono text-[10px] text-text-3 truncate max-w-[200px]" title={srv.status}>
+                  <td className="px-5 py-3.5 text-text-2 truncate max-w-[320px]" title={srv.status || ''}>
                     {srv.status || t('node_detail.services_no_details')}
                   </td>
                   {isAdminOrOperator && (
@@ -109,7 +122,7 @@ export const NodeDetailServicesTab: React.FC<{
                       <button
                         onClick={() => onRestart(srv.name)}
                         disabled={restartingService !== null || !isAdmin}
-                        className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer disabled:opacity-50 transition-all duration-150"
+                        className="px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer disabled:opacity-50 transition-colors duration-150"
                         title={isAdmin ? t('node_detail.restart_service_title') : t('node_detail.admin_required')}
                       >
                         {restartingService === srv.name ? t('card.restarting') : t('card.restart')}
@@ -120,6 +133,16 @@ export const NodeDetailServicesTab: React.FC<{
               ))}
             </tbody>
           </table>
+          {filteredServices.length > limit && (
+            <div className="p-3 text-center border-t border-border bg-surface-2/20">
+              <button
+                onClick={() => setLimit((l) => l + 50)}
+                className="px-4 py-1.5 text-xs font-semibold text-accent hover:text-accent-hover transition-colors"
+              >
+                + {filteredServices.length - limit} services (Afficher plus)
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -4,8 +4,6 @@
   border-radius: var(--radius-xl);
   padding: var(--spacing-4);
   transition: border-color var(--transition-normal), background-color var(--transition-normal), box-shadow var(--transition-normal), transform var(--transition-normal);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .card-interactive {
@@ -33,6 +31,7 @@
   width: 260px;
   max-width: 100%;
   min-height: 140px;
+  contain: layout paint;
 }
 
 .card-container {
@@ -104,22 +103,23 @@
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, transparent), var(--color-surface-1)) !important;
 }
 
-@keyframes border-pulse {
-  0% {
-    border-color: var(--color-border-critical);
-    box-shadow: var(--shadow-glow-danger);
-  }
-  50% {
-    border-color: var(--color-border-critical-hover);
-    box-shadow: 0 0 22px color-mix(in srgb, var(--severity-critical) 18%, transparent);
-  }
-  100% {
-    border-color: var(--color-border-critical);
-    box-shadow: var(--shadow-glow-danger);
-  }
+@keyframes card-pulse-opacity {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 .card-pulse-critical {
-  animation: border-pulse 2s infinite ease-in-out;
+  position: relative;
+  border-color: var(--color-border-critical-hover);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--severity-critical) 18%, transparent);
+}
+.card-pulse-critical::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid var(--color-border-critical);
+  pointer-events: none;
+  animation: card-pulse-opacity 2s infinite ease-in-out;
 }
 
 .btn {

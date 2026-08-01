@@ -322,7 +322,14 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
 
                   {/* Sessions Tab */}
                   {plexActiveTab === 'sessions' && (
-                    <PlexSessionsTab sessions={plexSessions} />
+                    <PlexSessionsTab
+                      sessions={plexSessions}
+                      nodeId={selectedNodeId}
+                      isAdmin={isAdmin}
+                      onKillSession={(sessionKey) => {
+                        api.toast(`Interruption de la session ${sessionKey}...`, 'info');
+                      }}
+                    />
                   )}
 
                   {/* Libraries Tab */}
