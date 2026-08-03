@@ -58,15 +58,10 @@ const getOfflineMiniInsight = (metrics: NodeMetrics, t: (k: string) => string): 
   return base;
 };
 
-const getResourceColor = (val: number, type: 'cpu' | 'mem' | 'disk') => {
-  const limits = {
-    cpu: { warn: 40, crit: 75 },
-    mem: { warn: 60, crit: 80 },
-    disk: { warn: 65, crit: 85 },
-  };
-  const { warn, crit } = limits[type];
-  if (val >= crit) return 'progress-bar-fill-danger';
-  if (val >= warn) return 'progress-bar-fill-warning';
+const getResourceColor = (val: number) => {
+  if (val >= 90) return 'progress-bar-fill-danger-saturated';
+  if (val >= 75) return 'progress-bar-fill-danger';
+  if (val >= 50) return 'progress-bar-fill-warning';
   return 'progress-bar-fill-success';
 };
 

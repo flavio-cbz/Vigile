@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { RefreshCw, Check, X, Trash2, Power, KeyRound, AlertTriangle, Copy, ArrowUpCircle } from 'lucide-react';
+import { RefreshCw, Check, X, Trash2, Power, KeyRound, AlertTriangle, Copy, ArrowUpCircle, Tag } from 'lucide-react';
 import { type Node } from '../../store/nodeStore';
 import { nodeMutations, type NodeWithMeta, type RegenerateTokenResult } from '../../store/nodeMutations';
 import { useAuthStore } from '../../store/authStore';
@@ -258,6 +258,21 @@ export const NodeSettingsTab = ({ node }: NodeSettingsTabProps) => {
             <AlertTriangle className="w-3.5 h-3.5" />
             {t('settings.danger_zone')}
           </h3>
+
+          <div className="p-3 rounded-lg bg-surface-1/60 border border-border flex items-center justify-between">
+            <div className="space-y-0.5">
+              <span className="text-[0.5625rem] font-bold text-ink-secondary uppercase tracking-wider block">
+                Version déclarée du Worker
+              </span>
+              <div className="flex items-center gap-1.5 text-xs font-mono font-semibold text-accent">
+                <Tag className="w-3.5 h-3.5 shrink-0 text-accent" />
+                <span>{n.worker_version || n.version ? `v${n.worker_version || n.version}` : 'Non rapportée'}</span>
+              </div>
+            </div>
+            <span className="text-[0.625rem] text-text-3 font-interface">
+              Envoyée par le binaire Go
+            </span>
+          </div>
 
           <div className="flex flex-wrap gap-2">
             <button

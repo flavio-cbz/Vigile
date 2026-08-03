@@ -1,4 +1,4 @@
-package main
+	package main
 
 import (
 	"bufio"
@@ -815,9 +815,12 @@ func parseProcStat(data []byte) (name, state string, utime, stime, starttime uin
 	if err != nil {
 		slog.Warn("stats: parse starttime", "error", err)
 	}
-	rssPages, err = strconv.ParseInt(fields[22], 10, 64)
-	if err != nil {
-		slog.Warn("stats: parse rss", "error", err)
+	if rssUint, err := strconv.ParseUint(fields[22], 10, 64); err == nil {
+		if rssUint > 9223372036854775807 {
+			rssPages = 0
+		} else {
+			rssPages = int64(rssUint)
+		}
 	}
 	return
 }

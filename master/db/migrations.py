@@ -134,15 +134,22 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
             "Added insights/caching/group/disabled/version/worker_version/disks_json/top_processes/cached_disks columns."
         )
 
-    # Migration: add trust_level column to automation_rules (Sprint 9)
-    async with db.execute("PRAGMA table_info(automation_rules)") as cursor:
-        ar_columns = [row["name"] for row in await cursor.fetchall()]
-    if "trust_level" not in ar_columns:
-        await db.execute(
-            "ALTER TABLE automation_rules ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'auto'"
-        )
-        logger.info("Added trust_level column to automation_rules.")
+    # Migration: add dispatch_id, intent_id, expires_at columns to action_proposals if missing
+    async with db.execute("PRAGMA table_info(action_proposals)") as cursor:
+        ap_columns = [row["name"] for row in await cursor.fetchall()]
+    ap_mutated = False
+    if "dispatch_id" not in ap_columns:
+        await db.execute("ALTER TABLE action_proposals ADD COLUMN dispatch_id TEXT DEFAULT NULL")
+        ap_mutated = True
+    if "intent_id" not in ap_columns:
+        await db.execute("ALTER TABLE action_proposals ADD COLUMN intent_id TEXT DEFAULT NULL")
+        ap_mutated = True
+    if "expires_at" not in ap_columns:
+        await db.execute("ALTER TABLE action_proposals ADD COLUMN expires_at REAL DEFAULT NULL")
+        ap_mutated = True
+    if ap_mutated:
         await db.commit()
+        logger.info("Added dispatch_id, intent_id, expires_at columns to action_proposals.")
 
     # Migration: create investigations table (Sprint 9) — CREATE TABLE IF NOT EXISTS handles new DBs
     async with db.execute("PRAGMA table_info(investigations)") as cursor:

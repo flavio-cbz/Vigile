@@ -306,5 +306,5 @@ class InvestigationManager:
         return [dict(r) for r in rows]
 
 
-# Module-level singleton — follows pattern of automation_engine, alert_engine
+# Module-level singleton — follows pattern of alert_engine
 investigation_manager = InvestigationManager(max_concurrent=3)

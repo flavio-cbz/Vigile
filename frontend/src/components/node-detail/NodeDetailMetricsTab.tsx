@@ -2,9 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { Spinner } from '../primitives/Spinner';
 import { useLocale } from '../../i18n';
-import type { StatsPoint, DiskMount } from './types';
+import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
 import { estimateDiskSaturation } from './diskUtils';
-import { MetricsOverview } from './MetricsOverview';
+import { MetricsOverview, type TimeRangePreset } from './MetricsOverview';
 import { MetricCharts } from './MetricCharts';
 import { MetricCards } from './MetricCards';
 import { DiskMountCards } from './DiskMountCards';
@@ -30,10 +30,19 @@ function generateSparklinePaths(points: number[], width = 120, height = 32, padd
 export const NodeDetailMetricsTab: React.FC<{
   statsHistory: StatsPoint[];
   loading: boolean;
+  nodeId?: string;
   onRefresh: () => void;
-}> = ({ statsHistory, loading, onRefresh }) => {
+  onFetchHistoryWithRange?: (startSec?: number, endSec?: number) => void;
+  dataWindowHours?: number;
+  observationReady?: boolean;
+  nodeBaseline?: NodeBaseline | null;
+  nodeAlerts?: AlertRecord[];
+}> = ({
+  statsHistory, loading, nodeId, onRefresh, onFetchHistoryWithRange,
+  dataWindowHours, observationReady = true, nodeBaseline, nodeAlerts,
+}) => {
   const { locale, t } = useLocale();
-  const [timeRange, setTimeRange] = useState<'30m' | '12h' | '24h'>('30m');
+  const [timeRange, setTimeRange] = useState<TimeRangePreset>('1h');
   const [chartStyle, setChartStyle] = useState<'area' | 'line'>('area');
   const [focusedMetric, setFocusedMetric] = useState<'all' | 'cpu' | 'ram' | 'disk'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -53,16 +62,30 @@ export const NodeDetailMetricsTab: React.FC<{
     setTimeout(() => setIsRefreshing(false), 800);
   };
 
-  const is30mAvailable = statsHistory.length >= 30;
-  const is12hAvailable = statsHistory.length >= 720;
-  const is24hAvailable = statsHistory.length >= 1440;
+  const handleTimeRangeChange = (preset: TimeRangePreset, customStartSec?: number, customEndSec?: number) => {
+    setTimeRange(preset);
+    if (!onFetchHistoryWithRange) return;
 
-  const filteredHistory = useMemo(() => {
-    if (timeRange === '30m' && statsHistory.length >= 30) return statsHistory.slice(-30);
-    if (timeRange === '12h' && statsHistory.length >= 720) return statsHistory.slice(-720);
-    if (timeRange === '24h' && statsHistory.length >= 1440) return statsHistory.slice(-1440);
-    return statsHistory;
-  }, [statsHistory, timeRange]);
+    if (preset === 'custom' && customStartSec && customEndSec) {
+      onFetchHistoryWithRange(customStartSec, customEndSec);
+      return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const durationMap: Record<string, number> = {
+      '1h': 3600,
+      '6h': 21600,
+      '12h': 43200,
+      '24h': 86400,
+      '7d': 604800,
+      '30d': 2592000,
+    };
+
+    const duration = durationMap[preset] || 3600;
+    onFetchHistoryWithRange(now - duration, now);
+  };
+
+  const filteredHistory = statsHistory;
 
   const mappedHistory = useMemo(() => {
     return filteredHistory.map((point, idx) => ({
@@ -138,7 +161,7 @@ export const NodeDetailMetricsTab: React.FC<{
   const enrichedDisks = useMemo(() => {
     const lastSnap = statsHistory[statsHistory.length - 1];
     const disks = lastSnap?.disks || [];
-    const estimates = estimateDiskSaturation(statsHistory.map(s => s.disks || []));
+    const estimates = estimateDiskSaturation(statsHistory);
     return disks.map(d => ({
       ...d,
       days_left: estimates[d.mount_point]?.days_left ?? null,
@@ -149,10 +172,24 @@ export const NodeDetailMetricsTab: React.FC<{
 
 
   const getStatus = (val: number, type: 'cpu' | 'ram' | 'disk') => {
+    const mBase = nodeBaseline?.metrics?.[type];
+    if (mBase && !nodeBaseline?.is_limited) {
+      if (val >= mBase.absolute_critical || val >= mBase.p99) {
+        return { text: localT('Critique absolu', 'Absolute critical'), bg: 'bg-red-500/10 text-severity-critical border-red-500/20' };
+      }
+      if (val >= mBase.p90) {
+        return { text: localT('Critique relatif', 'Relative critical'), bg: 'bg-amber-500/10 text-severity-warning border-amber-500/20' };
+      }
+      if (val >= mBase.p75) {
+        return { text: localT('Élevé', 'Elevated'), bg: 'bg-amber-500/10 text-zone-elevated border-amber-500/20' };
+      }
+      return { text: localT('Normal', 'Normal'), bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
+    }
+
     const limits = type === 'disk' ? { warn: 70, crit: 85 } : { warn: 50, crit: 80 };
-    if (val >= limits.crit) return { text: localT('Critique', 'Critical'), bg: 'bg-red-500/10 text-severity-critical border-red-500/20' };
-    if (val >= limits.warn) return { text: localT('Avertissement', 'Warning'), bg: 'bg-amber-500/10 text-severity-warning border-amber-500/20' };
-    return { text: localT('Nominal', 'Nominal'), bg: 'bg-emerald-500/10 text-severity-ok border-emerald-500/20' };
+    if (val >= limits.crit) return { text: localT('Critique absolu', 'Absolute critical'), bg: 'bg-red-500/10 text-severity-critical border-red-500/20' };
+    if (val >= limits.warn) return { text: localT('Élevé', 'Elevated'), bg: 'bg-amber-500/10 text-zone-elevated border-amber-500/20' };
+    return { text: localT('Normal', 'Normal'), bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
   };
 
   const getRelativeTimeLabel = (idx: number) => {
@@ -193,12 +230,10 @@ export const NodeDetailMetricsTab: React.FC<{
         isRefreshing={isRefreshing}
         lastRefreshed={lastRefreshed}
         locale={locale}
-        onTimeRangeChange={setTimeRange}
+        nodeId={nodeId}
+        onTimeRangeChange={handleTimeRangeChange}
         onChartStyleChange={setChartStyle}
         onRefresh={handleRefreshClick}
-        is30mAvailable={is30mAvailable}
-        is12hAvailable={is12hAvailable}
-        is24hAvailable={is24hAvailable}
       />
 
       <MetricCards
@@ -212,6 +247,7 @@ export const NodeDetailMetricsTab: React.FC<{
         focusedMetric={focusedMetric}
         onToggleMetric={handleToggleMetric}
         getStatus={getStatus}
+        dataWindowHours={dataWindowHours}
       />
 
       <MetricCharts
@@ -225,6 +261,8 @@ export const NodeDetailMetricsTab: React.FC<{
         diskChartData={diskChartData}
         uniqueMounts={uniqueMounts}
         DISK_COLORS={DISK_COLORS}
+        baseline={nodeBaseline}
+        alerts={nodeAlerts}
       />
 
     {enrichedDisks.length > 0 && (
@@ -232,7 +270,7 @@ export const NodeDetailMetricsTab: React.FC<{
         <h4 className="font-interface font-black text-xs uppercase tracking-widest text-text-3 px-1">
           {t('metrics.disks_title')}
         </h4>
-        <DiskMountCards disks={enrichedDisks} />
+        <DiskMountCards disks={enrichedDisks} observationReady={observationReady} />
       </div>
     )}
     </div>

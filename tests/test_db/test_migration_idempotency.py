@@ -90,3 +90,43 @@ class TestMigrationIdempotency:
         finally:
             await reset_db()
             shutil.rmtree(tmp, ignore_errors=True)
+
+    @pytest.mark.asyncio
+    async def test_action_proposals_columns_added_to_legacy_db(self) -> None:
+        """Legacy action_proposals tables missing dispatch_id/intent_id/expires_at must be migrated."""
+        tmp = tempfile.mkdtemp()
+        try:
+            db_path = os.path.join(tmp, "legacy.db")
+            await reset_db()
+            conn = await init_db(db_path)
+            # Create a legacy action_proposals table lacking dispatch_id, intent_id, expires_at
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS action_proposals (
+                    id TEXT PRIMARY KEY,
+                    node_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    params_json TEXT NOT NULL DEFAULT '{}',
+                    reasoning TEXT NOT NULL,
+                    risk_level TEXT NOT NULL DEFAULT 'MEDIUM',
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    created_by TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+            """)
+            await conn.commit()
+
+            # Run migrations
+            await run_migrations(conn)
+
+            async with conn.execute("PRAGMA table_info(action_proposals)") as cursor:
+                cols = {row["name"] for row in await cursor.fetchall()}
+                assert "dispatch_id" in cols
+                assert "intent_id" in cols
+                assert "expires_at" in cols
+
+            await close_db()
+        finally:
+            await reset_db()
+            shutil.rmtree(tmp, ignore_errors=True)
+

@@ -35,11 +35,48 @@ export interface DiskMount {
 }
 
 export interface StatsPoint {
+  collected_at?: number;
   time: string;
   cpu: number;
   ram: number;
   disk: number;
   disks?: DiskMount[];
+}
+
+export interface AlertRecord {
+  id: string;
+  node_id: string;
+  alert_name: string;
+  severity: 'info' | 'warning' | 'critical';
+  status: 'firing' | 'resolved';
+  message: string;
+  metric_value?: number | null;
+  threshold?: number | null;
+  details?: Record<string, unknown> | null;
+  created_at: number;
+  resolved_at?: number | null;
+  updated_at?: number | null;
+}
+
+export interface MetricBaseline {
+  mean: number;
+  std: number;
+  p75: number;
+  p90: number;
+  p99: number;
+  absolute_warning: number;
+  absolute_critical: number;
+}
+
+export interface NodeBaseline {
+  node_id: string;
+  data_window_hours: number;
+  is_limited: boolean;
+  metrics: {
+    cpu: MetricBaseline;
+    ram: MetricBaseline;
+    disk: MetricBaseline;
+  };
 }
 
 export type Severity = 'ok' | 'warning' | 'critical' | 'offline' | 'info';
@@ -50,7 +87,43 @@ export interface InsightRecord {
   icon: string;
   headline: string;
   detail: string;
+  confidence?: 'none' | 'low' | 'medium' | 'high';
   raw?: Record<string, unknown>;
+}
+
+export interface TypeReadiness {
+  ready: boolean;
+  hours: number;
+  required: number;
+}
+
+export interface PerTypeReadiness {
+  cpu: TypeReadiness;
+  ram: TypeReadiness;
+  disk: TypeReadiness;
+  profile: TypeReadiness;
+}
+
+/** Metadata returned alongside insights from GET /{node_id}/insights */
+export interface InsightsMeta {
+  data_window_hours: number;
+  observation_ready: boolean;
+  profile_confidence: 'none' | 'low' | 'medium' | 'high';
+  next_profile_refresh_at: string | null;
+  profile_generated_at: string | null;
+  per_type_readiness?: PerTypeReadiness;
+}
+
+export interface InsightsResponse {
+  node_id: string;
+  generated_at: string;
+  insights: InsightRecord[];
+  data_window_hours: number;
+  observation_ready: boolean;
+  profile_confidence: 'none' | 'low' | 'medium' | 'high';
+  next_profile_refresh_at: string | null;
+  profile_generated_at: string | null;
+  per_type_readiness?: PerTypeReadiness;
 }
 
 export interface NodeRecord {
@@ -74,5 +147,6 @@ export interface NodeRecord {
   disk_percent?: number;
   uptime_seconds?: number;
   version?: string;
+  worker_version?: string;
   cached_disks_json: string | null;
 }

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/flavio-cbz/Vigile/worker/updater"
 )
 
 // nodeID is set during enrollment and used for enrichment in action logs.
@@ -108,13 +108,25 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 }
 
 func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentResult {
-	// 1. Determine URLs
+	execPath, err := os.Executable()
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("failed to locate executable: %v", err)}
+	}
+
 	binaryURL := wc.masterURL + fmt.Sprintf("/api/nodes/binary/%s/%s/worker", runtime.GOOS, runtime.GOARCH)
 	checksumURL := binaryURL + ".sha256"
 
-	slog.Info("starting self-update", "url", binaryURL)
+	if bUrl, ok := msg.Params["binary_url"].(string); ok && bUrl != "" {
+		if strings.HasPrefix(bUrl, "/") {
+			binaryURL = wc.masterURL + bUrl
+		} else {
+			binaryURL = bUrl
+		}
+		checksumURL = binaryURL + ".sha256"
+	}
 
-	// 2. Setup HTTP Client with ALLOW_INSECURE support
+	slog.Info("starting worker update", "url", binaryURL)
+
 	tr := &http.Transport{}
 	if os.Getenv("ALLOW_INSECURE") == "true" {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
@@ -124,114 +136,50 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 		Timeout:   60 * time.Second,
 	}
 
-	// 3. Download checksum
+	// Fetch checksum
 	req, err := http.NewRequestWithContext(ctx, "GET", checksumURL, nil)
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create checksum request: %v", err)}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to download checksum: %v", err)}
+		return IntentResult{Success: false, Error: fmt.Sprintf("failed to fetch checksum: %v", err)}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return IntentResult{Success: false, Error: fmt.Sprintf("checksum download returned status: %d", resp.StatusCode)}
+		return IntentResult{Success: false, Error: fmt.Sprintf("checksum request failed with status %d", resp.StatusCode)}
 	}
-	checksumBytes, err := io.ReadAll(resp.Body)
+
+	csBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return IntentResult{Success: false, Error: fmt.Sprintf("failed to read checksum: %v", err)}
 	}
-	expectedHash := strings.TrimSpace(strings.Split(string(checksumBytes), " ")[0])
-	if len(expectedHash) != 64 {
-		return IntentResult{Success: false, Error: fmt.Sprintf("invalid checksum format: %q", string(checksumBytes))}
+	expectedHash := strings.TrimSpace(strings.Split(string(csBytes), " ")[0])
+
+	manifest := &updater.ReleaseManifest{
+		ReleaseID:     fmt.Sprintf("release-%s-%s", runtime.GOOS, runtime.GOARCH),
+		WorkerVersion: "latest",
+		OS:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		URL:           binaryURL,
+		SHA256:        expectedHash,
 	}
 
-	// 4. Download new binary to temporary file
-	execPath, err := os.Executable()
+	staged, err := updater.StageRelease(ctx, client, wc.masterURL, manifest)
 	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to locate executable: %v", err)}
-	}
-	// Try /tmp first (writable tmpfs in most Linux setups + Docker).
-	// Fall back to /etc/vigile (ReadWritePaths in systemd unit).
-	var tmpFile *os.File
-	for _, dir := range []string{"/tmp", "/etc/vigile", ""} {
-		tmpFile, err = os.CreateTemp(dir, "vigile-worker-new-*")
-		if err == nil {
-			break
-		}
-	}
-	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create temporary file (tried /tmp, /etc/vigile, and os.TempDir): %v", err)}
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-	}()
-
-	reqBin, err := http.NewRequestWithContext(ctx, "GET", binaryURL, nil)
-	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to create binary request: %v", err)}
-	}
-	resp, err = client.Do(reqBin)
-	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to download binary: %v", err)}
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return IntentResult{Success: false, Error: fmt.Sprintf("binary download returned status: %d", resp.StatusCode)}
+		return IntentResult{Success: false, Error: fmt.Sprintf("staging update failed: %v", err)}
 	}
 
-	hasher := sha256.New()
-	writer := io.MultiWriter(tmpFile, hasher)
-	if _, err := io.Copy(writer, resp.Body); err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to write binary: %v", err)}
-	}
-	tmpFile.Close()
-
-	// 5. Verify checksum
-	actualHash := hex.EncodeToString(hasher.Sum(nil))
-	if actualHash != expectedHash {
-		return IntentResult{Success: false, Error: fmt.Sprintf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)}
+	if err := updater.MarkUpdatePending("current", "latest"); err != nil {
+		slog.Warn("failed to write update pending marker", "error", err)
 	}
 
-	// 6. Back up the current binary (best-effort — read-only fs like Docker
-	//    containers skip gracefully and fall through to the replacement step).
-	backupPath := execPath + ".old"
-	_ = os.Remove(backupPath)
-	backupOK := true
-	if err := os.Rename(execPath, backupPath); err != nil {
-		slog.Warn("backup rename failed (proceeding without backup)", "error", err)
-		backupOK = false
-	}
-
-	// 7. Swap — try atomic rename first, fall back to copy+remove
-	//     (temp file is in /tmp, which may be a different filesystem).
-	replaceErr := os.Rename(tmpPath, execPath)
-	if replaceErr != nil {
-		// Cross-device or other: copy instead
-		var copyErr error
-		var data []byte
-		data, copyErr = os.ReadFile(tmpPath)
-		if copyErr == nil {
-			copyErr = os.WriteFile(execPath, data, 0755)
-		}
-		if copyErr != nil {
-			if backupOK {
-				_ = os.Rename(backupPath, execPath) // rollback only when we have a backup
-			}
-			return IntentResult{Success: false, Error: fmt.Sprintf("failed to replace executable: %v", copyErr)}
-		}
-		_ = os.Remove(tmpPath)
-	} else {
-		if err := os.Chmod(execPath, 0755); err != nil {
-			return IntentResult{Success: false, Error: fmt.Sprintf("failed to set executable permissions: %v", err)}
-		}
+	if err := updater.PromoteStagedRelease(staged.StagedPath, "latest", execPath); err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("failed to promote update binary: %v", err)}
 	}
 
 	slog.Info("self-update succeeded — restart scheduled")
 
-	// 7. Schedule exit after sending result
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -245,7 +193,7 @@ func handleUpdateWorker(ctx context.Context, wc *WorkerConn, msg Intent) IntentR
 		os.Exit(0)
 	}()
 
-	return IntentResult{Success: true, Output: "worker successfully updated, restarting now"}
+	return IntentResult{Success: true, Output: "worker successfully updated and promoted, restarting now"}
 }
 
 func handleTokenRotation(ctx context.Context, wc *WorkerConn, msg Intent) IntentResult {

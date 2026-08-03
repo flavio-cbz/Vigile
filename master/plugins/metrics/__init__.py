@@ -22,7 +22,7 @@ import logging
 import time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from master.core.plugin_base import PluginBase, hook, route
 
@@ -46,6 +46,45 @@ class MetricsSnapshot(BaseModel):
     All fields have safe defaults (0 / empty) so partial reports
     are still accepted but zero-values flag missing data.
     """
+    model_config = ConfigDict(extra="ignore")
+
+    @field_validator("cpu_percent", "mem_percent", "disk_percent", mode="before")
+    @classmethod
+    def normalize_percentage(cls, v: Any) -> float | None:
+        """Convert None to 0.0 for required percentage fields; let Pydantic
+        handle type coercion and ge/le constraint validation for all other values."""
+        if v is None:
+            return 0.0
+        return v
+
+    @field_validator(
+        "cpu_load_1m", "cpu_load_5m", "cpu_load_15m", "uptime_seconds",
+        "temp_celsius", "psi_cpu_avg10", "psi_mem_avg10", "psi_io_avg10",
+        mode="before"
+    )
+    @classmethod
+    def normalize_non_negative_float(cls, v: Any) -> float | None:
+        """Pass None through for optional fields; let Pydantic validate range."""
+        if v is None:
+            return None
+        return v
+
+    @field_validator(
+        "mem_total_bytes", "mem_used_bytes", "swap_total_bytes", "swap_used_bytes",
+        "disk_total_bytes", "disk_used_bytes", "net_bytes_recv", "net_bytes_sent",
+        "net_packets_recv", "net_packets_sent", "net_errors_in", "net_errors_out",
+        "net_drops_in", "net_drops_out", "disk_reads", "disk_writes",
+        "disk_read_bytes", "disk_write_bytes", "file_handles_used",
+        "file_handles_max", "entropy_avail", "context_switches",
+        "cpu_throttled_count",
+        mode="before"
+    )
+    @classmethod
+    def normalize_non_negative_int(cls, v: Any) -> int | None:
+        """Pass None through for optional fields; let Pydantic validate range."""
+        if v is None:
+            return None
+        return v
 
     # CPU
     cpu_percent: float = Field(
@@ -346,7 +385,7 @@ def _normalize_status_report(raw_report: dict) -> dict | None:
         )
         return snapshot.model_dump_flat()
     except Exception as exc:
-        logger.warning("Invalid status report: %s", exc)
+        logger.warning("Invalid status report validation error: %s", exc, exc_info=True)
         return None
 
 

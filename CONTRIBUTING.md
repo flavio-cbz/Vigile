@@ -62,7 +62,6 @@ Les scopes identifient le module touché. Utilisez un scope quand c'est pertinen
 | `logging` | Système de logging |
 | `security` | Sécurité / auth / crypto |
 | `alerts` | Moteur d'alertes |
-| `automations` | Moteur d'automatisation |
 | `insights` | Analyse d'anomalies |
 
 Plusieurs scopes sont autorisés avec `+` : `feat(master+worker): ...`

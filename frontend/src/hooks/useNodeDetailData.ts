@@ -5,6 +5,7 @@ import { t } from '../i18n';
 import type {
   ContainerRecord,
   InsightRecord,
+  InsightsMeta,
   NodeRecord,
   ServiceRecord,
   StatsPoint,
@@ -48,10 +49,14 @@ export interface NodeDetailData {
   setRestartingService: (v: string | null) => void;
   restartingContainer: string | null;
   setRestartingContainer: (v: string | null) => void;
+  insightsMeta: InsightsMeta | null;
+  nodeAlerts: AlertRecord[];
+  nodeBaseline: NodeBaseline | null;
+  fetchNodeBaseline: () => Promise<void>;
 }
 
 export function useNodeDetailData(nodeId: string | undefined, activePlugins: string[] | null): NodeDetailData {
-  const { insights, loading: loadingInsights, refresh: refreshInsights } = useNodeInsights(nodeId || null);
+  const { insights, loading: loadingInsights, refresh: refreshInsights, meta: insightsMeta } = useNodeInsights(nodeId || null);
 
   const [node, setNode] = useState<NodeRecord | null>(null);
   const [loadingNode, setLoadingNode] = useState(true);
@@ -84,14 +89,51 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     }
   }, [nodeId]);
 
-  const fetchStatsHistory = useCallback(async (skipToast = false) => {
+  const [nodeAlerts, setNodeAlerts] = useState<AlertRecord[]>([]);
+  const [nodeBaseline, setNodeBaseline] = useState<NodeBaseline | null>(null);
+
+  const fetchNodeAlerts = useCallback(async (startSec?: number, endSec?: number) => {
+    if (!nodeId) return;
+    try {
+      let url = `/api/nodes/${nodeId}/alerts`;
+      const params = new URLSearchParams();
+      if (startSec) params.append('start', startSec.toString());
+      if (endSec) params.append('end', endSec.toString());
+      if (params.toString()) url += `?${params.toString()}`;
+
+      const res = await api<{ alerts: AlertRecord[] }>(url, { skipToast: true });
+      if (res && res.alerts) setNodeAlerts(res.alerts);
+    } catch (err) {
+      console.error('Failed to fetch node alerts:', err);
+    }
+  }, [nodeId]);
+
+  const fetchNodeBaseline = useCallback(async () => {
+    if (!nodeId) return;
+    try {
+      const res = await api<NodeBaseline>(`/api/nodes/${nodeId}/baseline`, { skipToast: true });
+      if (res && res.metrics) setNodeBaseline(res);
+    } catch (err) {
+      console.error('Failed to fetch node baseline:', err);
+    }
+  }, [nodeId]);
+
+  const fetchStatsHistory = useCallback(async (skipToast = false, startSec?: number, endSec?: number) => {
     if (!nodeId) return;
     setLoadingStats(true);
     try {
-      const data = await api<{ snapshots: StatsSnapshot[] }>(`/api/nodes/${nodeId}/stats?limit=60`, { skipToast });
+      let query = `?limit=5000`;
+      if (startSec && endSec) {
+        query += `&start=${startSec}&end=${endSec}`;
+      }
+      const data = await api<{ snapshots: StatsSnapshot[] }>(`/api/nodes/${nodeId}/stats${query}`, { skipToast });
       if (data && data.snapshots) {
+        const isLongRange = startSec && endSec && (endSec - startSec) > 86400;
         const ordered = [...data.snapshots].reverse().map((snap) => ({
-          time: new Date(snap.collected_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          collected_at: snap.collected_at,
+          time: isLongRange
+            ? new Date(snap.collected_at * 1000).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+            : new Date(snap.collected_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           cpu: snap.cpu_percent,
           ram: snap.mem_percent,
           disk: snap.disk_percent,
@@ -99,12 +141,13 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
         }));
         setStatsHistory(ordered);
       }
+      void fetchNodeAlerts(startSec, endSec);
     } catch (err) {
       console.error('Failed to fetch stats history:', err);
     } finally {
       setLoadingStats(false);
     }
-  }, [nodeId]);
+  }, [nodeId, fetchNodeAlerts]);
 
   const fetchServicesList = useCallback(async () => {
     if (!nodeId) return;
@@ -218,5 +261,9 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     setRestartingService,
     restartingContainer,
     setRestartingContainer,
+    insightsMeta,
+    nodeAlerts,
+    nodeBaseline,
+    fetchNodeBaseline,
   };
 }

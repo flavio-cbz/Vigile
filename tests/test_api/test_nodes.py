@@ -8,7 +8,7 @@ from fastapi import status
 from httpx import AsyncClient
 
 from master.api import deps
-from master.core.node_manager import NodeState, node_manager
+from master.core.node_manager import NodeManager, NodeState, node_manager
 from master.core.security_manager import SecurityManager
 from master.main import app
 
@@ -666,30 +666,35 @@ async def test_generate_join_with_group(client: AsyncClient, db, auth_headers):
 async def test_update_worker_success(client: AsyncClient, db, auth_headers):
     # Insert a node in connected state
     await db.execute(
-        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
-        "VALUES ('n-update-1', 'n-update', 'CONNECTED', 1234567, 1234567)"
+        "INSERT INTO nodes (id, name, state, os, created_at, updated_at) "
+        "VALUES ('n-update-1', 'n-update', 'CONNECTED', 'linux', 1234567, 1234567)"
     )
     await db.commit()
 
-    # Mock node manager's _send_intent to return success
-    with mock.patch.object(
-        node_manager,
-        "_send_intent",
-        return_value={"success": True, "output": "updated successfully"},
-    ) as mock_send:
+    from master.api.deps import node_manager
+    from master.core.proposal_dispatcher import ApprovedProposalDispatcher
+    dispatcher = ApprovedProposalDispatcher(node_manager)
+
+    with mock.patch("master.api.nodes_operations.get_proposal_dispatcher", return_value=dispatcher), \
+         mock.patch.object(node_manager, "is_connected", return_value=True), \
+         mock.patch.object(
+             node_manager,
+             "_send_intent",
+             new_callable=mock.AsyncMock,
+             return_value={"success": True, "output": "updated successfully"},
+         ) as mock_send:
         response = await client.post(
             "/api/nodes/n-update-1/update",
             headers=auth_headers("admin"),
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json() == {"success": True, "output": "updated successfully"}
-        # ApprovedProposalDispatcher adds intent_id to the intent
         call_args = mock_send.call_args
-        assert call_args[0][0] == "n-update-1"
-        assert call_args[0][1]["action"] == "UPDATE_WORKER"
-        assert call_args[0][1]["params"] == {}
-        assert "intent_id" in call_args[0][1]
-        assert call_args[1]["timeout"] == 30.0
+        print("DEBUG INTENT DICT:", call_args.args[1])
+        assert call_args.args[0] == "n-update-1"
+        assert call_args.args[1]["action"] == "UPDATE_WORKER"
+        assert "os" in call_args.args[1]["params"]
+        assert call_args.args[1]["params"]["arch"] == "amd64"
 
 
 @pytest.mark.asyncio

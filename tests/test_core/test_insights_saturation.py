@@ -142,6 +142,43 @@ async def test_disk_insight_ignores_outlier_spike():
         assert res["raw"]["growth_gb_per_day"] < 5.0
 
 @pytest.mark.asyncio
+async def test_disk_insight_mass_deletion_keeps_growth_rate():
+    """A mass deletion (level shift) must not zero the growth estimate:
+    the underlying growth rate must still be reported."""
+    async with aiosqlite.connect(":memory:") as db:
+        await db.execute("""
+            CREATE TABLE metrics_snapshots (
+                node_id TEXT,
+                collected_at REAL,
+                disk_used_bytes INTEGER,
+                disk_total_bytes INTEGER,
+                disk_percent REAL
+            )
+        """)
+
+        now = time.time()
+        total = 500 * (1024**3)
+        used = 400 * (1024**3)
+        growth = 2.0 / 24.0 * (1024**3)  # ~2 GB/day
+        # 24 snapshots over 24h, steady +2 GB/day growth, -50 GB at midpoint.
+        for i in range(24):
+            t = now - 86400 + i * 3600
+            if i == 12:
+                used -= 50 * (1024**3)
+            else:
+                used += int(growth)
+            await db.execute("INSERT INTO metrics_snapshots VALUES (?, ?, ?, ?, ?)", ("n1", t, int(used), total, 70.0))
+        await db.commit()
+
+        im = InsightsManager()
+        latest = {"disk_total_bytes": total, "disk_used_bytes": int(used), "disk_percent": 70.0}
+        res = await im._calculate_disk_insight("n1", db, latest)
+
+        assert res is not None
+        # Real growth is ~2 GB/day; the -50 GB step must not zero it out.
+        assert 1.0 < res["raw"]["growth_gb_per_day"] < 5.0
+
+@pytest.mark.asyncio
 async def test_disk_insight_without_filter_would_be_skewed():
     """Sanity: the same data without the IQR filter yields a high slope (regression on raw points)."""
     async with aiosqlite.connect(":memory:") as db:
@@ -208,7 +245,7 @@ async def test_stale_profile_triggers_reprofile_while_serving_insights():
         total = 100 * (1024**3)
         used = 20 * (1024**3)
         for i in range(4):
-            await db.execute("INSERT INTO metrics_snapshots VALUES (?, ?, ?, ?, ?)", (node_id, now - (7 - i) * 7200, used, total, 20.0))
+            await db.execute("INSERT INTO metrics_snapshots VALUES (?, ?, ?, ?, ?)", (node_id, now - (30 - i * 10) * 3600, used, total, 20.0))
         await db.commit()
 
         node = {
@@ -256,7 +293,7 @@ async def test_fresh_profile_does_not_trigger_reprofile():
             "hostname": "fresh-host",
             "online": True,
             "insight_profile": '{"node_id": "n1", "known_heavy_processes": [], "baseline_ram_percent": 70.0, "context_label": "Serveur test"}',
-            "insight_profile_generated_at": now - 86400,
+            "insight_profile_generated_at": now - 3600,
             "cached_services_json": "[]",
             "cached_containers_json": "[]",
         }
@@ -309,7 +346,6 @@ async def test_analyze_anomaly_trims_services_and_containers_in_prompt():
     async with aiosqlite.connect(":memory:") as db:
         await db.execute("CREATE TABLE metrics_snapshots (node_id TEXT, collected_at REAL)")
         await db.execute("CREATE TABLE audit_log (action TEXT, details_json TEXT, created_at REAL, node_id TEXT)")
-        await db.execute("CREATE TABLE automation_logs (rule_id TEXT, status TEXT, trigger_data_json TEXT, triggered_at REAL, node_id TEXT)")
         await db.commit()
 
         services = [

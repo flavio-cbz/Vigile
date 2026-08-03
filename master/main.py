@@ -35,7 +35,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from master.api.admin import router as admin_router
 from master.api.audit import router as audit_router
 from master.api.auth import router as auth_router
-from master.api.automations import router as automations_router
 from master.api.chat import router as chat_router
 from master.api.demo import router as demo_router
 from master.api.investigations import router as investigations_router
@@ -50,7 +49,6 @@ from master.logging_config import setup_logging
 from master.logging_config import get_logger
 from master.core.alert_engine import alert_engine
 from master.core.investigation_manager import investigation_manager
-from master.core.automation_engine import automation_engine
 from master.core.enums import NodeState
 from master.core.node_manager import node_manager
 from master.core.plugin_engine import PluginEngine, PageRegistry
@@ -131,7 +129,6 @@ app.include_router(audit_router)
 app.include_router(admin_router)
 app.include_router(demo_router)
 app.include_router(worker_binary_router)
-app.include_router(automations_router)
 app.include_router(investigations_router)
 app.include_router(plugins_router)
 

@@ -6,11 +6,21 @@ import { MetricPill } from '../primitives/MetricPill';
 import { TimeAgo } from '../primitives/TimeAgo';
 import { Badge } from '../primitives/Badge';
 import { useLocale } from '../../i18n';
-import type { NodeRecord } from './types';
+import type { NodeRecord, PerTypeReadiness } from './types';
 
-export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
+export const NodeDetailHeader: React.FC<{ node: NodeRecord; observationReady?: boolean; perTypeReadiness?: PerTypeReadiness }> = ({ node, observationReady = true, perTypeReadiness }) => {
   const { t } = useLocale();
   const navigate = useNavigate();
+
+  let isLearning = !observationReady;
+  let learningPercent = 0;
+
+  if (perTypeReadiness) {
+    const { cpu, ram, disk, profile } = perTypeReadiness;
+    const readyCount = [cpu, ram, disk, profile].filter((t) => t.ready).length;
+    isLearning = readyCount < 4;
+    learningPercent = Math.round((readyCount / 4) * 100);
+  }
 
   return (
     <>
@@ -34,6 +44,11 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
                 {node.name}
               </h1>
               <Badge severity={node.online ? 'ok' : 'offline'} className="text-[8px] px-1 py-0" />
+              {isLearning && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[8px] font-mono border border-amber-500/20 animate-pulse">
+                  🔄 Apprentissage {perTypeReadiness ? `${learningPercent}%` : ''}
+                </span>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2">
@@ -61,10 +76,10 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord }> = ({ node }) => {
               </div>
 
               {/* Version Chip */}
-              {node.version && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-accent-muted/25 to-accent-muted/10 border border-l-2 border-l-accent/60 border-accent/20 text-accent text-[11px] font-mono font-medium whitespace-nowrap shadow-2xs hover:bg-accent-muted/35 hover:border-accent/40 hover:shadow-[0_2px_8px_rgba(245,158,11,0.10)] transition-all duration-200">
+              {(node.worker_version || node.version) && (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-accent-muted/25 to-accent-muted/10 border border-l-2 border-l-accent/60 border-accent/20 text-accent text-[11px] font-mono font-medium whitespace-nowrap shadow-2xs hover:bg-accent-muted/35 hover:border-accent/40 hover:shadow-[0_2px_8px_rgba(245,158,11,0.10)] transition-all duration-200" title="Version déclarée par le binaire Go du Worker">
                   <Tag className="w-3.5 h-3.5 shrink-0" />
-                  <span>v{node.version}</span>
+                  <span>Worker v{node.worker_version || node.version}</span>
                 </div>
               )}
             </div>

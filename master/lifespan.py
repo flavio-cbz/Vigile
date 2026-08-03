@@ -18,7 +18,6 @@ from fastapi import FastAPI
 
 from master.config import settings
 from master.core.alert_engine import alert_engine
-from master.core.automation_engine import automation_engine
 from master.core.enums import NodeState
 from master.core.investigation_manager import investigation_manager
 from master.core.node_manager import node_manager
@@ -232,17 +231,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     node_manager.register_state_change_callback(_on_node_connected)
     logger.info("Disk scan background trigger registered for CONNECTED state changes.")
 
-    # 7. Automation Engine
-    await automation_engine.initialize(db)
-    node_manager.register_state_change_callback(automation_engine.evaluate_state_trigger)
-    engine.register(
-        "on_status_report",
-        automation_engine.evaluate_metric_trigger,
-        plugin_name="automation_engine",
-    )
-    logger.info("Automation Engine initialized and state-change callback registered.")
+    # 6c. Insights — re-profile when node reconnects after being LOST for >4h.
+    async def _on_node_reconnected(node_id: str, new_state: str, db: Any) -> None:
+        """Re-profile when a node reconnects after being LOST for >4 hours."""
+        if new_state != NodeState.CONNECTED.value:
+            return
+        try:
+            async with db.execute(
+                "SELECT last_heartbeat FROM nodes WHERE id = ?", (node_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row and row[0] and (time.time() - row[0]) > 14400:  # 4h
+                logger.info(
+                    "Node %s reconnected after >4h LOST. Triggering re-profile.", node_id
+                )
+                insights_manager.invalidate_cache(node_id)
+                asyncio.create_task(
+                    insights_manager.generate_profile(node_id, db, node_manager, force=True)
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to check LOST duration for re-profile on node %s: %s",
+                node_id, exc,
+            )
 
-    # 7b. Alert Engine (évaluation des seuils intégrés)
+    node_manager.register_state_change_callback(_on_node_reconnected)
+    logger.info("Insights re-profile callback registered for LOST→CONNECTED transitions.")
+
+    # 7. Alert Engine (évaluation des seuils intégrés)
     await alert_engine.initialize(db)
     node_manager.register_state_change_callback(alert_engine.evaluate_node_state)
     engine.register(
@@ -254,8 +270,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 7c. Investigation Manager (alerte → Phase 3 automatique)
     alert_engine.on_alert_fired_callback = investigation_manager.on_alert_fired
-    # Wire alert engine → automation engine for alert-based triggers
-    alert_engine.on_automation_alert_callback = automation_engine.evaluate_alert_callback
     logger.info("Investigation Manager initialized and wired to AlertEngine.")
 
     app.state.startup_time = time.time()
@@ -263,16 +277,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.trusted_proxies = settings.trusted_proxies
     rate_limiter.trusted_proxies = settings.trusted_proxies
 
-    # 7. Start Rate Limiter Cleanup Task
+    # 8. Start Rate Limiter Cleanup Task
     cleanup_task = rate_limiter.start_cleanup_task(app)
 
-    # 8. Start Worker Auto-Update Task
+    # 9. Start Worker Auto-Update Task
     auto_update_task = asyncio.create_task(auto_update_workers_task(db, node_manager, settings))
 
-    # 9. Start Proposal Auto-Expiry Task
+    # 10. Start Proposal Auto-Expiry Task
     proposal_expiry = asyncio.create_task(proposal_expiry_task(db, node_manager, settings))
 
-    # 10. Start Alert Cleanup Task (toutes les heures)
+    # 11. Start Alert Cleanup Task (toutes les heures)
     async def alert_cleanup_loop() -> None:
         while True:
             await asyncio.sleep(3600)
@@ -283,7 +297,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     cleanup_alerts = asyncio.create_task(alert_cleanup_loop())
 
-    # 11. Outbox dispatch loop (toutes les 15 s) — at-least-once delivery
+    # 12. Outbox dispatch loop (toutes les 15 s) — at-least-once delivery
     async def outbox_dispatch_loop() -> None:
         while True:
             await asyncio.sleep(15)
@@ -294,7 +308,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     outbox_dispatch = asyncio.create_task(outbox_dispatch_loop())
 
-    # 12. Outbox cleanup loop (toutes les heures) — purge processed entries
+    # 13. Outbox cleanup loop (toutes les heures) — purge processed entries
     #     older than 7 days so the outbox table stays bounded.
     async def outbox_cleanup_loop() -> None:
         while True:

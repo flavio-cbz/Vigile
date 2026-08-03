@@ -241,6 +241,12 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 	statusTicker := time.NewTicker(statusReportInterval)
 	defer statusTicker.Stop()
 
+	// Send initial status report immediately on connection
+	initialReport := buildStatusReport(wc.ctx)
+	if err := wc.sendJSON(ctx, initialReport); err != nil {
+		slog.Warn("initial status report error", "error", err)
+	}
+
 	// Dedicated goroutine for reading WebSocket messages.
 	// Uses a 90s read deadline as safety net if Master goes silent.
 	type wsMsg struct {

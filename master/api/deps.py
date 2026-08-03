@@ -26,7 +26,7 @@ from master.core.event_bus import get_event_bus
 from master.core.insights import InsightsManager
 from master.core.llm_client import LLMClient
 from master.core.node_manager import NodeManager, node_manager
-from master.core.plugin_manager import plugin_manager
+import master.core.plugin_manager as pm_mod
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.security_manager import (
     ROLES_HIERARCHY,
@@ -242,7 +242,7 @@ def get_insights_manager() -> Any:
                 llm_client = get_llm_client()
             except RuntimeError:
                 pass
-            _insights_manager = InsightsManager(llm_client=llm_client, plugin_manager=plugin_manager)
+            _insights_manager = InsightsManager(llm_client=llm_client, plugin_manager=pm_mod.plugin_manager)
         return _insights_manager
 
 

@@ -19,6 +19,8 @@ from master.api.nodes_router import router
 from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
 from master.core.node_manager import NodeManager
 
+import time
+
 logger = logging.getLogger(__name__)
 
 
@@ -161,7 +163,15 @@ async def get_node_insights(
             "node_id": node_id,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "insights": insights,
+            "data_window_hours": 72.0,
+            "observation_ready": True,
             "profile_confidence": "high",
+            "next_profile_refresh_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 12 * 3600)
+            ),
+            "profile_generated_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 12 * 3600)
+            ),
         }
 
     # Verify node exists
@@ -207,6 +217,7 @@ async def regenerate_node_profile(
 
     try:
         profile = await im.generate_profile(node_id, db, nm, force=True, locale=locale)
+        im.invalidate_cache(node_id)
         return profile
     except Exception as e:
         raise HTTPException(

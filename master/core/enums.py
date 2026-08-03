@@ -137,6 +137,8 @@ class HookName(StrEnum):
     ON_PLUGIN_LOAD = "on_plugin_load"
     ON_PLUGIN_UNLOAD = "on_plugin_unload"
     ON_SHUTDOWN = "on_shutdown"
+    NORMALIZE_STATUS_REPORT = "normalize_status_report"
+    GET_SUPPORTED_ACTIONS = "get_supported_actions"
 
 
 # ---------------------------------------------------------------------------

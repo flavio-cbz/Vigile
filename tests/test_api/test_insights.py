@@ -105,6 +105,10 @@ async def test_get_node_insights_real(client: AsyncClient, db, auth_headers):
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["node_id"] == node_id
+    assert "data_window_hours" in data
+    assert "observation_ready" in data
+    assert "profile_confidence" in data
+    assert "next_profile_refresh_at" in data
     assert len(data["insights"]) == 3  # Disk, CPU, RAM
     assert data["insights"][0]["type"] == "disk"
     assert data["insights"][0]["headline"] == "Disque stable"

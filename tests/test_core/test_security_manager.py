@@ -353,3 +353,47 @@ def test_load_master_key_warns_on_bad_permissions(temp_dir, caplog):
     raw2 = key2.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
     assert raw1 == raw2
     assert any("insecure permissions" in r.message.lower() or "600" in r.message for r in caplog.records)
+
+
+def test_sign_policy_bundle_and_execution_grant(security: SecurityManager):
+    policy_payload = {
+        "policy_id": "pol-100",
+        "node_id": "node-100",
+        "master_key_id": "key-1",
+        "policy_epoch": 1,
+        "policy_version": 1,
+        "issued_at": 1000.0,
+        "expires_at": 2000.0,
+        "rules": [
+            {
+                "rule_id": "r1",
+                "plugin_id": "nginx",
+                "action": "RELOAD_SERVICE",
+                "target": {"kind": "systemd_service", "id": "nginx.service"},
+                "requires_human_approval": True,
+            }
+        ],
+    }
+
+    sig = security.sign_policy_bundle(policy_payload)
+    assert sig is not None
+    assert isinstance(sig, str)
+    assert len(sig) > 0
+
+    grant_payload = {
+        "request_id": "req-1",
+        "proposal_id": "prop-1",
+        "policy_id": "pol-100",
+        "policy_version": 1,
+        "action": "RELOAD_SERVICE",
+        "target": {"kind": "systemd_service", "id": "nginx.service"},
+        "approved_by": "admin",
+        "approved_at": 1000.0,
+        "expires_at": 1300.0,
+    }
+
+    grant_sig = security.sign_execution_grant(grant_payload)
+    assert grant_sig is not None
+    assert isinstance(grant_sig, str)
+    assert len(grant_sig) > 0
+

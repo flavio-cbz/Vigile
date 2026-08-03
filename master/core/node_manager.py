@@ -156,13 +156,16 @@ class NodeManager:
         self._default_intent_max_age: float = 300.0
         self._monitor_task: asyncio.Task | None = None
         self._cache_task: asyncio.Task | None = None
-        # Callbacks invoked after every successful state transition (e.g. automation engine)
+        # Callbacks invoked after every successful state transition
         self._state_change_callbacks: list = []
         # In-flight disk scan tracking (prevents concurrent scans per node)
         self._disk_scan_inflight: set[str] = set()
         # Per-node last disk-scan trigger time (for 12h periodic scheduling)
         self._disk_scan_last_run: dict[str, float] = {}
         self._insights_manager: object | None = None
+        # CPU drift detection: per-node epoch of last drift-triggered re-profile
+        self._last_drift_trigger: dict[str, float] = {}
+        self._DRIFT_COOLDOWN: float = 3600.0  # 1 hour cooldown
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -366,8 +369,8 @@ class NodeManager:
                     generated_at = row["insight_profile_generated_at"] or 0.0
                     now = time.time()
 
-                    # 7-day expiration check
-                    expired_time = (now - generated_at) > 7 * 86400
+                    # 24h hard expiration check
+                    expired_time = (now - generated_at) > 86400
 
                     # New containers check (with 24h cooldown to avoid LLM spam)
                     new_apps_detected = False
@@ -388,14 +391,28 @@ class NodeManager:
                         ]
                         new_apps_detected = any(fc not in known_conts for fc in fresh_running)
 
-                    if expired_time or new_apps_detected:
+                    # CPU drift detection: compare avg of last 10 snapshots vs previous 10
+                    cpu_drift_detected = False
+                    last_drift = self._last_drift_trigger.get(nid, 0)
+                    if (now - last_drift) > self._DRIFT_COOLDOWN:
+                        cpu_drift_detected = await self._check_cpu_drift(nid, db)
+                        if cpu_drift_detected:
+                            self._last_drift_trigger[nid] = now
+                            logger.info(
+                                "CPU drift >30 points detected for node %s. Triggering re-profile.",
+                                nid,
+                            )
+
+                    if expired_time or new_apps_detected or cpu_drift_detected:
                         logger.info(
-                            "Profile expiration / new apps detected for node %s (expired=%s, new_apps=%s). Regenerating profile...",
+                            "Profile refresh for node %s (expired=%s, new_apps=%s, cpu_drift=%s). Regenerating...",
                             nid,
                             expired_time,
                             new_apps_detected,
+                            cpu_drift_detected,
                         )
                         if self._insights_manager:
+                            self._insights_manager.invalidate_cache(nid)
                             asyncio.create_task(
                                 self._insights_manager.generate_profile(nid, db, self, force=True)
                             )
@@ -403,6 +420,28 @@ class NodeManager:
                 logger.warning(
                     "Cache updater: failed to check profile expiration for node %s: %s", nid, ex
                 )
+
+    async def _check_cpu_drift(self, node_id: str, db: aiosqlite.Connection) -> bool:
+        """Compare avg CPU of last 10 snapshots (~50 min) vs previous 10 (~50-100 min).
+
+        Returns True if the absolute delta exceeds 30 percentage points,
+        indicating a significant workload change that warrants re-profiling.
+        """
+        try:
+            async with db.execute(
+                "SELECT cpu_percent FROM metrics_snapshots "
+                "WHERE node_id = ? ORDER BY collected_at DESC LIMIT 20",
+                (node_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            if len(rows) < 20:
+                return False
+            recent_avg = sum(r[0] for r in rows[:10]) / 10
+            previous_avg = sum(r[0] for r in rows[10:]) / 10
+            return abs(recent_avg - previous_avg) > 30.0
+        except Exception as ex:
+            logger.debug("CPU drift check failed for node %s: %s", node_id, ex)
+            return False
 
     # -----------------------------------------------------------------------
     # Node creation (called when Admin generates a join token)
@@ -518,7 +557,7 @@ class NodeManager:
         except Exception:
             logger.exception("Failed to publish node.state event")
 
-        # Notify registered callbacks (e.g. automation engine) without blocking
+        # Notify registered callbacks without blocking
         for cb in self._state_change_callbacks:
             asyncio.create_task(cb(node_id, new_state, db))
 

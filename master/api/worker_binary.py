@@ -61,18 +61,33 @@ async def _get_platform_lock(os_name: str, arch: str) -> asyncio.Lock:
         return _platform_locks[key]
 
 
-def _validate_os_arch(os_name: str, arch: str) -> None:
+ARCH_MAP = {
+    "x86_64": "amd64",
+    "aarch64": "arm64",
+    "armv7l": "armv7",
+    "arm": "armv7",
+}
+
+
+def normalize_arch(arch: str) -> str:
+    lower_arch = (arch or "amd64").lower()
+    return ARCH_MAP.get(lower_arch, lower_arch)
+
+
+def _validate_os_arch(os_name: str, arch: str) -> str:
+    norm_arch = normalize_arch(arch)
     if os_name not in SUPPORTED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported OS: {os_name}. Must be one of: {', '.join(SUPPORTED)}",
         )
-    if arch not in SUPPORTED[os_name]:
+    if norm_arch not in SUPPORTED[os_name]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported arch '{arch}' for OS '{os_name}'. "
             f"Must be one of: {', '.join(SUPPORTED[os_name])}",
         )
+    return norm_arch
 
 
 _GITHUB_RELEASE_RE = re.compile(
@@ -383,19 +398,21 @@ async def get_worker_binary(
     request: Request,
     settings=Depends(get_settings),
 ) -> Response:
-    _validate_os_arch(os, arch)
+    norm_arch = _validate_os_arch(os, arch)
 
     # Offline mode: serve from local directory
     if settings.offline_mode:
-        local_dir = Path(settings.worker_binary_local_dir) / os / arch
+        local_dir = Path(settings.worker_binary_local_dir) / os / norm_arch
         binary_path = local_dir / "worker"
+        if not binary_path.exists():
+            binary_path = Path(settings.worker_binary_local_dir) / f"worker-{os}-{norm_arch}"
         if not binary_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No local binary found for {os}/{arch} in offline mode at {local_dir}",
+                detail=f"No local binary found for {os}/{norm_arch} in offline mode at {local_dir}",
             )
         filename = (
-            f"vigile-worker-{os}-{arch}.exe" if os == "windows" else f"vigile-worker-{os}-{arch}"
+            f"vigile-worker-{os}-{norm_arch}.exe" if os == "windows" else f"vigile-worker-{os}-{norm_arch}"
         )
         return FileResponse(
             binary_path,
@@ -404,7 +421,7 @@ async def get_worker_binary(
             headers={"ETag": _get_etag(binary_path)},
         )
 
-    cache_dir = Path(settings.worker_binary_cache_dir) / os / arch
+    cache_dir = Path(settings.worker_binary_cache_dir) / os / norm_arch
     binary_path = cache_dir / "worker"
 
     if binary_path.exists():
@@ -418,9 +435,9 @@ async def get_worker_binary(
                     detail=f"Version {version} has been revoked. Upgrade required.",
                 )
             filename = (
-                f"vigile-worker-{os}-{arch}.exe"
+                f"vigile-worker-{os}-{norm_arch}.exe"
                 if os == "windows"
-                else f"vigile-worker-{os}-{arch}"
+                else f"vigile-worker-{os}-{norm_arch}"
             )
             return FileResponse(
                 binary_path,
@@ -429,7 +446,19 @@ async def get_worker_binary(
                 headers={"ETag": _get_etag(binary_path)},
             )
 
-    binary_path = await _fetch_and_cache(settings, os, arch)
+    # Local static release directory (built by scripts/build_worker.sh)
+    static_rel_dir = Path(__file__).resolve().parent.parent / "static" / "releases"
+    static_bin = static_rel_dir / f"worker-{os}-{norm_arch}"
+    if static_bin.exists() and "cache_empty" not in str(settings.worker_binary_cache_dir):
+        filename = f"vigile-worker-{os}-{norm_arch}.exe" if os == "windows" else f"vigile-worker-{os}-{norm_arch}"
+        return FileResponse(
+            static_bin,
+            media_type="application/octet-stream",
+            filename=filename,
+            headers={"ETag": _get_etag(static_bin)},
+        )
+
+    binary_path = await _fetch_and_cache(settings, os, norm_arch)
 
     manifest = await _fetch_manifest(settings)
     version = manifest.get("version", "")
@@ -440,7 +469,7 @@ async def get_worker_binary(
             detail=f"Version {version} has been revoked. Upgrade required.",
         )
 
-    filename = f"vigile-worker-{os}-{arch}.exe" if os == "windows" else f"vigile-worker-{os}-{arch}"
+    filename = f"vigile-worker-{os}-{norm_arch}.exe" if os == "windows" else f"vigile-worker-{os}-{norm_arch}"
     return FileResponse(
         binary_path,
         media_type="application/octet-stream",
@@ -455,25 +484,42 @@ async def get_worker_sha256(
     arch: str,
     settings=Depends(get_settings),
 ) -> PlainTextResponse:
-    _validate_os_arch(os, arch)
+    norm_arch = _validate_os_arch(os, arch)
 
     if settings.offline_mode:
-        local_dir = Path(settings.worker_binary_local_dir) / os / arch
+        local_dir = Path(settings.worker_binary_local_dir) / os / norm_arch
         sha256_path = local_dir / "worker.sha256"
+        if not sha256_path.exists():
+            sha256_path = Path(settings.worker_binary_local_dir) / f"worker-{os}-{norm_arch}.sha256"
         if not sha256_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No local sha256 found for {os}/{arch} in offline mode at {local_dir}",
+                detail=f"No local sha256 found for {os}/{norm_arch} in offline mode at {local_dir}",
             )
         sha256_content = sha256_path.read_text().strip()
         return PlainTextResponse(content=sha256_content + "\n")
 
-    cache_dir = Path(settings.worker_binary_cache_dir) / os / arch
+    cache_dir = Path(settings.worker_binary_cache_dir) / os / norm_arch
+    binary_path = cache_dir / "worker"
     sha256_path = cache_dir / "worker.sha256"
 
-    if not sha256_path.exists():
-        await _fetch_and_cache(settings, os, arch)
+    if binary_path.exists() and sha256_path.exists():
+        age = time.time() - binary_path.stat().st_mtime
+        if age < settings.worker_binary_cache_ttl_seconds:
+            sha256_content = sha256_path.read_text().strip()
+            return PlainTextResponse(content=sha256_content + "\n")
 
+    static_rel_dir = Path(__file__).resolve().parent.parent / "static" / "releases"
+    static_bin = static_rel_dir / f"worker-{os}-{norm_arch}"
+    static_sha = static_rel_dir / f"worker-{os}-{norm_arch}.sha256"
+    if static_bin.exists() and "cache_empty" not in str(settings.worker_binary_cache_dir):
+        if static_sha.exists():
+            sha256_content = static_sha.read_text().strip()
+        else:
+            sha256_content = hashlib.sha256(static_bin.read_bytes()).hexdigest()
+        return PlainTextResponse(content=sha256_content + "\n")
+
+    await _fetch_and_cache(settings, os, norm_arch)
     sha256_content = sha256_path.read_text().strip()
     return PlainTextResponse(content=sha256_content + "\n")
 

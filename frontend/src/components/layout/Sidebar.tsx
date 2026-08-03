@@ -8,7 +8,7 @@ import { useNodeStore } from '../../store/nodeStore';
 import {
   LayoutDashboard, CheckSquare, Grid, X, ChevronsLeft, ChevronsRight,
   MessageSquareCode, Server, Settings as SettingsIcon, ChevronDown,
-  ChevronRight, Zap, Activity, Play, Container,
+  ChevronRight, Activity, Play, Container,
 } from 'lucide-react';
 import { VigileLogo } from '../ui/VigileLogo';
 import { useLocale } from '../../i18n';
@@ -166,7 +166,6 @@ export const Sidebar: React.FC = () => {
     }
 
     const adminItems: NavItem[] = [
-      { to: '/automations', label: t('nav.automations'), icon: Zap },
       { to: '/plugins', label: t('nav.plugins'), icon: Grid },
       { to: '/settings', label: t('nav.settings'), icon: SettingsIcon },
     ];

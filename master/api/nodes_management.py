@@ -591,7 +591,7 @@ async def get_node_stats(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    limit: Annotated[int, Query(ge=1, le=100, description="Number of snapshots to return")] = 10,
+    limit: Annotated[int, Query(ge=1, le=1440, description="Number of snapshots to return")] = 1440,
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
     """Return the latest metrics snapshots for a node, ordered by time descending."""

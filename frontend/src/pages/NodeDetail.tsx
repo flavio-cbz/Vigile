@@ -57,6 +57,7 @@ export const NodeDetail: React.FC = () => {
     displayInsights,
     loadingInsights,
     refreshInsights,
+    insightsMeta,
     statsHistory,
     loadingStats,
     fetchStatsHistory,
@@ -79,7 +80,15 @@ export const NodeDetail: React.FC = () => {
     setRestartingService,
     restartingContainer,
     setRestartingContainer,
+    fetchNodeBaseline,
   } = data;
+
+  useEffect(() => {
+    if (id) {
+      void fetchNodeBaseline();
+      void fetchStatsHistory();
+    }
+  }, [id, fetchNodeBaseline, fetchStatsHistory]);
 
   const tabs = useNodeDetailTabs({
     insightsCount: displayInsights?.length ?? 0,
@@ -172,7 +181,7 @@ export const NodeDetail: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
-      <NodeDetailHeader node={node} />
+      <NodeDetailHeader node={node} observationReady={insightsMeta?.observation_ready ?? true} perTypeReadiness={insightsMeta?.per_type_readiness} />
 
       <NodeDetailTabs tabs={tabs} activeTab={effectiveTab} onChange={handleTabChange} />
 
@@ -183,14 +192,21 @@ export const NodeDetail: React.FC = () => {
             loading={loadingInsights}
             nodeId={id}
             onRefresh={refreshInsights}
+            meta={insightsMeta}
           />
         )}
 
         {effectiveTab === 'metrics' && (
           <NodeDetailMetricsTab
+            nodeId={id}
             statsHistory={statsHistory}
             loading={loadingStats}
             onRefresh={fetchStatsHistory}
+            onFetchHistoryWithRange={(start, end) => fetchStatsHistory(true, start, end)}
+            dataWindowHours={insightsMeta?.data_window_hours}
+            observationReady={insightsMeta?.observation_ready}
+            nodeBaseline={data.nodeBaseline}
+            nodeAlerts={data.nodeAlerts}
           />
         )}
 

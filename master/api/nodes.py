@@ -44,7 +44,7 @@ from master.api.deps import (
 from master.api.rate_limits import KICKSTART_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
-from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile
+from master.core.insights import DiagnosticReport, HeavyProcessConfig, NodeProfile, calculate_node_baseline
 from master.core.node_manager import NodeManager, NodeState
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.rate_limiter import rate_limiter
@@ -111,6 +111,7 @@ class NodeResponse(BaseModel):
     disabled: bool
     enrolled_recently: bool
     version: str | None = None
+    worker_version: str | None = None
     cpu_percent: float | None = None
     memory_percent: float | None = None
     disk_percent: float | None = None
@@ -309,7 +310,7 @@ StandardError=journal
 SyslogIdentifier=vigile-worker
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/etc/vigile
+ReadWritePaths=-/etc/vigile -/var/lib/vigile -/usr/local/bin
 PrivateTmp=true
 
 [Install]
@@ -1115,11 +1116,12 @@ async def get_node_stats(
     node_id: Annotated[str, Path(description="Node UUID")],
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
-    limit: Annotated[int, Query(ge=1, le=100, description="Number of snapshots to return")] = 10,
+    start: Annotated[float | None, Query(description="Start epoch timestamp")] = None,
+    end: Annotated[float | None, Query(description="End epoch timestamp")] = None,
+    limit: Annotated[int, Query(ge=1, le=5000, description="Number of snapshots to return")] = 1440,
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
-    """Return the latest metrics snapshots for a node, ordered by time descending."""
-    # Demo mode: return mock metrics
+    """Return metrics snapshots for a node with optional time range and server-side aggregation."""
     if is_demo(claims):
         demo_node = get_demo_node(node_id)
         if demo_node is None:
@@ -1130,15 +1132,70 @@ async def get_node_stats(
             snapshots=[MetricsSnapshotResponse(**s) for s in snapshots],
         )
 
-    # Verify node exists
     node = await nm.get_node(db, node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
     import json
     rows: list[dict] = []
-    async with db.execute(
-        """
+
+    if start is not None or end is not None:
+        now = time.time()
+        effective_start = start if start is not None else now - 3600.0
+        effective_end = end if end is not None else now
+        duration = max(1.0, effective_end - effective_start)
+
+        if duration > 7 * 86400:
+            bucket_size = 3600
+        elif duration > 86400:
+            bucket_size = 300
+        else:
+            bucket_size = 0
+
+        if bucket_size > 0:
+            sql = f"""
+            SELECT
+                AVG(collected_at) AS collected_at,
+                AVG(cpu_percent) AS cpu_percent,
+                AVG(cpu_load_1m) AS cpu_load_1m,
+                AVG(cpu_load_5m) AS cpu_load_5m,
+                AVG(cpu_load_15m) AS cpu_load_15m,
+                AVG(cpu_cores) AS cpu_cores,
+                AVG(mem_total_bytes) AS mem_total_bytes,
+                AVG(mem_used_bytes) AS mem_used_bytes,
+                AVG(mem_percent) AS mem_percent,
+                AVG(swap_total_bytes) AS swap_total_bytes,
+                AVG(swap_used_bytes) AS swap_used_bytes,
+                AVG(disk_total_bytes) AS disk_total_bytes,
+                AVG(disk_used_bytes) AS disk_used_bytes,
+                AVG(disk_percent) AS disk_percent,
+                MAX(uptime_seconds) AS uptime_seconds,
+                AVG(processes) AS processes,
+                MAX(disks_json) AS disks_json
+            FROM metrics_snapshots
+            WHERE node_id = ? AND collected_at >= ? AND collected_at <= ?
+            GROUP BY CAST(collected_at / {bucket_size} AS INT)
+            ORDER BY collected_at DESC
+            LIMIT ?
+            """
+            params = (node_id, effective_start, effective_end, limit)
+        else:
+            sql = """
+            SELECT
+                collected_at,
+                cpu_percent, cpu_load_1m, cpu_load_5m, cpu_load_15m, cpu_cores,
+                mem_total_bytes, mem_used_bytes, mem_percent,
+                swap_total_bytes, swap_used_bytes,
+                disk_total_bytes, disk_used_bytes, disk_percent,
+                uptime_seconds, processes, disks_json
+            FROM metrics_snapshots
+            WHERE node_id = ? AND collected_at >= ? AND collected_at <= ?
+            ORDER BY collected_at DESC
+            LIMIT ?
+            """
+            params = (node_id, effective_start, effective_end, limit)
+    else:
+        sql = """
         SELECT
             collected_at,
             cpu_percent, cpu_load_1m, cpu_load_5m, cpu_load_15m, cpu_cores,
@@ -1150,9 +1207,10 @@ async def get_node_stats(
         WHERE node_id = ?
         ORDER BY collected_at DESC
         LIMIT ?
-        """,
-        (node_id, limit),
-    ) as cursor:
+        """
+        params = (node_id, limit)
+
+    async with db.execute(sql, params) as cursor:
         for row in await cursor.fetchall():
             d = dict(row)
             if d.get("disks_json"):
@@ -1166,6 +1224,141 @@ async def get_node_stats(
         node_id=node_id,
         snapshots=[MetricsSnapshotResponse(**r) for r in rows],
     )
+
+
+@router.get(
+    "/{node_id}/alerts",
+    summary="Get alerts for a node within optional timeframe (Operator+)",
+)
+async def get_node_alerts(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    start: Annotated[float | None, Query(description="Start epoch timestamp")] = None,
+    end: Annotated[float | None, Query(description="End epoch timestamp")] = None,
+    nm: NodeManager = Depends(get_node_manager),
+) -> dict[str, Any]:
+    """Return stored alerts for a node with optional start and end time range."""
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    sql = (
+        "SELECT id, node_id, alert_name, severity, status, message, "
+        "metric_value, threshold, details_json, created_at, resolved_at, updated_at "
+        "FROM alerts WHERE node_id = ?"
+    )
+    params: list[Any] = [node_id]
+
+    if start is not None:
+        sql += " AND created_at >= ?"
+        params.append(start)
+    if end is not None:
+        sql += " AND created_at <= ?"
+        params.append(end)
+
+    sql += " ORDER BY created_at DESC LIMIT 500"
+
+    alerts = []
+    async with db.execute(sql, tuple(params)) as cursor:
+        for row in await cursor.fetchall():
+            d = dict(row)
+            if d.get("details_json"):
+                try:
+                    d["details"] = json.loads(d["details_json"])
+                except Exception:
+                    d["details"] = {}
+            alerts.append(d)
+
+    return {"node_id": node_id, "alerts": alerts}
+
+
+@router.get(
+    "/{node_id}/baseline",
+    summary="Get statistical baseline percentiles for a node (Operator+)",
+)
+async def get_node_baseline(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+) -> dict[str, Any]:
+    """Return rolling statistical baseline (mean, std, p75, p90, p99) per metric for a node."""
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    return await calculate_node_baseline(db, node_id)
+
+
+@router.post(
+    "/{node_id}/baseline/recalculate",
+    summary="Force recalculation of node baseline percentiles (Operator+)",
+)
+async def recalculate_baseline(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    insights: Insights,
+    nm: NodeManager = Depends(get_node_manager),
+) -> dict[str, Any]:
+    """Recalculate node baseline percentiles and invalidate insights cache."""
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    baseline = await calculate_node_baseline(db, node_id)
+    if hasattr(insights, "invalidate_cache"):
+        insights.invalidate_cache(node_id)
+
+    return {"status": "ok", "node_id": node_id, "baseline": baseline}
+
+
+@router.get(
+    "/alerts/{alert_id}",
+    summary="Get alert details with diagnostic LLM investigation (Operator+)",
+)
+async def get_alert_detail(
+    alert_id: Annotated[str, Path(description="Alert UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+) -> dict[str, Any]:
+    """Return alert details and attached LLM investigation report if available."""
+    async with db.execute(
+        "SELECT id, node_id, alert_name, severity, status, message, "
+        "metric_value, threshold, details_json, created_at, resolved_at, updated_at "
+        "FROM alerts WHERE id = ?",
+        (alert_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        alert = dict(row)
+        if alert.get("details_json"):
+            try:
+                alert["details"] = json.loads(alert["details_json"])
+            except Exception:
+                alert["details"] = {}
+
+    investigation = None
+    async with db.execute(
+        "SELECT id, alert_id, node_id, alert_name, severity, status, context_json, result, created_at, completed_at "
+        "FROM investigations WHERE alert_id = ? ORDER BY created_at DESC LIMIT 1",
+        (alert_id,),
+    ) as cursor:
+        inv_row = await cursor.fetchone()
+        if inv_row:
+            investigation = dict(inv_row)
+            if investigation.get("result"):
+                try:
+                    investigation["result"] = json.loads(investigation["result"])
+                except Exception:
+                    pass
+
+    return {
+        "alert": alert,
+        "investigation": investigation,
+    }
 
 
 @router.get(
@@ -1283,7 +1476,8 @@ def _node_to_response(node: dict) -> dict:
         "group": node.get("node_group") or None,
         "disabled": bool(node.get("disabled", 0)),
         "enrolled_recently": enrolled_recently,
-        "version": node.get("version"),
+        "version": node.get("worker_version") or node.get("version"),
+        "worker_version": node.get("worker_version") or node.get("version"),
     }
 
 
@@ -1588,6 +1782,7 @@ async def regenerate_node_profile(
 
     try:
         profile = await im.generate_profile(node_id, db, nm, force=True, locale=locale)
+        im.invalidate_cache(node_id)
         return profile
     except Exception as e:
         raise HTTPException(
@@ -1664,11 +1859,35 @@ async def update_worker(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
+    if not await nm.is_connected(node_id):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Worker disconnected: cannot update node {node_id} while offline",
+        )
+
+    ARCH_MAP = {
+        "x86_64": "amd64",
+        "aarch64": "arm64",
+        "armv7l": "armv7",
+        "arm": "armv7",
+    }
+    raw_os = (node.get("os") or "linux").lower()
+    raw_arch = (node.get("arch") or "amd64").lower()
+    node_os = raw_os
+    node_arch = ARCH_MAP.get(raw_arch, raw_arch)
+
+    update_params = {
+        "os": node_os,
+        "arch": node_arch,
+        "binary_url": f"/api/nodes/binary/{node_os}/{node_arch}/worker",
+        "sha256_url": f"/api/nodes/binary/{node_os}/{node_arch}/worker.sha256",
+    }
+
     try:
         result = await dispatcher.dispatch_admin_action(
             node_id,
             WorkerAction.UPDATE_WORKER,
-            {},
+            update_params,
             claims["sub"],
             db,
             intent_timeout=30.0,

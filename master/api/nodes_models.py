@@ -55,6 +55,7 @@ class NodeResponse(BaseModel):
     disabled: bool
     enrolled_recently: bool
     version: str | None = None
+    worker_version: str | None = None
     cpu_percent: float | None = None
     memory_percent: float | None = None
     disk_percent: float | None = None

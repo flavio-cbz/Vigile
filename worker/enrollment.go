@@ -98,6 +98,7 @@ func buildEnrollmentRequest(joinToken, workerToken string, pub ed25519.PublicKey
 			"machine_id": fp.MachineID,
 			"arch":       fp.Arch,
 			"os":         fp.OS,
+			"version":    fp.Version,
 		},
 	}
 	if workerToken != "" {

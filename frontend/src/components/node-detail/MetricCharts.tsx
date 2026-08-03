@@ -1,6 +1,6 @@
 import React from 'react';
 import { MetricChart } from './MetricChart';
-import type { StatsPoint, DiskMount } from './types';
+import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
 
 interface MetricChartsProps {
   mappedHistory: Array<StatsPoint & { chartIndex: number }>;
@@ -13,12 +13,14 @@ interface MetricChartsProps {
   diskChartData: Array<Record<string, number | string | DiskMount[]>>;
   uniqueMounts: string[];
   DISK_COLORS: string[];
+  baseline?: NodeBaseline | null;
+  alerts?: AlertRecord[];
 }
 
 export const MetricCharts: React.FC<MetricChartsProps> = ({
   mappedHistory, chartStyle, locale, focusedMetric,
   onSetFocusedMetric, getRelativeTimeLabel, filteredHistory,
-  diskChartData, uniqueMounts, DISK_COLORS,
+  diskChartData, uniqueMounts, DISK_COLORS, baseline, alerts,
 }) => {
   return (
     <div className="grid gap-6 grid-cols-1">
@@ -35,6 +37,8 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
           diskChartData={diskChartData}
           uniqueMounts={uniqueMounts}
           DISK_COLORS={DISK_COLORS}
+          baseline={baseline}
+          alerts={alerts}
         />
       )}
 
@@ -51,6 +55,8 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
           diskChartData={diskChartData}
           uniqueMounts={uniqueMounts}
           DISK_COLORS={DISK_COLORS}
+          baseline={baseline}
+          alerts={alerts}
         />
       )}
 
@@ -67,8 +73,11 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
           diskChartData={diskChartData}
           uniqueMounts={uniqueMounts}
           DISK_COLORS={DISK_COLORS}
+          baseline={baseline}
+          alerts={alerts}
         />
       )}
     </div>
   );
 };
+

@@ -41,6 +41,7 @@ interface MetricsOverviewCardsProps {
   focusedMetric: 'all' | 'cpu' | 'ram' | 'disk';
   onToggleMetric: (metric: 'cpu' | 'ram' | 'disk') => void;
   getStatus: (val: number, type: 'cpu' | 'ram' | 'disk') => { text: string; bg: string };
+  dataWindowHours?: number;
 }
 
 const TrendIcon: React.FC<{ dir: string; val: number }> = ({ dir, val }) => (
@@ -64,6 +65,7 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
   lastSnap, cpuTrend, ramTrend, diskTrend,
   cpuSpark, ramSpark, diskSpark,
   focusedMetric, onToggleMetric, getStatus,
+  dataWindowHours = 999,
 }) => {
   const cpuValue = lastSnap?.cpu ?? 0;
   const ramValue = lastSnap?.ram ?? 0;
@@ -71,6 +73,17 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
   const cpuStatus = getStatus(cpuValue, 'cpu');
   const ramStatus = getStatus(ramValue, 'ram');
   const diskStatus = getStatus(diskValue, 'disk');
+  const isLearningTrend = dataWindowHours < 2;
+
+  const renderTrend = (dir: string, val: number) => (
+    <div
+      className="flex items-center gap-1.5 mt-0.5"
+      title={isLearningTrend ? "Tendance disponible après 2h d'observation" : undefined}
+      style={isLearningTrend ? { opacity: 0.3, filter: 'grayscale(1)' } : undefined}
+    >
+      <TrendIcon dir={dir} val={val} />
+    </div>
+  );
 
   return (
     <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
@@ -94,9 +107,11 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
         <div className="flex items-end justify-between mt-2">
           <div>
             <div className="font-mono text-3xl font-black text-text-1 tracking-tight">{cpuValue.toFixed(1)}%</div>
-            <div className="flex items-center gap-1.5 mt-0.5"><TrendIcon dir={cpuTrend.dir} val={cpuTrend.val} /></div>
+            {renderTrend(cpuTrend.dir, cpuTrend.val)}
           </div>
-          <Sparkline paths={cpuSpark} color={METRIC_THEMES.cpu.stroke} />
+          <div style={isLearningTrend ? { opacity: 0.3 } : undefined}>
+            <Sparkline paths={cpuSpark} color={METRIC_THEMES.cpu.stroke} />
+          </div>
         </div>
       </div>
 
@@ -120,9 +135,11 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
         <div className="flex items-end justify-between mt-2">
           <div>
             <div className="font-mono text-3xl font-black text-text-1 tracking-tight">{ramValue.toFixed(1)}%</div>
-            <div className="flex items-center gap-1.5 mt-0.5"><TrendIcon dir={ramTrend.dir} val={ramTrend.val} /></div>
+            {renderTrend(ramTrend.dir, ramTrend.val)}
           </div>
-          <Sparkline paths={ramSpark} color={METRIC_THEMES.ram.stroke} />
+          <div style={isLearningTrend ? { opacity: 0.3 } : undefined}>
+            <Sparkline paths={ramSpark} color={METRIC_THEMES.ram.stroke} />
+          </div>
         </div>
       </div>
 
@@ -146,11 +163,14 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
         <div className="flex items-end justify-between mt-2">
           <div>
             <div className="font-mono text-3xl font-black text-text-1 tracking-tight">{diskValue.toFixed(1)}%</div>
-            <div className="flex items-center gap-1.5 mt-0.5"><TrendIcon dir={diskTrend.dir} val={diskTrend.val} /></div>
+            {renderTrend(diskTrend.dir, diskTrend.val)}
           </div>
-          <Sparkline paths={diskSpark} color={METRIC_THEMES.disk.stroke} />
+          <div style={isLearningTrend ? { opacity: 0.3 } : undefined}>
+            <Sparkline paths={diskSpark} color={METRIC_THEMES.disk.stroke} />
+          </div>
         </div>
       </div>
     </div>
   );
 };
+

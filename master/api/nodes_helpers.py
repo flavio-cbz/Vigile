@@ -30,7 +30,8 @@ def _node_to_response(node: dict) -> dict:
         "group": node.get("node_group") or None,
         "disabled": bool(node.get("disabled", 0)),
         "enrolled_recently": enrolled_recently,
-        "version": node.get("version"),
+        "version": node.get("worker_version") or node.get("version"),
+        "worker_version": node.get("worker_version") or node.get("version"),
     }
 
 

@@ -10,6 +10,7 @@ Implements the 3-phase insights and profiling system:
 """
 
 import asyncio
+import dataclasses
 import enum
 import json
 import logging
@@ -26,6 +27,40 @@ from master.core.structured_llm import StructuredLLM
 from master.core.plugin_manager import PluginManager
 
 logger = logging.getLogger(__name__)
+
+# Global minimum — used as the default for observation readiness.
+MIN_OBSERVATION_HOURS: float = 2.0
+
+# Target hours for a fully mature profile (used for progress bar in frontend).
+TARGET_OBSERVATION_HOURS: float = 24.0
+
+# Per-type observation thresholds (hours).
+# CPU/RAM insights need only 2h of data; disk trends and LLM profile
+# require a full 24h cycle to be statistically reliable.
+OBSERVATION_THRESHOLDS: dict[str, float] = {
+    "cpu": 2.0,
+    "ram": 2.0,
+    "disk": 24.0,
+    "profile": 24.0,
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class DataWindow:
+    """Computed observation window for a node's metrics history."""
+
+    hours: float
+    snapshot_count: int
+    ready: bool
+    first_seen_at: float | None
+    last_seen_at: float | None
+
+
+def _format_profile_ts(ts: float | None) -> str | None:
+    """Format an epoch timestamp as ISO 8601 UTC string, or None."""
+    if not ts:
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
 
 class HeavyProcessConfig(BaseModel):
@@ -79,6 +114,10 @@ class NodeProfile(BaseModel):
     context_label: str = Field(
         default="Serveur homelab", description="Overall context label of the node"
     )
+    generated_via: str = Field(
+        default="heuristic",
+        description="How the profile was generated: 'llm' or 'heuristic'",
+    )
 
 
 class DiagnosticReport(BaseModel):
@@ -96,7 +135,7 @@ class DiagnosticReport(BaseModel):
     correlated_cause: list[str] = Field(
         default_factory=list,
         max_length=20,
-        description="List of correlated events (audit actions, automation triggers, service changes) that may have contributed to this anomaly",
+        description="List of correlated events (audit actions, service changes) that may have contributed to this anomaly",
     )
 
 
@@ -120,6 +159,19 @@ class InsightsManager:
         # Nodes with an in-flight profile generation (initial or re-profile),
         # guarding against duplicate concurrent generations per node.
         self._profiling_nodes: set[str] = set()
+        # In-memory cache for get_insights() responses (5 min TTL).
+        # Keyed by node_id → (epoch_timestamp, response_dict).
+        self._insights_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._INSIGHTS_CACHE_TTL: float = 300.0  # 5 minutes
+
+    def invalidate_cache(self, node_id: str) -> None:
+        """Invalidate the insights cache for a node.
+
+        Called when event-driven re-profiling triggers fire (CPU drift,
+        LOST→CONNECTED reconnection, new container detection) to ensure
+        the next GET /insights returns fresh data.
+        """
+        self._insights_cache.pop(node_id, None)
 
     def _spawn_task(self, coro: Any, name: str) -> asyncio.Task:
         """Spawn a supervised background task tracked for graceful shutdown."""
@@ -227,6 +279,7 @@ class InsightsManager:
             known_heavy_processes=known_heavy,
             baseline_ram_percent=baseline_ram_percent,
             context_label=context_label,
+            generated_via="llm" if (self._sllm and self._llm_client and self._llm_client.base_url) else "heuristic",
         )
 
         logger.info("Profile ready for node %s", node_id)
@@ -506,6 +559,52 @@ class InsightsManager:
             context_label="Serveur homelab",
         )
 
+    async def _compute_data_window(
+        self,
+        node_id: str,
+        db: aiosqlite.Connection,
+    ) -> DataWindow:
+        """Compute the observation window for a node from metrics_snapshots."""
+        try:
+            async with db.execute(
+                "SELECT MIN(collected_at), MAX(collected_at), COUNT(*) "
+                "FROM metrics_snapshots WHERE node_id = ?",
+                (node_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row and row[0] is not None and row[1] is not None:
+                hours = (row[1] - row[0]) / 3600.0
+                return DataWindow(
+                    hours=hours,
+                    snapshot_count=row[2],
+                    ready=hours >= OBSERVATION_THRESHOLDS.get("cpu", MIN_OBSERVATION_HOURS),
+                    first_seen_at=row[0],
+                    last_seen_at=row[1],
+                )
+        except Exception as ex:
+            logger.debug("Could not query metrics_snapshots for node %s: %s", node_id, ex)
+
+        return DataWindow(
+            hours=0.0, snapshot_count=0, ready=False,
+            first_seen_at=None, last_seen_at=None,
+        )
+
+    @staticmethod
+    def _compute_profile_confidence(
+        profile: NodeProfile | None,
+        window: DataWindow,
+    ) -> str:
+        """Derive a confidence level from the profile source and window maturity."""
+        if profile is None:
+            return "none"
+        if window.snapshot_count == 0:
+            return "high"
+        if window.hours < MIN_OBSERVATION_HOURS:
+            return "low"
+        if window.hours < TARGET_OBSERVATION_HOURS:
+            return "medium"
+        return "high"
+
     async def get_insights(
         self,
         node_id: str,
@@ -516,10 +615,24 @@ class InsightsManager:
         """
         Produce real-time insights for a node (Phase 2).
         Calculates disk slope on-the-fly and evaluates current CPU/RAM.
+
+        Results are cached in-memory for 5 minutes to avoid redundant
+        SQL queries when the operator refreshes the dashboard rapidly.
         """
         node = await nm.get_node(db, node_id)
         if not node:
-            return {"node_id": node_id, "insights": [], "profile_confidence": "low"}
+            return {
+                "node_id": node_id,
+                "insights": [],
+                "data_window_hours": 0.0,
+                "observation_ready": False,
+                "profile_confidence": "none",
+                "next_profile_refresh_at": None,
+                "profile_generated_at": None,
+            }
+
+        # Compute observation window early — used for metadata and confidence.
+        window = await self._compute_data_window(node_id, db)
 
         # 1. Trigger profile generation automatically if missing and online
         profile_json = node.get("insight_profile")
@@ -547,7 +660,11 @@ class InsightsManager:
                             "detail": "Vigilbot identifie les services et configure les seuils de charge...",
                         }
                     ],
+                    "data_window_hours": round(window.hours, 1),
+                    "observation_ready": window.ready,
                     "profile_confidence": "low",
+                    "next_profile_refresh_at": None,
+                    "profile_generated_at": None,
                 }
             else:
                 return {
@@ -562,16 +679,21 @@ class InsightsManager:
                             "detail": "Le serveur doit être connecté en ligne pour initialiser son profil d'insights.",
                         }
                     ],
-                    "profile_confidence": "low",
+                    "data_window_hours": round(window.hours, 1),
+                    "observation_ready": window.ready,
+                    "profile_confidence": "none",
+                    "next_profile_refresh_at": None,
+                    "profile_generated_at": None,
                 }
 
         profile = NodeProfile.model_validate_json(profile_json)
 
-        # 1b. Re-profile when stale (> 7 days) and node online — stale-while-revalidate:
+        # 1b. Re-profile when stale (> 12h) and node online — stale-while-revalidate:
         # keep serving the existing profile while the background task refreshes it.
-        profile_age = time.time() - (node.get("insight_profile_generated_at") or 0)
+        profile_generated_at_ts = node.get("insight_profile_generated_at") or 0
+        profile_age = time.time() - profile_generated_at_ts
         if (
-            profile_age > 7 * 86400
+            profile_age > 12 * 3600  # 12h soft refresh
             and node.get("online")
             and node_id not in self._profiling_nodes
         ):
@@ -594,6 +716,19 @@ class InsightsManager:
             if row:
                 latest_snap = dict(row)
 
+        latest_snap_ts = latest_snap.get("collected_at") if latest_snap else 0
+        cache_key = (node_id, latest_snap_ts, profile_generated_at_ts, locale)
+
+        # --- In-memory cache check ---
+        now_cache = time.time()
+        cached_entry = self._insights_cache.get(node_id)
+        if (
+            cached_entry
+            and cached_entry[0] == cache_key
+            and (now_cache - cached_entry[1]) < self._INSIGHTS_CACHE_TTL
+        ):
+            return cached_entry[2]
+
         if not latest_snap:
             return {
                 "node_id": node_id,
@@ -607,7 +742,11 @@ class InsightsManager:
                         "detail": "Aucun rapport de métriques n'a encore été stocké pour ce serveur.",
                     }
                 ],
-                "profile_confidence": "medium",
+                "data_window_hours": 0.0,
+                "observation_ready": False,
+                "profile_confidence": "low",
+                "next_profile_refresh_at": None,
+                "profile_generated_at": _format_profile_ts(profile_generated_at_ts),
             }
 
         insights = []
@@ -627,12 +766,39 @@ class InsightsManager:
         if ram_insight:
             insights.append(ram_insight)
 
-        return {
+        confidence = self._compute_profile_confidence(profile, window)
+        next_refresh_ts = profile_generated_at_ts + 24 * 3600 if profile_generated_at_ts else None
+
+        # Per-type readiness: tells the frontend exactly which insight types
+        # have enough data vs which are still in observation phase.
+        per_type_readiness = {
+            itype: {
+                "ready": window.hours >= threshold,
+                "hours": round(window.hours, 1),
+                "required": threshold,
+            }
+            for itype, threshold in OBSERVATION_THRESHOLDS.items()
+        }
+
+        result = {
             "node_id": node_id,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "insights": insights,
-            "profile_confidence": "high",
+            "data_window_hours": round(window.hours, 1),
+            "observation_ready": window.ready,
+            "profile_confidence": confidence,
+            "next_profile_refresh_at": (
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(next_refresh_ts))
+                if next_refresh_ts
+                else None
+            ),
+            "profile_generated_at": _format_profile_ts(profile_generated_at_ts),
+            "per_type_readiness": per_type_readiness,
         }
+
+        # Store in cache
+        self._insights_cache[node_id] = (cache_key, time.time(), result)
+        return result
     async def _calculate_disk_insight(
         self,
         node_id: str,
@@ -658,7 +824,6 @@ class InsightsManager:
             FROM metrics_snapshots
             WHERE node_id = ? AND collected_at >= ?
             ORDER BY collected_at ASC
-            LIMIT 150
             """,
             (node_id, limit_time),
         ) as cursor:
@@ -700,11 +865,14 @@ class InsightsManager:
                 },
             }
 
-        # --- IQR outlier filter on consecutive deltas ---
+        # --- IQR outlier detection on consecutive deltas ---
         # A one-off spike (e.g. a nightly 50 GB backup written then deleted)
-        # skews the naive least-squares slope. Drop any point whose delta vs.
-        # the previous point falls outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR];
-        # snapshot 0 is the anchor and always kept.
+        # skews the naive least-squares slope. But a MASS DELETION must not
+        # zero the estimate either. Outlier deltas are therefore treated as
+        # PERMANENT LEVEL SHIFTS, not noise: the series is rebuilt backwards
+        # from the latest value ignoring those jumps, so the regression slope
+        # reflects the underlying growth rate regardless of how much space was
+        # freed (or bulk-added) in between.
         raw_gb = [s["disk_used_bytes"] / (1024**3) for s in snapshots]
         deltas = [raw_gb[i] - raw_gb[i - 1] for i in range(1, len(raw_gb))]
         if deltas:
@@ -714,28 +882,41 @@ class InsightsManager:
             q3 = sorted_deltas[(3 * n_deltas + 3) // 4 - 1]
             iqr = q3 - q1
             lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-            filtered = [snapshots[0]]
-            for i in range(1, len(snapshots)):
-                if lower <= deltas[i - 1] <= upper:
-                    filtered.append(snapshots[i])
-            snapshots = filtered
+            inliers = [d for d in deltas if lower <= d <= upper]
 
-        # Not enough points survived the outlier filter: no reliable trend.
-        if len(snapshots) < 4:
-            return {
-                "type": "disk",
-                "severity": "ok",
-                "icon": "📊",
-                "headline": "Tendance disque fluctuante",
-                "detail": "Historique insuffisant après filtrage des points aberrants",
-                "confidence": "low",
-                "raw": {
-                    "used_percent": used_percent,
-                    "free_gb": round(free_gb, 1),
-                    "growth_gb_per_day": 0.0,
-                    "r_squared": 0.0,
-                },
-            }
+            # Too many level shifts to reconstruct a reliable trend.
+            if len(inliers) < 3:
+                return {
+                    "type": "disk",
+                    "severity": "ok",
+                    "icon": "📊",
+                    "headline": "Tendance disque fluctuante",
+                    "detail": "Historique insuffisant après filtrage des points aberrants",
+                    "confidence": "low",
+                    "raw": {
+                        "used_percent": used_percent,
+                        "free_gb": round(free_gb, 1),
+                        "growth_gb_per_day": 0.0,
+                        "r_squared": 0.0,
+                    },
+                }
+
+            # Rebuild the series without level shifts: start from the latest
+            # measured value and walk backwards, keeping only inlier deltas.
+            # Outlier deltas (mass deletion / bulk import / transient spike)
+            # are skipped, stitching both sides at the current level.
+            normalized_gb = [0.0] * len(raw_gb)
+            normalized_gb[-1] = raw_gb[-1]
+            for i in range(len(raw_gb) - 2, -1, -1):
+                delta = raw_gb[i + 1] - raw_gb[i]
+                if lower <= delta <= upper:
+                    normalized_gb[i] = normalized_gb[i + 1] - delta
+                else:
+                    normalized_gb[i] = normalized_gb[i + 1]
+            snapshots = [
+                {**s, "disk_used_bytes": round(normalized_gb[i] * (1024**3))}
+                for i, s in enumerate(snapshots)
+            ]
 
         # Calculate slope (GB per day) and R² (coefficient of determination)
         t0 = snapshots[0]["collected_at"]
@@ -1221,24 +1402,6 @@ class InsightsManager:
             pass
         audit_str = json.dumps(recent_audit, indent=2) if recent_audit else "No recent audit events"
 
-        # Fetch recent automation log entries for this node (last 6 hours)
-        recent_automations = []
-        try:
-            async with db.execute(
-                """SELECT rule_id, status, trigger_data_json, triggered_at
-                   FROM automation_logs WHERE node_id = ? AND triggered_at > ?
-                   ORDER BY triggered_at DESC LIMIT 10""",
-                (node_id, time.time() - 21600),
-            ) as cursor:
-                rows = await cursor.fetchall()
-                recent_automations = [dict(r) for r in rows]
-        except aiosqlite.Error:
-            pass
-        auto_str = (
-            json.dumps(recent_automations, indent=2)
-            if recent_automations else "No recent automation events"
-        )
-
         lang_instruction = (
             "You must write the explanation, headline, and suggested_action in English."
             if locale == "en"
@@ -1252,10 +1415,9 @@ class InsightsManager:
                     f"- Active Services: {services_prompt}\n"
                     f"- Active Containers: {containers_prompt}\n"
                     f"- Current Metrics: {snap_str}\n"
-                    f"- Recent Audit Events (last 6h): {audit_str}\n"
-                    f"- Recent Automation Events (last 6h): {auto_str}\n\n"
+                    f"- Recent Audit Events (last 6h): {audit_str}\n\n"
                     f"Diagnose what is causing the anomaly and suggest remediation actions. "
-                    f"When evaluating the situation, consider recent audit/automation events "
+                    f"When evaluating the situation, consider recent audit events "
                     f"that may have triggered state changes. "
                     f"{lang_instruction}"
                 ),
@@ -1277,3 +1439,92 @@ class InsightsManager:
                 suggested_action="Veuillez inspecter manuellement les services systemd et conteneurs Docker via l'interface du serveur.",
                 correlated_cause=[],
             )
+
+
+def _percentile(data: list[float], p: float) -> float:
+    if not data:
+        return 0.0
+    s = sorted(data)
+    n = len(s)
+    k = (n - 1) * (p / 100.0)
+    f = int(k)
+    c = f + 1
+    if c >= n:
+        return s[-1]
+    return s[f] + (k - f) * (s[c] - s[f])
+
+
+async def calculate_node_baseline(db: Any, node_id: str) -> dict[str, Any]:
+    """
+    Calcule la baseline statistique glissante (µ, σ, p75, p90, p99) par métrique pour un nœud.
+    Si l'historique est < 3 jours (72h), positionne is_limited = True et applique les seuils absolus.
+    """
+    async with db.execute(
+        "SELECT collected_at, cpu_percent, mem_percent, disk_percent "
+        "FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at ASC",
+        (node_id,),
+    ) as cursor:
+        raw_rows = await cursor.fetchall()
+
+    if not raw_rows:
+        return {
+            "node_id": node_id,
+            "data_window_hours": 0.0,
+            "is_limited": True,
+            "metrics": {
+                "cpu": {"mean": 0.0, "std": 0.0, "p75": 50.0, "p90": 75.0, "p99": 90.0, "absolute_warning": 80.0, "absolute_critical": 95.0},
+                "ram": {"mean": 0.0, "std": 0.0, "p75": 60.0, "p90": 80.0, "p99": 92.0, "absolute_warning": 85.0, "absolute_critical": 95.0},
+                "disk": {"mean": 0.0, "std": 0.0, "p75": 70.0, "p90": 85.0, "p99": 95.0, "absolute_warning": 85.0, "absolute_critical": 95.0},
+            },
+        }
+
+    rows = []
+    for r in raw_rows:
+        if hasattr(r, "keys"):
+            rows.append(dict(r))
+        else:
+            rows.append({
+                "collected_at": r[0],
+                "cpu_percent": r[1],
+                "mem_percent": r[2],
+                "disk_percent": r[3],
+            })
+
+    ts_list = [r["collected_at"] for r in rows if r["collected_at"] is not None]
+    data_window_hours = (max(ts_list) - min(ts_list)) / 3600.0 if ts_list else 0.0
+    is_limited = data_window_hours < 72.0 or len(rows) < 50
+
+    cpu_vals = [float(r["cpu_percent"]) for r in rows if r["cpu_percent"] is not None]
+    ram_vals = [float(r["mem_percent"]) for r in rows if r["mem_percent"] is not None]
+    disk_vals = [float(r["disk_percent"]) for r in rows if r["disk_percent"] is not None]
+
+    def _calc_stats(vals: list[float], abs_warn: float, abs_crit: float) -> dict[str, float]:
+        if not vals:
+            return {"mean": 0.0, "std": 0.0, "p75": 50.0, "p90": 75.0, "p99": 90.0, "absolute_warning": abs_warn, "absolute_critical": abs_crit}
+        mean_val = sum(vals) / len(vals)
+        variance = sum((x - mean_val) ** 2 for x in vals) / len(vals)
+        std_val = variance ** 0.5
+        p75 = _percentile(vals, 75.0)
+        p90 = _percentile(vals, 90.0)
+        p99 = _percentile(vals, 99.0)
+        return {
+            "mean": round(mean_val, 1),
+            "std": round(std_val, 1),
+            "p75": round(p75, 1),
+            "p90": round(p90, 1),
+            "p99": round(p99, 1),
+            "absolute_warning": abs_warn,
+            "absolute_critical": abs_crit,
+        }
+
+    return {
+        "node_id": node_id,
+        "data_window_hours": round(data_window_hours, 1),
+        "is_limited": is_limited,
+        "metrics": {
+            "cpu": _calc_stats(cpu_vals, 80.0, 95.0),
+            "ram": _calc_stats(ram_vals, 85.0, 95.0),
+            "disk": _calc_stats(disk_vals, 85.0, 95.0),
+        },
+    }
+

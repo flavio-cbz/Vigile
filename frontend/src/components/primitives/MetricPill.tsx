@@ -11,13 +11,15 @@ interface MetricPillProps {
 }
 
 const severityColor = (pct: number): string => {
-  if (pct >= 85) return 'var(--severity-critical)';
-  if (pct >= 70) return 'var(--severity-warning)';
-  return 'var(--accent)';
+  if (pct >= 90) return '#dc2626'; // Rouge saturé (Saturated Red)
+  if (pct >= 75) return 'var(--severity-critical)'; // Rouge (Red)
+  if (pct >= 50) return '#eab308'; // Jaune (Yellow)
+  return 'var(--severity-ok)'; // Vert libre (Green)
 };
 
 const MiniGauge: React.FC<{ label: string; value: number }> = ({ label, value }) => {
   const display = Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+  const isExtreme = value >= 90;
   return (
     <div className="flex items-center gap-1.5 min-w-0">
       <span className="text-[9px] font-interface font-bold uppercase tracking-wider text-text-3 shrink-0">
@@ -25,10 +27,11 @@ const MiniGauge: React.FC<{ label: string; value: number }> = ({ label, value })
       </span>
       <div className="w-12 h-1.5 bg-surface-2 rounded-full overflow-hidden border border-border shrink-0">
         <div
-          className="h-full rounded-full transition-all"
+          className="h-full rounded-full transition-all duration-300"
           style={{
             width: `${Math.min(100, Math.max(0, value))}%`,
             backgroundColor: severityColor(value),
+            boxShadow: isExtreme ? '0 0 6px rgba(220, 38, 38, 0.7)' : undefined,
           }}
         />
       </div>

@@ -222,7 +222,7 @@ StandardError=journal
 SyslogIdentifier=vigile-worker
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/etc/vigile
+ReadWritePaths=-/etc/vigile -/var/lib/vigile -/usr/local/bin
 PrivateTmp=true
 
 [Install]

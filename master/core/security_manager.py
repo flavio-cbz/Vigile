@@ -282,6 +282,29 @@ class SecurityManager:
             logger.warning("Ed25519 verification error: %s", exc)
             return False
 
+    def sign_policy_bundle(self, payload: dict[str, Any]) -> str:
+        """
+        Signs a PolicyBundle payload using Master's Ed25519 private key.
+        Uses RFC 8785 (JCS) deterministic JSON canonicalization.
+        Returns the base64url-encoded Ed25519 signature string.
+        """
+        # Ensure payload excludes any existing signature field
+        clean_payload = {k: v for k, v in payload.items() if k not in ("signature", "recovery_proof")}
+        canonical_json = json.dumps(clean_payload, separators=(",", ":"), sort_keys=True)
+        sig_bytes = self._master_private_key.sign(canonical_json.encode())
+        return base64.urlsafe_b64encode(sig_bytes).decode().rstrip("=")
+
+    def sign_execution_grant(self, grant_payload: dict[str, Any]) -> str:
+        """
+        Signs an execution_grant payload using Master's Ed25519 private key.
+        Uses RFC 8785 (JCS) deterministic JSON canonicalization.
+        Returns the base64url-encoded Ed25519 signature string.
+        """
+        canonical_json = json.dumps(grant_payload, separators=(",", ":"), sort_keys=True)
+        sig_bytes = self._master_private_key.sign(canonical_json.encode())
+        return base64.urlsafe_b64encode(sig_bytes).decode().rstrip("=")
+
+
     # -----------------------------------------------------------------------
     # WORKER_TOKEN — JWT HS256 with rotation lifecycle
     # -----------------------------------------------------------------------

@@ -21,6 +21,7 @@
   /* Severities - independent of the active theme */
   --severity-critical: #EF4444;
   --severity-warning:  #F59E0B;
+  --zone-elevated:     #F59E0B;
   --severity-info:     #60A5FA;
   --severity-ok:       #22C55E;
 

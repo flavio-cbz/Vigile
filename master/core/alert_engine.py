@@ -190,7 +190,6 @@ class AlertEngine:
         self._db: Any = None
         # Callback when an alert fires — set by InvestigationManager at startup
         self.on_alert_fired_callback: Any = None
-        self.on_automation_alert_callback: Any = None
         # {node_id: {alert_name: {"severity": ..., "status": ..., "created_at": ...}}}
         self._active_alerts: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
         # Dernière métrique connue par nœud (pour les dérivées)
@@ -546,18 +545,6 @@ class AlertEngine:
                     details=details,
                 ),
                 name=f"investigation:{alert_name}:{alert_id[:12]}",
-            )
-
-        # Notify automation engine for alert-based rules (supervised task)
-        if self.on_automation_alert_callback is not None:
-            self._spawn_task(
-                self.on_automation_alert_callback(
-                    node_id=node_id,
-                    alert_name=alert_name,
-                    severity=severity,
-                    db=db,
-                ),
-                name=f"automation:alert:{alert_name}:{node_id[:12]}",
             )
 
         return alert_id

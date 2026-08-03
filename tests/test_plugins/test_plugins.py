@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import os
 import shutil
-import tempfile
 
 import pytest
+from pydantic import ValidationError
 
 from master.core.plugin_manager import PluginManager
 from master.plugins.metrics import MetricsSnapshot, _on_status_report
@@ -50,11 +48,11 @@ def test_metrics_snapshot_defaults():
 
 
 def test_metrics_snapshot_validation():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MetricsSnapshot(cpu_percent=-1)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MetricsSnapshot(cpu_percent=101)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MetricsSnapshot(mem_total_bytes=-100)
 
 

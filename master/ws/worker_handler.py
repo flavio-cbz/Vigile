@@ -42,7 +42,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeState, node_manager
-from master.core.plugin_manager import plugin_manager
+import master.core.plugin_manager as pm_mod
 from master.core.security_manager import get_security_instance
 from master.db.database import get_db_conn, transaction
 
@@ -327,8 +327,8 @@ async def _run_enrollment(
                     arch = ?,
                     os = ?,
                     public_key = ?,
-                    version = ?,
-                    worker_version = ?,
+                    version = COALESCE(NULLIF(?, ''), version),
+                    worker_version = COALESCE(NULLIF(?, ''), worker_version),
                     enrolled_at = ?,
                     updated_at = ?
                 WHERE id = ?
@@ -512,8 +512,8 @@ async def _run_reconnect(
                 machine_id = ?,
                 arch = ?,
                 os = ?,
-                version = ?,
-                worker_version = ?,
+                version = COALESCE(NULLIF(?, ''), version),
+                worker_version = COALESCE(NULLIF(?, ''), worker_version),
                 updated_at = ?
             WHERE id = ?
             """,
@@ -777,26 +777,19 @@ async def _run_operational(
             )
             # Suivi du taux d'échec des intents pour l'alert engine
             from master.core.alert_engine import alert_engine
-            from master.core.automation_engine import automation_engine
             asyncio.create_task(
                 alert_engine.track_intent_result(node_id, success, db),
                 name=f"alert:intent:{node_id[:12]}",
             )
-            # Évaluation des règles d'automation node_intent_failure
-            asyncio.create_task(
-                automation_engine.evaluate_intent_failure(
-                    node_id, msg.get("action", ""), success, db
-                ),
-                name=f"automation:intent:{node_id[:12]}",
-            )
 
         elif msg_type == "STATUS_REPORT":
+            logger.info("RECEIVED STATUS_REPORT from %s: %s", node_id, msg)
             # Normalize and store metrics snapshot via plugin system
-            snapshot = await plugin_manager.async_call_first(
+            snapshot = await pm_mod.plugin_manager.async_call_first(
                 "normalize_status_report", raw_report=msg
             )
             if snapshot:
-                await plugin_manager.async_call(
+                await pm_mod.plugin_manager.async_call(
                     "on_status_report", node_id=node_id, snapshot=snapshot, db=db
                 )
 

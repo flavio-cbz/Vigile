@@ -65,11 +65,35 @@ async def update_worker(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
+    if not await nm.is_connected(node_id):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Worker disconnected: cannot update node {node_id} while offline",
+        )
+
+    ARCH_MAP = {
+        "x86_64": "amd64",
+        "aarch64": "arm64",
+        "armv7l": "armv7",
+        "arm": "armv7",
+    }
+    raw_os = (node.get("os") or "linux").lower()
+    raw_arch = (node.get("arch") or "amd64").lower()
+    node_os = raw_os
+    node_arch = ARCH_MAP.get(raw_arch, raw_arch)
+
+    update_params = {
+        "os": node_os,
+        "arch": node_arch,
+        "binary_url": f"/api/nodes/binary/{node_os}/{node_arch}/worker",
+        "sha256_url": f"/api/nodes/binary/{node_os}/{node_arch}/worker.sha256",
+    }
+
     try:
         result = await dispatcher.dispatch_admin_action(
             node_id,
             WorkerAction.UPDATE_WORKER,
-            {},
+            update_params,
             claims["sub"],
             db,
             intent_timeout=30.0,

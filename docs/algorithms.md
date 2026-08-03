@@ -56,7 +56,7 @@ Registre d'audit append-only avec chaîne cryptographique.
 - Entrée genesis : `previous_hash = "0" * 64`.
 - Vérification par `verify_chain()` qui rejoue tout le calcul et détecte toute altération.
 - Verrou asyncio pour éviter les collisions de séquence en concurrence.
-- 40+ types d'actions auditées (login, proposals, intents, automations, nœuds, plugins, etc.).
+- 40+ types d'actions auditées (login, proposals, intents, nœuds, plugins, etc.).
 
 ## 6. Security Manager — Crypto & RBAC (`master/core/security_manager.py`)
 
@@ -97,7 +97,7 @@ PENDING → ENROLLING → UNCONFIGURED → CONNECTED → LOST → STALE
                                     ↘ DISABLED
 ```
 - 18 transitions valides définies dans `VALID_TRANSITIONS`.
-- Chaque transition persistée en DB, notifiée via `event_bus` + callbacks (automation engine).
+- Chaque transition persistée en DB, notifiée via `event_bus` + callbacks.
 - `transition_state()` valide la transition avant exécution ; `ValueError` si invalide.
 
 ### Heartbeat Monitor
@@ -121,30 +121,7 @@ PENDING → ENROLLING → UNCONFIGURED → CONNECTED → LOST → STALE
 - Fermeture de toutes les connexions WebSocket en cas de compromission.
 - Code close `4433` (SECURITY_COMPROMISE).
 
-## 8. Automation Engine — Moteur de Règles (`master/core/automation_engine.py`)
-
-Système Trigger → Condition → Action évalué en temps réel.
-
-### Triggers
-- `metric_threshold` : se déclenche quand une métrique (cpu_percent, mem_percent, disk_percent, etc.) dépasse un seuil avec opérateur (gt/lt/gte/lte/eq).
-- `node_state` : se déclenche quand un nœud transite vers un état spécifique.
-
-### Conditions
-- `always` : pas de condition (défaut).
-- `time_window` : exécution uniquement dans une plage HH:MM-HH:MM.
-- Filtrage par `target_node_id` et `target_group` (vérifié en DB).
-
-### Actions
-- `send_intent` : envoie une commande au Worker (ex: `RESTART_CONTAINER`, `RESTART_SERVICE`).
-- `call_webhook` : POST HTTP vers une URL externe avec template de body.
-- `log_message` : écrit dans `automation_logs` (sans effet de bord).
-
-### Safeguards
-- Cooldown par règle+nœud (300s par défaut) pour éviter les boucles.
-- Audit log sur chaque déclenchement (`AUTOMATION_TRIGGERED`).
-- Échec d'action → `FAILED` (les autres actions continuent).
-
-## 9. Rate Limiter — Fenêtre Glissante (`master/core/rate_limiter.py`)
+## 8. Rate Limiter — Fenêtre Glissante (`master/core/rate_limiter.py`)
 
 Limitation de requêtes par IP + endpoint.
 
@@ -155,7 +132,7 @@ Limitation de requêtes par IP + endpoint.
 - Support X-Forwarded-For avec whitelist de proxies de confiance (`trusted_proxies`).
 - Tâche de nettoyage périodique (toutes les 300s).
 
-## 10. Structured LLM — Génération Structurée (`master/core/structured_llm.py`)
+## 9. Structured LLM — Génération Structurée (`master/core/structured_llm.py`)
 
 Force le LLM à produire du JSON valide contre un schéma Pydantic.
 
@@ -164,7 +141,7 @@ Force le LLM à produire du JSON valide contre un schéma Pydantic.
 - Boucle de retry : si validation échoue, renvoie l'erreur au LLM avec `max_retries` tentatives.
 - Zéro dépendance externe (pattern inspired by Instructor).
 
-## 11. LLM Client — Client OpenAI-Compatibles (`master/core/llm_client.py`)
+## 10. LLM Client — Client OpenAI-Compatibles (`master/core/llm_client.py`)
 
 Client HTTP natif pour API de chat.
 
@@ -174,7 +151,7 @@ Client HTTP natif pour API de chat.
 - Timeouts : 30s requête, 120s stream.
 - Messages d'erreur en français, pas de fuite d'exceptions.
 
-## 12. Plugin Manager — Hooks & Sandbox (`master/core/plugin_manager.py`)
+## 11. Plugin Manager — Hooks & Sandbox (`master/core/plugin_manager.py`)
 
 Système de plugins avec hooks nommés et exécution sandboxée.
 
@@ -183,7 +160,7 @@ Système de plugins avec hooks nommés et exécution sandboxée.
 - Drain des appels actifs au déchargement.
 - GTT : si un plugin asynchrone est appelé via `call()` synchrone → ignoré avec warning.
 
-## 13. Event Bus — Pub/Sub Interne (`master/core/event_bus.py`)
+## 12. Event Bus — Pub/Sub Interne (`master/core/event_bus.py`)
 
 Bus d'événements asynchrone pour la communication in-process.
 
@@ -192,11 +169,11 @@ Bus d'événements asynchrone pour la communication in-process.
 - Ring buffer de replay (200 derniers événements) pour les nouveaux abonnés.
 - SSE endpoint s'abonne pour les mises à jour temps réel.
 
-## 14. Secret Loader — Docker Secrets (`master/core/secret_loader.py`)
+## 13. Secret Loader — Docker Secrets (`master/core/secret_loader.py`)
 
 Chargement des secrets avec fallback Docker secrets (`{VAR}_FILE`).
 
-## 15. WebSocket Handler — Protocole Deux Phases (`master/ws/worker_handler.py`)
+## 14. WebSocket Handler — Protocole Deux Phases (`master/ws/worker_handler.py`)
 
 ### Phase d'Enrôlement
 1. `ENROLLMENT_REQUEST` : Worker envoie join_token + public_key Ed25519.
@@ -220,11 +197,11 @@ Chaque étape a un timeout strict de 30s.
 - Vérification HTTPS si `enforce_https=True`.
 - Lockdown en cas de compromission.
 
-## 16. Customisation de la Génération Automatique de Secrets (`master/config.py`)
+## 15. Customisation de la Génération Automatique de Secrets (`master/config.py`)
 
 Si `SERVER_SECRET_KEY` ou `JWT_SECRET_KEY` sont vides en développement, le Master génère automatiquement des secrets via `secrets.token_hex(32)`.
 
-## 17. Human-in-the-Loop — Cycle d'Approbation (`master/core/action_proposal.py`)
+## 16. Human-in-the-Loop — Cycle d'Approbation (`master/core/action_proposal.py`)
 
 Machine à états des propositions d'action :
 ```
@@ -235,20 +212,20 @@ PENDING → REJECTED
 - Persisté en DB avec horodatage, utilisateur approveur, raison du rejet.
 - Résultat d'exécution stocké (`result_json`).
 
-## 18. Détection de Nouveaux Conteneurs (`master/core/node_manager.py`)
+## 17. Détection de Nouveaux Conteneurs (`master/core/node_manager.py`)
 
 Dans le `cache_updater` : compare les conteneurs actifs actuels contre les `known_heavy_processes` du profil. Si un nouveau conteneur roulant n'est pas dans le profil, déclenche une régénération (cooldown 24h pour éviter le spam LLM).
 
-## 19. Repérage de Contexte (`_guess_context` dans `master/core/insights.py`)
+## 18. Repérage de Contexte (`_guess_context` dans `master/core/insights.py`)
 
 Heuristique simple basée sur le hostname et les conteneurs pour déterminer le rôle du serveur : "Serveur Web / Applicatif", "Base de Données", "Homelab Médias & Stockage", ou "Serveur général".
 
-## 20. RBAC — Contrôle d'Accès (`master/core/enums.py`, `master/api/deps.py`)
+## 19. RBAC — Contrôle d'Accès (`master/core/enums.py`, `master/api/deps.py`)
 
 Hiérarchie de rôles : `viewer` (1) < `operator` (2) < `admin` (3).
 Chaque endpoint est protégé par `require_role("operator", "admin")` qui compare le niveau de l'utilisateur contre le niveau requis.
 
-## 21. Plugins — Alerting, Cleanup, Parseurs
+## 20. Plugins — Alerting, Cleanup, Parseurs
 
 ### Metrics Plugin (`master/plugins/metrics_plugin.py`)
 - **Normalisation STATUS_REPORT** : accepte les formats plat et `{"metrics":{...}}`, valide via `MetricsSnapshot` (20+ champs avec contraintes `ge`/`le`).
@@ -273,19 +250,19 @@ Chaque endpoint est protégé par `require_role("operator", "admin")` qui compar
 - **Anti-doublon** : vérifie qu'il n'y a pas déjà une proposal PENDING pour ce nœud avant d'en créer une nouvelle.
 - **Human-in-the-Loop** : la proposal est risquée `LOW`, en attente d'approbation opérateur.
 
-## 22. Plugin Worker — Sandbox Subprocess (`master/core/plugin_worker.py`)
+## 21. Plugin Worker — Sandbox Subprocess (`master/core/plugin_worker.py`)
 
 - **JSON-RPC sur stdin/stdout** : communication entre le processus parent et le plugin sandboxé via lignes JSON.
 - **DatabaseProxy** : délègue les appels `execute()`/`commit()` du processus enfant vers le parent via JSON-RPC, avec `CursorProxy` pour simuler un curseur sqlite3.
 - **Lecteur stdin thread-safe** : utilise un thread lecteur + `asyncio.Queue` pour ne pas bloquer l'event loop sur stdin.
 
-## 23. LoopBoundLock — Verrou par Boucle d'Événements (`master/core/lock.py`)
+## 22. LoopBoundLock — Verrou par Boucle d'Événements (`master/core/lock.py`)
 
 - Crée un `asyncio.Lock` par boucle d'événements (clé = objet loop).
 - Nettoie les boucles fermées pour éviter les fuites mémoire.
 - Empêche l'erreur "attached to a different loop" dans les tests.
 
-## 24. Migrations Idempotentes (`master/db/migrations.py`)
+## 23. Migrations Idempotentes (`master/db/migrations.py`)
 
 - **Création de tables** : `CREATE TABLE IF NOT EXISTS` pour toutes les tables.
 - **Ajout dynamique de colonnes** : vérifie `PRAGMA table_info()` et ajoute les colonnes manquantes (8 colonnes possibles : `insight_profile`, `cached_services_json`, `cached_containers_json`, `node_group`, `disabled`, `version`, `worker_version`, `disks_json`).
@@ -296,14 +273,14 @@ Chaque endpoint est protégé par `require_role("operator", "admin")` qui compar
 - **Plugins par défaut** : insère metrics, systemd, docker comme activés.
 - **Alembic stamping** : crée `alembic_version` et stamp "008".
 
-## 25. Auto-Génération de Secrets (`master/config.py`)
+## 24. Auto-Génération de Secrets (`master/config.py`)
 
 - **Dev mode** : si `SERVER_SECRET_KEY` ou `JWT_SECRET_KEY` sont vides et `allow_insecure=True`, utilise `"dev_secret_key_only"` / `"dev_jwt_key_only"`.
 - **Production** : si `allow_insecure=False`, lève `ValueError` → impossible de démarrer sans config.
 - **HTTPS enforcement** : `allow_insecure=False` force `enforce_https=True` et `cookie_secure=True`.
 - **apply_overrides()** : mutation runtime des paramètres LLM (base_url, api_key, model) sans I/O disque. Masque les clés inchangées avec `"••••••••"`.
 
-## 26. Per-Endpoint Rate Limits (`master/api/rate_limits.py`)
+## 25. Per-Endpoint Rate Limits (`master/api/rate_limits.py`)
 
 6 constantes de limite par minute par IP :
 - `LOGIN_LIMIT=5`, `REFRESH_LIMIT=30`, `KICKSTART_LIMIT=10`, `GENERATE_JOIN_LIMIT=10`, `WORKER_CONTROL_LIMIT=100`, `CHAT_LIMIT=30`, `ADMIN_LIMIT=200`, `GLOBAL_LIMIT=300`.

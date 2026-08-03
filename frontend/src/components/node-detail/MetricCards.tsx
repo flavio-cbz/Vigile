@@ -13,12 +13,14 @@ interface MetricCardsProps {
   focusedMetric: 'all' | 'cpu' | 'ram' | 'disk';
   onToggleMetric: (metric: 'cpu' | 'ram' | 'disk') => void;
   getStatus: (val: number, type: 'cpu' | 'ram' | 'disk') => { text: string; bg: string };
+  dataWindowHours?: number;
 }
 
 export const MetricCards: React.FC<MetricCardsProps> = ({
   lastSnap, cpuTrend, ramTrend, diskTrend,
   cpuSpark, ramSpark, diskSpark,
   focusedMetric, onToggleMetric, getStatus,
+  dataWindowHours,
 }) => {
   return (
     <MetricsOverviewCards
@@ -32,6 +34,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
       focusedMetric={focusedMetric}
       onToggleMetric={onToggleMetric}
       getStatus={getStatus}
+      dataWindowHours={dataWindowHours}
     />
   );
 };

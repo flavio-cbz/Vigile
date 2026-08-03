@@ -278,9 +278,14 @@
 }
 
 .progress-bar-fill-warning {
-  background-color: var(--color-warning);
+  background-color: #eab308;
 }
 
 .progress-bar-fill-danger {
   background-color: var(--color-danger);
+}
+
+.progress-bar-fill-danger-saturated {
+  background-color: #dc2626;
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.7);
 }

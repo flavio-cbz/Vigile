@@ -12,8 +12,6 @@ Tables:
   - audit_log           : append-only action log with chained SHA256 hashes
   - metrics_snapshots   : periodic status reports from Workers
   - action_proposals    : Human-in-the-Loop action lifecycle
-  - automation_rules    : Trigger→Condition→Action automation rules
-  - automation_logs     : Execution history for automation rules
   - alerts              : Engine-evaluated alert lifecycle (firing → resolved)
 """
 
@@ -287,49 +285,6 @@ CREATE TABLE IF NOT EXISTS plugins (
 """
 
 # ---------------------------------------------------------------------------
-# automation_rules  (Trigger → Condition → Action automation engine)
-# ---------------------------------------------------------------------------
-CREATE_AUTOMATION_RULES = """
-CREATE TABLE IF NOT EXISTS automation_rules (
-    id                   TEXT PRIMARY KEY,          -- UUID
-    name                 TEXT NOT NULL,             -- Human-readable label
-    description          TEXT NOT NULL DEFAULT '',  -- Optional description
-    enabled              INTEGER NOT NULL DEFAULT 1,
-    trigger_type         TEXT NOT NULL,             -- metric_threshold | node_state
-    trigger_config_json  TEXT NOT NULL DEFAULT '{}',-- Trigger params (metric, operator, threshold, state)
-    conditions_json      TEXT NOT NULL DEFAULT '[]',-- List of condition dicts [{type, ...}]
-    actions_json         TEXT NOT NULL DEFAULT '[]',-- List of action dicts [{type, ...}]
-    target_node_id       TEXT,                      -- Scope: specific node (NULL = all nodes)
-    target_group         TEXT,                      -- Scope: node group (NULL = all groups)
-    cooldown_seconds     INTEGER NOT NULL DEFAULT 300, -- Anti-spam: min seconds between triggers
-    trust_level          TEXT NOT NULL DEFAULT 'auto' -- auto | always_approve | manual
-                        CHECK(trust_level IN ('auto','always_approve','manual')),
-    created_by           TEXT NOT NULL,             -- user_id of the creator
-    created_at           REAL NOT NULL,
-    updated_at           REAL NOT NULL,
-    FOREIGN KEY (target_node_id) REFERENCES nodes(id) ON DELETE SET NULL
-)
-"""
-
-# ---------------------------------------------------------------------------
-# automation_logs  (Execution history for automation rules)
-# ---------------------------------------------------------------------------
-CREATE_AUTOMATION_LOGS = """
-CREATE TABLE IF NOT EXISTS automation_logs (
-    id               TEXT PRIMARY KEY,  -- UUID
-    rule_id          TEXT NOT NULL,     -- FK → automation_rules.id
-    node_id          TEXT,              -- Target node at time of trigger (nullable)
-    triggered_at     REAL NOT NULL,     -- Unix timestamp
-    status           TEXT NOT NULL DEFAULT 'TRIGGERED'
-                     CHECK(status IN ('SUCCESS','FAILED','SKIPPED','COOLDOWN')),
-    trigger_data_json TEXT NOT NULL DEFAULT '{}', -- Snapshot of the data that triggered the rule
-    result_json      TEXT NOT NULL DEFAULT '{}',  -- Results of each action execution
-    FOREIGN KEY (rule_id) REFERENCES automation_rules(id) ON DELETE CASCADE,
-    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE SET NULL
-)
-"""
-
-# ---------------------------------------------------------------------------
 # alerts  (Engine-evaluated alert lifecycle — firing → resolved)
 # ---------------------------------------------------------------------------
 CREATE_ALERTS = """
@@ -478,6 +433,51 @@ CREATE TABLE IF NOT EXISTS plex_events (
 )
 """
 
+CREATE_PLUGIN_CAPABILITY_DECLARATIONS = """
+CREATE TABLE IF NOT EXISTS plugin_capability_declarations (
+    id            TEXT PRIMARY KEY,
+    plugin_id     TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    target_kind   TEXT NOT NULL,
+    risk_level    TEXT NOT NULL,
+    justification TEXT,
+    manifest_hash TEXT NOT NULL,
+    created_at    REAL NOT NULL
+)
+"""
+
+CREATE_PLUGIN_GRANTS = """
+CREATE TABLE IF NOT EXISTS plugin_grants (
+    id            TEXT PRIMARY KEY,
+    plugin_id     TEXT NOT NULL,
+    node_id       TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    target_kind   TEXT NOT NULL,
+    target_id     TEXT NOT NULL,
+    limits_json   TEXT,
+    granted_by    TEXT NOT NULL,
+    granted_at    REAL NOT NULL,
+    revoked_at    REAL
+)
+"""
+
+CREATE_POLICIES = """
+CREATE TABLE IF NOT EXISTS policies (
+    id             TEXT PRIMARY KEY,
+    node_id        TEXT NOT NULL,
+    master_key_id  TEXT NOT NULL,
+    policy_epoch   INTEGER NOT NULL,
+    policy_version INTEGER NOT NULL,
+    bundle_hash    TEXT NOT NULL,
+    bundle_json    TEXT NOT NULL,
+    signature      TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'ACTIVE',
+    issued_by      TEXT NOT NULL,
+    expires_at     REAL NOT NULL,
+    created_at     REAL NOT NULL
+)
+"""
+
 # ---------------------------------------------------------------------------
 # Indexes for common query patterns
 # ---------------------------------------------------------------------------
@@ -500,10 +500,6 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_plugin_configs_enabled ON plugin_configs(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_plugins_enabled ON plugins(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_plugins_status ON plugins(status)",
-    "CREATE INDEX IF NOT EXISTS idx_automation_rules_enabled ON automation_rules(enabled)",
-    "CREATE INDEX IF NOT EXISTS idx_automation_rules_trigger ON automation_rules(trigger_type)",
-    "CREATE INDEX IF NOT EXISTS idx_automation_logs_rule ON automation_logs(rule_id, triggered_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_automation_logs_node ON automation_logs(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_node_status ON alerts(node_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_name_status ON alerts(alert_name, node_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at)",
@@ -518,6 +514,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_plex_libraries_node ON plex_libraries(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_plex_media_cache_node_key ON plex_media_cache(node_id, rating_key)",
     "CREATE INDEX IF NOT EXISTS idx_plex_events_node_time ON plex_events(node_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_plugin_grants_node ON plugin_grants(node_id, plugin_id)",
+    "CREATE INDEX IF NOT EXISTS idx_policies_node_ver ON policies(node_id, policy_epoch, policy_version DESC)",
 ]
 
 # All CREATE statements in dependency order
@@ -533,8 +531,6 @@ ALL_TABLES = [
     CREATE_CHAT_SESSIONS,
     CREATE_PLUGIN_CONFIGS,
     CREATE_PLUGINS,
-    CREATE_AUTOMATION_RULES,
-    CREATE_AUTOMATION_LOGS,
     CREATE_ALERTS,
     CREATE_INVESTIGATIONS,
     CREATE_OUTBOX,
@@ -543,5 +539,8 @@ ALL_TABLES = [
     CREATE_PLEX_LIBRARIES,
     CREATE_PLEX_MEDIA_CACHE,
     CREATE_PLEX_EVENTS,
+    CREATE_PLUGIN_CAPABILITY_DECLARATIONS,
+    CREATE_PLUGIN_GRANTS,
+    CREATE_POLICIES,
 ]
 

@@ -17,6 +17,8 @@ export interface Node {
   group: string | null;
   disabled: boolean;
   enrolled_recently: boolean;
+  version?: string;
+  worker_version?: string;
 }
 
 export interface NodeStateChangeEvent {

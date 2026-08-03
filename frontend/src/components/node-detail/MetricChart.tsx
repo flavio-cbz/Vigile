@@ -11,9 +11,10 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
 } from 'recharts';
 import { MetricsTooltip } from './MetricsTooltip';
-import type { StatsPoint, DiskMount } from './types';
+import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
 
 const METRIC_THEMES = {
   cpu: { stroke: '#06B6D4' },
@@ -79,12 +80,14 @@ interface MetricChartProps {
   diskChartData: Array<Record<string, number | string | DiskMount[]>>;
   uniqueMounts: string[];
   DISK_COLORS: string[];
+  baseline?: NodeBaseline | null;
+  alerts?: AlertRecord[];
 }
 
 export const MetricChart: React.FC<MetricChartProps> = ({
   metric, mappedHistory, chartStyle, locale, focusedMetric,
   onSetFocusedMetric, getRelativeTimeLabel, filteredHistory,
-  diskChartData, uniqueMounts, DISK_COLORS,
+  diskChartData, uniqueMounts, DISK_COLORS, baseline, alerts,
 }) => {
   const localT = (frText: string, enText: string) => {
     return locale === 'fr' ? frText : enText;
@@ -103,21 +106,59 @@ export const MetricChart: React.FC<MetricChartProps> = ({
   const delta = lastVal - firstVal;
   const deltaStr = Math.abs(delta).toFixed(1);
   const trendText = delta > 1.0 ? `hausse de ${deltaStr} points` : delta < -1.0 ? `baisse de ${deltaStr} points` : 'stable';
-  const summaryPhrase = `Pic à ${maxVal}%, moyenne ${avgVal}%, ${trendText}`;
+  const secondaryPhrase = `Pic à ${maxVal}%, moyenne ${avgVal}%, ${trendText}`;
+
+  const curVal = lastVal;
+  const mBase = baseline?.metrics?.[metric];
+  const isLimited = baseline?.is_limited ?? true;
+
+  let tierLabel = 'Normal';
+  let tierBadgeClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+  let activePhrase = '';
+
+  if (isLimited) {
+    tierLabel = localT('Historique encore limité', 'Limited history');
+    tierBadgeClass = 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
+    activePhrase = `${curVal.toFixed(1)}% actuellement (seuils par défaut : alerte à 85%)`;
+  } else if (mBase) {
+    if (curVal >= mBase.absolute_critical || curVal >= mBase.p99) {
+      tierLabel = localT('Critique absolu', 'Absolute critical');
+      tierBadgeClass = 'bg-red-500/10 text-severity-critical border-red-500/30';
+      activePhrase = `${curVal.toFixed(1)}% : seuil de sécurité dépassé, indépendamment de l'historique du nœud`;
+    } else if (curVal >= mBase.p90) {
+      tierLabel = localT('Critique relatif', 'Relative critical');
+      tierBadgeClass = 'bg-amber-500/10 text-severity-warning border-amber-500/30';
+      activePhrase = `Charge inhabituelle (${curVal.toFixed(1)}%), nettement au-dessus des standards de ce nœud`;
+    } else if (curVal >= mBase.p75) {
+      tierLabel = localT('Élevé', 'Elevated');
+      tierBadgeClass = 'bg-amber-500/10 text-zone-elevated border-amber-500/30';
+      activePhrase = `${curVal.toFixed(1)}% actuellement, au-dessus de l'habitude de ce nœud`;
+    } else {
+      tierLabel = localT('Normal', 'Normal');
+      tierBadgeClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+      activePhrase = `${curVal.toFixed(1)}% actuellement, dans la moyenne habituelle de ce nœud (${mBase.mean.toFixed(0)}–${mBase.p75.toFixed(0)}%)`;
+    }
+  }
 
   return (
     <div className="p-5 border border-border rounded-2xl bg-surface/30 flex flex-col gap-4 backdrop-blur-sm relative overflow-hidden">
       <div className={`absolute top-0 left-0 w-full h-[3px] ${cfg.borderColor}`} />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
             <Icon className={`w-4 h-4 ${cfg.iconColor}`} />
             <span className="font-interface font-black text-xs uppercase tracking-widest text-text-1">
               {localT(cfg.titleFr, cfg.titleEn)}
             </span>
+            <span className={`text-[9px] font-mono font-bold uppercase px-2 py-0.5 rounded border ${tierBadgeClass}`}>
+              {tierLabel}
+            </span>
           </div>
-          <p className="text-[11px] font-mono text-text-3 mt-1">
-            {summaryPhrase}
+          <p className="text-xs font-interface font-bold text-text-1">
+            {activePhrase}
+          </p>
+          <p className="text-[10px] font-mono text-text-3">
+            {secondaryPhrase}
           </p>
         </div>
         {focusedMetric === metric && (
@@ -142,7 +183,7 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 tickLine={false}
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
-              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} />} />
+              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} />} />
               <ReferenceLine
                 y={85}
                 stroke="var(--severity-critical)"
@@ -198,7 +239,20 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 tickLine={false}
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
-              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} />} />
+              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} />} />
+              {mBase && !isLimited && (
+                <>
+                  <ReferenceArea y1={0} y2={mBase.p75} fill="rgba(34, 197, 94, 0.03)" />
+                  <ReferenceArea y1={mBase.p75} y2={mBase.p90} fill="rgba(245, 158, 11, 0.05)" />
+                  <ReferenceArea y1={mBase.p90} y2={mBase.p99} fill="rgba(245, 158, 11, 0.08)" />
+                  <ReferenceArea y1={mBase.p99} y2={100} fill="rgba(239, 68, 68, 0.08)" />
+                </>
+              )}
+              <ReferenceLine
+                y={mBase?.absolute_critical || 85}
+                stroke="var(--severity-critical)"
+                strokeDasharray="4 4"
+              />
               <Area
                 type="monotone"
                 dataKey={cfg.dataKey}
@@ -222,7 +276,20 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 tickLine={false}
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
-              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} />} />
+              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} />} />
+              {mBase && !isLimited && (
+                <>
+                  <ReferenceArea y1={0} y2={mBase.p75} fill="rgba(34, 197, 94, 0.03)" />
+                  <ReferenceArea y1={mBase.p75} y2={mBase.p90} fill="rgba(245, 158, 11, 0.05)" />
+                  <ReferenceArea y1={mBase.p90} y2={mBase.p99} fill="rgba(245, 158, 11, 0.08)" />
+                  <ReferenceArea y1={mBase.p99} y2={100} fill="rgba(239, 68, 68, 0.08)" />
+                </>
+              )}
+              <ReferenceLine
+                y={mBase?.absolute_critical || 85}
+                stroke="var(--severity-critical)"
+                strokeDasharray="4 4"
+              />
               <Line
                 type="monotone"
                 dataKey={cfg.dataKey}
@@ -239,3 +306,4 @@ export const MetricChart: React.FC<MetricChartProps> = ({
     </div>
   );
 };
+

@@ -13,8 +13,7 @@ const ProposalsPage = lazy(() => import('./pages/ProposalsPage').then((m) => ({ 
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const ServersPage = lazy(() => import('./pages/ServersPage').then((m) => ({ default: m.ServersPage })));
 const PluginsPage = lazy(() => import('./pages/PluginsPage').then((m) => ({ default: m.PluginsPage })));
-const AutomationsPage = lazy(() => import('./pages/AutomationsPage').then((m) => ({ default: m.AutomationsPage })));
-
+const EventDetailPage = lazy(() => import('./pages/EventDetailPage').then((m) => ({ default: m.EventDetailPage })));
 const RouteLoadingFallback = () => (
   <div className="flex items-center justify-center min-h-[400px] w-full">
     <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
@@ -56,7 +55,7 @@ export default function App() {
           <Route path="servers" element={<ServersPage />} />
           <Route path="plugins" element={<PluginsPage />} />
           <Route path="plugins/*" element={<PluginRouter />} />
-          <Route path="automations" element={<AutomationsPage />} />
+          <Route path="events/:alertId" element={<EventDetailPage />} />
           <Route path="chat" element={<ChatRedirect />} />
           <Route path="chat/new" element={<ChatRedirect />} />
         </Route>
