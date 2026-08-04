@@ -284,6 +284,55 @@ async def test_get_node_stats(client: AsyncClient, db, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_get_node_stats_with_range_and_decimation(client: AsyncClient, db, auth_headers):
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-range', 'node-range', 'CONNECTED', ?, ?)",
+        (time.time(), time.time()),
+    )
+    now = time.time()
+    for i in range(100):
+        t = now - i * 60
+        await db.execute(
+            "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds) "
+            "VALUES (?, 'n-range', ?, ?, ?, 8000, 4000, 50.0, 1000, 100, 20000, 5000, 25.0, 500.0)",
+            (f"s-range-{i}", t, t, 15.5),
+        )
+    await db.commit()
+
+    start = int(now - 7200)
+    end = int(now + 60)
+    response = await client.get(
+        f"/api/nodes/n-range/stats?limit=1440&start={start}&end={end}",
+        headers=auth_headers("operator"),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+
+    # All snapshots are inside the requested window
+    for snap in data["snapshots"]:
+        assert start <= snap["collected_at"] <= end
+
+    # Ordered descending (newest -> oldest), newest snapshot inside the window
+    stamps = [snap["collected_at"] for snap in data["snapshots"]]
+    assert stamps == sorted(stamps, reverse=True)
+    assert any(abs(t - end) < 120 for t in stamps)
+
+    # Small range is NOT decimated (all 100 points fit in 2h window)
+    assert len(data["snapshots"]) == 100
+
+    # Long range triggers hourly aggregation -> dense series collapses to few buckets
+    start_long = int(now - 30 * 86400)
+    response_long = await client.get(
+        f"/api/nodes/n-range/stats?limit=1440&start={start_long}&end={end}",
+        headers=auth_headers("operator"),
+    )
+    data_long = response_long.json()
+    # 100 points clustered in 2h collapse into their hourly buckets (3 buckets)
+    assert 0 < len(data_long["snapshots"]) < 100
+
+
+@pytest.mark.asyncio
 async def test_verify_chain(client: AsyncClient, auth_headers):
     # Admin required
     response = await client.get("/api/nodes/verify-chain", headers=auth_headers("admin"))

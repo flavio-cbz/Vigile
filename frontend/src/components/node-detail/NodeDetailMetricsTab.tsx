@@ -4,10 +4,12 @@ import { Spinner } from '../primitives/Spinner';
 import { useLocale } from '../../i18n';
 import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
 import { estimateDiskSaturation } from './diskUtils';
+import { formatRelativeDuration } from '../../utils/formatTime';
 import { MetricsOverview, type TimeRangePreset } from './MetricsOverview';
 import { MetricCharts } from './MetricCharts';
 import { MetricCards } from './MetricCards';
 import { DiskMountCards } from './DiskMountCards';
+import { AlertDetailModal } from './AlertDetailModal';
 
 function generateSparklinePaths(points: number[], width = 120, height = 32, padding = 2) {
   if (points.length < 2) return { line: '', area: '' };
@@ -32,20 +34,20 @@ export const NodeDetailMetricsTab: React.FC<{
   loading: boolean;
   nodeId?: string;
   onRefresh: () => void;
-  onFetchHistoryWithRange?: (startSec?: number, endSec?: number) => void;
+  timeRange: TimeRangePreset;
+  onSetTimeRange: (preset: TimeRangePreset, customStartSec?: number, customEndSec?: number) => void;
   dataWindowHours?: number;
   observationReady?: boolean;
   nodeBaseline?: NodeBaseline | null;
   nodeAlerts?: AlertRecord[];
 }> = ({
-  statsHistory, loading, nodeId, onRefresh, onFetchHistoryWithRange,
+  statsHistory, loading, nodeId, onRefresh, timeRange, onSetTimeRange,
   dataWindowHours, observationReady = true, nodeBaseline, nodeAlerts,
 }) => {
   const { locale, t } = useLocale();
-  const [timeRange, setTimeRange] = useState<TimeRangePreset>('1h');
-  const [chartStyle, setChartStyle] = useState<'area' | 'line'>('area');
   const [focusedMetric, setFocusedMetric] = useState<'all' | 'cpu' | 'ram' | 'disk'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedAlert, setSelectedAlert] = useState<AlertRecord | null>(null);
 
   const localT = (frText: string, enText: string) => {
     return locale === 'fr' ? frText : enText;
@@ -63,26 +65,7 @@ export const NodeDetailMetricsTab: React.FC<{
   };
 
   const handleTimeRangeChange = (preset: TimeRangePreset, customStartSec?: number, customEndSec?: number) => {
-    setTimeRange(preset);
-    if (!onFetchHistoryWithRange) return;
-
-    if (preset === 'custom' && customStartSec && customEndSec) {
-      onFetchHistoryWithRange(customStartSec, customEndSec);
-      return;
-    }
-
-    const now = Math.floor(Date.now() / 1000);
-    const durationMap: Record<string, number> = {
-      '1h': 3600,
-      '6h': 21600,
-      '12h': 43200,
-      '24h': 86400,
-      '7d': 604800,
-      '30d': 2592000,
-    };
-
-    const duration = durationMap[preset] || 3600;
-    onFetchHistoryWithRange(now - duration, now);
+    onSetTimeRange(preset, customStartSec, customEndSec);
   };
 
   const filteredHistory = statsHistory;
@@ -96,7 +79,6 @@ export const NodeDetailMetricsTab: React.FC<{
 
   const lastSnap = statsHistory[statsHistory.length - 1];
 
-
   const cpuHistory = useMemo(() => statsHistory.map(p => p.cpu), [statsHistory]);
   const ramHistory = useMemo(() => statsHistory.map(p => p.ram), [statsHistory]);
   const diskHistory = useMemo(() => statsHistory.map(p => p.disk), [statsHistory]);
@@ -105,7 +87,11 @@ export const NodeDetailMetricsTab: React.FC<{
     const set = new Set<string>();
     statsHistory.forEach(point => {
       if (point.disks) {
-        point.disks.forEach(d => set.add(d.mount_point));
+        point.disks.forEach(d => {
+          if (d.mount_point !== '/boot/efi') {
+            set.add(d.mount_point);
+          }
+        });
       }
     });
     return Array.from(set);
@@ -160,7 +146,7 @@ export const NodeDetailMetricsTab: React.FC<{
 
   const enrichedDisks = useMemo(() => {
     const lastSnap = statsHistory[statsHistory.length - 1];
-    const disks = lastSnap?.disks || [];
+    const disks = (lastSnap?.disks || []).filter(d => d.mount_point !== '/boot/efi');
     const estimates = estimateDiskSaturation(statsHistory);
     return disks.map(d => ({
       ...d,
@@ -168,8 +154,6 @@ export const NodeDetailMetricsTab: React.FC<{
       growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
     }));
   }, [statsHistory]);
-
-
 
   const getStatus = (val: number, type: 'cpu' | 'ram' | 'disk') => {
     const mBase = nodeBaseline?.metrics?.[type];
@@ -193,9 +177,16 @@ export const NodeDetailMetricsTab: React.FC<{
   };
 
   const getRelativeTimeLabel = (idx: number) => {
-    const diff = idx - (filteredHistory.length - 1);
-    if (diff === 0) return localT('Maintenant', 'Now');
-    return `${diff}m`;
+    const point = filteredHistory[idx];
+    const lastPoint = filteredHistory[filteredHistory.length - 1];
+    if (!point || !lastPoint) return '';
+
+    const diffSec = point.collected_at != null && lastPoint.collected_at != null
+      ? point.collected_at - lastPoint.collected_at
+      : (idx - (filteredHistory.length - 1)) * 60;
+
+    if (Math.abs(diffSec) < 1) return localT('Maintenant', 'Now');
+    return formatRelativeDuration(diffSec);
   };
 
   const handleToggleMetric = (metric: 'cpu' | 'ram' | 'disk') => {
@@ -226,13 +217,11 @@ export const NodeDetailMetricsTab: React.FC<{
     <div className="space-y-8 animate-fade-in">
       <MetricsOverview
         timeRange={timeRange}
-        chartStyle={chartStyle}
         isRefreshing={isRefreshing}
         lastRefreshed={lastRefreshed}
         locale={locale}
         nodeId={nodeId}
         onTimeRangeChange={handleTimeRangeChange}
-        onChartStyleChange={setChartStyle}
         onRefresh={handleRefreshClick}
       />
 
@@ -252,7 +241,6 @@ export const NodeDetailMetricsTab: React.FC<{
 
       <MetricCharts
         mappedHistory={mappedHistory}
-        chartStyle={chartStyle}
         locale={locale}
         focusedMetric={focusedMetric}
         onSetFocusedMetric={setFocusedMetric}
@@ -263,6 +251,7 @@ export const NodeDetailMetricsTab: React.FC<{
         DISK_COLORS={DISK_COLORS}
         baseline={nodeBaseline}
         alerts={nodeAlerts}
+        onSelectAlert={setSelectedAlert}
       />
 
     {enrichedDisks.length > 0 && (
@@ -273,6 +262,12 @@ export const NodeDetailMetricsTab: React.FC<{
         <DiskMountCards disks={enrichedDisks} observationReady={observationReady} />
       </div>
     )}
+
+      <AlertDetailModal
+        alert={selectedAlert}
+        locale={locale}
+        onClose={() => setSelectedAlert(null)}
+      />
     </div>
   );
 };

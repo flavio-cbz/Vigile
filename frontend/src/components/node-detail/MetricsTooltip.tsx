@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router';
 import { AlertTriangle, ChevronRight } from 'lucide-react';
 import { Card, CardHeader, CardContent } from '../ui/Card';
+import { formatRelativeDuration } from '../../utils/formatTime';
 import type { StatsPoint, AlertRecord } from './types';
 
 const ALERT_NAME_LABELS: Record<string, { fr: string; en: string }> = {
@@ -41,9 +42,18 @@ interface MetricsTooltipProps {
   locale: string;
   history: StatsPoint[];
   alerts?: AlertRecord[];
+  onSelectAlert?: (alert: AlertRecord) => void;
 }
 
-export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({ active, payload, label, locale, history, alerts }) => {
+export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({
+  active,
+  payload,
+  label,
+  locale,
+  history,
+  alerts,
+  onSelectAlert,
+}) => {
   const [nowSec] = useState(() => Date.now() / 1000);
 
   if (!active || !payload || payload.length === 0) return null;
@@ -56,10 +66,13 @@ export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({ active, payload,
   const point = history && history[index] ? history[index] : null;
   const timeLabel = point ? point.time : label;
 
-  const relativeDiff = history ? index - (history.length - 1) : 0;
-  const relativeLabel = relativeDiff === 0 
-    ? localT('Maintenant', 'Now') 
-    : `${relativeDiff}m`;
+  const lastPoint = history ? history[history.length - 1] : null;
+  const relativeDiffSec = point?.collected_at != null && lastPoint?.collected_at != null
+    ? point.collected_at - lastPoint.collected_at
+    : (index - (history.length - 1)) * 60;
+  const relativeLabel = Math.abs(relativeDiffSec) < 1
+    ? localT('Maintenant', 'Now')
+    : formatRelativeDuration(relativeDiffSec);
 
   const pointTs = point?.collected_at;
   const activeAlerts = pointTs && alerts
@@ -70,6 +83,8 @@ export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({ active, payload,
       })
     : [];
 
+  const topPointProc = point?.top_processes && point.top_processes.length > 0 ? point.top_processes[0] : null;
+
   const formatAlertName = (name: string) => {
     const labels = ALERT_NAME_LABELS[name];
     if (labels) return localT(labels.fr, labels.en);
@@ -77,7 +92,7 @@ export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({ active, payload,
   };
 
   return (
-    <Card className="backdrop-blur-md animate-fade-in min-w-[180px] max-w-[260px] z-50">
+    <Card className="backdrop-blur-md animate-fade-in min-w-[200px] max-w-[280px] z-50 pointer-events-auto shadow-xl border-border-strong">
       <CardHeader>
         <div className="text-[9px] font-mono text-text-3 uppercase tracking-wider">
           {localT('Temps', 'Time')} : {relativeLabel} {timeLabel ? `(${timeLabel})` : ''}
@@ -101,33 +116,74 @@ export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({ active, payload,
           })}
         </div>
 
+        {topPointProc && activeAlerts.length === 0 && (
+          <div className="pt-1.5 border-t border-border/50">
+            <div className="text-[8px] font-interface font-bold uppercase tracking-wider text-text-3 mb-0.5">
+              {localT('Proc. principal', 'Top Process')}
+            </div>
+            <div className="flex items-center justify-between text-[9px] font-mono text-text-2 bg-surface-2/60 px-1.5 py-0.5 rounded border border-border/40">
+              <span className="truncate max-w-[120px] font-bold text-accent">{topPointProc.name}</span>
+              <span className="shrink-0 text-[8px] text-text-3">
+                (PID {topPointProc.pid}) {typeof topPointProc.cpu_percent === 'number' ? `${topPointProc.cpu_percent.toFixed(1)}%` : ''}
+              </span>
+            </div>
+          </div>
+        )}
+
         {activeAlerts.length > 0 && (
-          <div className="pt-2 border-t border-border space-y-1">
+          <div className="pt-2 border-t border-border space-y-1.5">
             <div className="text-[9px] font-interface font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" />
+              <AlertTriangle className="w-3 h-3 animate-pulse" />
               {localT('ÉVÉNEMENT ACTIF', 'ACTIVE EVENT')} ({activeAlerts.length})
             </div>
-            {activeAlerts.map((alt) => (
-              <Link
-                key={alt.id}
-                to={`/events/${alt.id}`}
-                className="flex items-center justify-between p-1.5 rounded bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/50 transition-all text-left group"
-              >
-                <div className="truncate pr-1">
-                  <div className="font-interface text-[9px] font-bold text-amber-300 truncate">
-                    {formatAlertName(alt.alert_name)}
+            {activeAlerts.map((alt) => {
+              const topProc = alt.details?.top_process || topPointProc;
+              return (
+                <div
+                  key={alt.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onSelectAlert) onSelectAlert(alt);
+                  }}
+                  className="p-1.5 rounded bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/60 hover:bg-amber-500/15 transition-all text-left group cursor-pointer"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="truncate pr-1">
+                      <div className="font-interface text-[9px] font-bold text-amber-300 truncate">
+                        {formatAlertName(alt.alert_name)}
+                      </div>
+                      <div className="font-mono text-[8px] text-text-3 uppercase">
+                        {alt.severity} • {alt.status}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Link
+                        to={`/events/${alt.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-0.5 hover:text-amber-300 text-text-3 transition-colors"
+                        title={localT('Page événement complète', 'Full event page')}
+                      >
+                        <ChevronRight className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
+                      </Link>
+                    </div>
                   </div>
-                  <div className="font-mono text-[8px] text-text-3 uppercase">
-                    {alt.severity} • {alt.status}
-                  </div>
+
+                  {topProc && (
+                    <div className="mt-1 pt-1 border-t border-amber-500/20 text-[8px] font-mono text-amber-200/90 flex items-center justify-between">
+                      <span className="truncate max-w-[130px]">
+                        🎯 <strong className="text-amber-100">{topProc.name}</strong> (PID {topProc.pid})
+                      </span>
+                      <span className="shrink-0 font-bold ml-1">
+                        {typeof topProc.cpu_percent === 'number' ? `${topProc.cpu_percent.toFixed(1)}%` : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <ChevronRight className="w-3 h-3 text-amber-400 opacity-60 group-hover:opacity-100 shrink-0" />
-              </Link>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>
     </Card>
   );
 };
-

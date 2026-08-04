@@ -1,0 +1,1 @@
+import{r as e}from"./rolldown-runtime-b3L32Ng1.js";import{_ as o}from"./vendor-charts-yXoniBR4.js";var i=e(o(),1),t="Vigile";function _(r){(0,i.useEffect)(()=>{document.title=r?`${r} — ${t}`:t},[r])}export{_ as t};

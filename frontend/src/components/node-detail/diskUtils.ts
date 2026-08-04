@@ -118,11 +118,23 @@ export function estimateDiskSaturation(
 
     const slope = (n * sumXY - sumX * sumY) / denominator;
 
-    // If disk usage is flat or shrinking (slope <= 0.01 GB/day)
-    if (slope <= 0.01) {
+    const roundedSlope = Math.round(slope * 1000) / 1000;
+
+    // Truly flat slope (|slope| <= 0.0001 GB/day)
+    if (Math.abs(slope) <= 0.0001) {
       result[mountPoint] = {
         days_left: null,
         growth_gb_per_day: 0,
+        confidence: hoursCollected >= 24 ? 'high' : 'medium',
+      };
+      continue;
+    }
+
+    // Shrinking disk (negative slope)
+    if (slope < 0) {
+      result[mountPoint] = {
+        days_left: null,
+        growth_gb_per_day: roundedSlope,
         confidence: hoursCollected >= 24 ? 'high' : 'medium',
       };
       continue;
@@ -140,7 +152,7 @@ export function estimateDiskSaturation(
 
     result[mountPoint] = {
       days_left: isFinite(daysLeft) && daysLeft > 0 ? Math.round(daysLeft) : null,
-      growth_gb_per_day: Math.round(slope * 1000) / 1000,
+      growth_gb_per_day: roundedSlope,
       confidence,
     };
   }

@@ -129,12 +129,25 @@ def get_demo_node(node_id: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
+def get_demo_metrics(
+    node_id: str, limit: int = 10, start: int | None = None, end: int | None = None
+) -> list[dict[str, Any]]:
     """Generate simulated time-series metrics for a demo node.
 
     Each node has a distinct "personality" so the dashboard feels alive.
+    With `start`+`end`, points are spread evenly across the requested window
+    (60s step for short spans, larger steps for long ones) so range presets
+    behave like the real backend.
     """
     now = time.time()
+
+    if start is not None and end is not None and end > start:
+        span = int(end - start)
+        step = max(60, (span + limit - 1) // limit)
+        count = min(limit, span // step + 1)
+        base_t = end
+    else:
+        step, count, base_t = 60, limit, now
 
     # Node profiles — different workloads
     profiles = {
@@ -214,8 +227,8 @@ def get_demo_metrics(node_id: str, limit: int = 10) -> list[dict[str, Any]]:
     profile = profiles.get(node_id, profiles["demo-node-01"])
 
     snapshots: list[dict[str, Any]] = []
-    for i in range(limit):
-        t = now - i * 60
+    for i in range(count):
+        t = base_t - i * step
         # Sine wave around base CPU with occasional spike
         cycle = (i * 1.3) % 60
         spike = 40 if i % 7 == 3 and node_id in ("demo-node-01", "demo-node-04") else 0

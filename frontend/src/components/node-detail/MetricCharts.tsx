@@ -4,7 +4,6 @@ import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
 
 interface MetricChartsProps {
   mappedHistory: Array<StatsPoint & { chartIndex: number }>;
-  chartStyle: 'area' | 'line';
   locale: string;
   focusedMetric: 'all' | 'cpu' | 'ram' | 'disk';
   onSetFocusedMetric: (metric: 'all' | 'cpu' | 'ram' | 'disk') => void;
@@ -15,12 +14,14 @@ interface MetricChartsProps {
   DISK_COLORS: string[];
   baseline?: NodeBaseline | null;
   alerts?: AlertRecord[];
+  onSelectAlert?: (alert: AlertRecord) => void;
 }
 
 export const MetricCharts: React.FC<MetricChartsProps> = ({
-  mappedHistory, chartStyle, locale, focusedMetric,
+  mappedHistory, locale, focusedMetric,
   onSetFocusedMetric, getRelativeTimeLabel, filteredHistory,
   diskChartData, uniqueMounts, DISK_COLORS, baseline, alerts,
+  onSelectAlert,
 }) => {
   return (
     <div className="grid gap-6 grid-cols-1">
@@ -28,7 +29,6 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
         <MetricChart
           metric="cpu"
           mappedHistory={mappedHistory}
-          chartStyle={chartStyle}
           locale={locale}
           focusedMetric={focusedMetric}
           onSetFocusedMetric={onSetFocusedMetric}
@@ -39,6 +39,7 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
           DISK_COLORS={DISK_COLORS}
           baseline={baseline}
           alerts={alerts}
+          onSelectAlert={onSelectAlert}
         />
       )}
 
@@ -46,7 +47,6 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
         <MetricChart
           metric="ram"
           mappedHistory={mappedHistory}
-          chartStyle={chartStyle}
           locale={locale}
           focusedMetric={focusedMetric}
           onSetFocusedMetric={onSetFocusedMetric}
@@ -57,6 +57,7 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
           DISK_COLORS={DISK_COLORS}
           baseline={baseline}
           alerts={alerts}
+          onSelectAlert={onSelectAlert}
         />
       )}
 
@@ -64,7 +65,6 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
         <MetricChart
           metric="disk"
           mappedHistory={mappedHistory}
-          chartStyle={chartStyle}
           locale={locale}
           focusedMetric={focusedMetric}
           onSetFocusedMetric={onSetFocusedMetric}
@@ -75,6 +75,7 @@ export const MetricCharts: React.FC<MetricChartsProps> = ({
           DISK_COLORS={DISK_COLORS}
           baseline={baseline}
           alerts={alerts}
+          onSelectAlert={onSelectAlert}
         />
       )}
     </div>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router';
-import { ArrowLeft, AlertTriangle, CheckCircle, ShieldAlert, Sparkles, Clock, Server } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, CheckCircle, ShieldAlert, Sparkles, Clock, Server, Cpu } from 'lucide-react';
 import { api } from '../hooks/useApi';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { useLocale } from '../i18n';
@@ -237,6 +237,57 @@ export const EventDetailPage: React.FC = () => {
           {alert.message}
         </p>
       </div>
+
+      {/* Processus suspect identifié */}
+      {alert.details?.top_process && (
+        <div className="p-5 border border-amber-500/30 rounded-2xl bg-amber-500/10 space-y-3">
+          <div className="text-[10px] font-interface font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-amber-400" />
+            {localT('PROCESSUS SUSPECT ET CONSOMMATEUR IDENTIFIÉ', 'SUSPECT RESOURCE-HEAVY PROCESS IDENTIFIED')}
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-surface/60 border border-amber-500/20 rounded-xl">
+            <div className="space-y-0.5">
+              <span className="font-mono text-base font-black text-amber-200">
+                {alert.details.top_process.name}
+              </span>
+              <div className="text-xs font-mono text-text-3">
+                PID : <span className="text-text-1 font-bold">{alert.details.top_process.pid}</span>
+                {alert.details.top_process.state && ` • État : ${alert.details.top_process.state}`}
+              </div>
+            </div>
+            <div className="flex items-center gap-4 font-mono text-xs">
+              <div className="px-2.5 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold">
+                {typeof alert.details.top_process.cpu_percent === 'number'
+                  ? `${alert.details.top_process.cpu_percent.toFixed(1)}% CPU`
+                  : '—'}
+              </div>
+              {alert.details.top_process.mem_rss_kb != null && (
+                <div className="px-2.5 py-1 rounded bg-surface-2 border border-border text-text-2">
+                  {(alert.details.top_process.mem_rss_kb / 1024).toFixed(1)} MB RAM
+                </div>
+              )}
+            </div>
+          </div>
+
+          {alert.details.top_processes && alert.details.top_processes.length > 1 && (
+            <div className="space-y-1.5 pt-1">
+              <div className="text-[9px] font-interface font-bold uppercase tracking-wider text-amber-400/80">
+                {localT('AUTRES PROCESSUS CONSOMMATEURS AU MOMENT DE L\'ÉVÉNEMENT :', 'OTHER HEAVY PROCESSES AT EVENT TIME:')}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {alert.details.top_processes.slice(1, 5).map((p, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-surface/40 border border-border/50 font-mono text-xs">
+                    <span className="truncate max-w-[140px] text-text-2">{p.name} (PID {p.pid})</span>
+                    <span className="font-bold text-amber-300">
+                      {typeof p.cpu_percent === 'number' ? `${p.cpu_percent.toFixed(1)}%` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Diagnostic LLM Section */}
       {investigation?.result && (

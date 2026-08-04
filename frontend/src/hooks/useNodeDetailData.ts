@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../hooks/useApi';
 import { useNodeInsights } from '../hooks/useNodeInsights';
 import { t } from '../i18n';
+import type { TimeRangePreset } from '../components/node-detail/MetricsOverview';
 import type {
   ContainerRecord,
   InsightRecord,
@@ -11,6 +12,36 @@ import type {
   StatsPoint,
   DiskMount,
 } from '../components/node-detail/types';
+
+const METRICS_RANGE_KEY = 'vigile_metrics_range';
+const RANGE_DURATIONS: Record<string, number> = {
+  '1h': 3600,
+  '6h': 21600,
+  '12h': 43200,
+  '24h': 86400,
+  '7d': 604800,
+  '30d': 2592000,
+};
+
+interface SavedMetricsRange {
+  preset: TimeRangePreset;
+  custom?: { start: number; end: number };
+}
+
+function loadSavedMetricsRange(): SavedMetricsRange {
+  try {
+    const raw = localStorage.getItem(METRICS_RANGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as SavedMetricsRange;
+      if (parsed && typeof parsed.preset === 'string') {
+        return { preset: parsed.preset, custom: parsed.custom };
+      }
+    }
+  } catch {
+    // corrupted storage -> fall back to default
+  }
+  return { preset: '1h' };
+}
 
 interface StatsSnapshot {
   collected_at: number;
@@ -53,6 +84,9 @@ export interface NodeDetailData {
   nodeAlerts: AlertRecord[];
   nodeBaseline: NodeBaseline | null;
   fetchNodeBaseline: () => Promise<void>;
+  timeRange: TimeRangePreset;
+  setTimeRange: (preset: TimeRangePreset, startSec?: number, endSec?: number) => void;
+  refreshStatsForRange: () => Promise<void>;
 }
 
 export function useNodeDetailData(nodeId: string | undefined, activePlugins: string[] | null): NodeDetailData {
@@ -78,6 +112,9 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
 
   const [restartingService, setRestartingService] = useState<string | null>(null);
   const [restartingContainer, setRestartingContainer] = useState<string | null>(null);
+
+  const [timeRange, setTimeRangeState] = useState<TimeRangePreset>(() => loadSavedMetricsRange().preset);
+  const rangeRef = useRef<SavedMetricsRange>(loadSavedMetricsRange());
 
   const fetchNodeDetails = useCallback(async () => {
     if (!nodeId) return;
@@ -122,7 +159,7 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     if (!nodeId) return;
     setLoadingStats(true);
     try {
-      let query = `?limit=5000`;
+      let query = `?limit=1440`;
       if (startSec && endSec) {
         query += `&start=${startSec}&end=${endSec}`;
       }
@@ -148,6 +185,30 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
       setLoadingStats(false);
     }
   }, [nodeId, fetchNodeAlerts]);
+
+  const fetchStatsForRange = useCallback((range: SavedMetricsRange) => {
+    if (range.preset === 'custom' && range.custom) {
+      return fetchStatsHistory(true, range.custom.start, range.custom.end);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const duration = RANGE_DURATIONS[range.preset] ?? 3600;
+    return fetchStatsHistory(true, now - duration, now);
+  }, [fetchStatsHistory]);
+
+  const setTimeRange = useCallback((preset: TimeRangePreset, startSec?: number, endSec?: number) => {
+    const custom = preset === 'custom' && startSec && endSec ? { start: startSec, end: endSec } : undefined;
+    const next: SavedMetricsRange = { preset, custom };
+    rangeRef.current = next;
+    setTimeRangeState(preset);
+    try {
+      localStorage.setItem(METRICS_RANGE_KEY, JSON.stringify(next));
+    } catch {
+      // storage unavailable (private mode) -> selection kept for the session only
+    }
+    void fetchStatsForRange(next);
+  }, [fetchStatsForRange]);
+
+  const refreshStatsForRange = useCallback(() => fetchStatsForRange(rangeRef.current), [fetchStatsForRange]);
 
   const fetchServicesList = useCallback(async () => {
     if (!nodeId) return;
@@ -265,5 +326,8 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     nodeAlerts,
     nodeBaseline,
     fetchNodeBaseline,
+    timeRange,
+    setTimeRange,
+    refreshStatsForRange,
   };
 }

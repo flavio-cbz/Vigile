@@ -293,10 +293,17 @@ class AlertEngine:
                     threshold=thresh,
                     operator=threshold.operator,
                 )
+                top_procs = snapshot.get("top_processes")
+                alert_details: dict[str, Any] = {}
+                if top_procs and isinstance(top_procs, list) and len(top_procs) > 0:
+                    alert_details["top_process"] = top_procs[0]
+                    alert_details["top_processes"] = top_procs
+
                 await self._fire_alert(
                     node_id, alert_name, severity, msg,
                     metric_value=float(value),
                     threshold=float(thresh),
+                    details=alert_details if alert_details else None,
                     db=db,
                 )
             elif current and current["status"] == "firing":

@@ -34,6 +34,15 @@ export interface DiskMount {
   growth_gb_per_day?: number;
 }
 
+export interface TopProcess {
+  pid: number;
+  name: string;
+  cpu_percent: number;
+  mem_rss_kb?: number;
+  state?: string;
+  [key: string]: unknown;
+}
+
 export interface StatsPoint {
   collected_at?: number;
   time: string;
@@ -41,6 +50,7 @@ export interface StatsPoint {
   ram: number;
   disk: number;
   disks?: DiskMount[];
+  top_processes?: TopProcess[];
 }
 
 export interface AlertRecord {
@@ -52,7 +62,11 @@ export interface AlertRecord {
   message: string;
   metric_value?: number | null;
   threshold?: number | null;
-  details?: Record<string, unknown> | null;
+  details?: {
+    top_process?: TopProcess;
+    top_processes?: TopProcess[];
+    [key: string]: unknown;
+  } | null;
   created_at: number;
   resolved_at?: number | null;
   updated_at?: number | null;

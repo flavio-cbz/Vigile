@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, HardDrive, ChevronRight, AlertTriangle } from 'lucide-react';
 import { Spinner } from '../primitives/Spinner';
-import { useLocale } from '../../i18n';
+import { t } from '../../i18n';
 import { getDiskScan } from '../../api/disk';
 import type { DiskScanResult } from '../../types/disk';
 import { DiskTreemap } from './DiskTreemap';
@@ -17,8 +17,8 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
   mounts,
   isAdmin,
 }) => {
-  const { t } = useLocale();
-  const [selectedPath, setSelectedPath] = useState(mounts[0] ?? '/');
+  const validMounts = mounts.filter((m) => m !== '/boot/efi');
+  const [selectedPath, setSelectedPath] = useState(validMounts[0] ?? '/');
   const [scanResult, setScanResult] = useState<DiskScanResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,8 +82,8 @@ export const NodeDetailDiskTab: React.FC<NodeDetailDiskTabProps> = ({
             onChange={(e) => setSelectedPath(e.target.value)}
             className="bg-surface-2 border border-border rounded px-3 py-1.5 focus:outline-none text-text-2 font-semibold"
           >
-            {mounts.length > 0
-              ? mounts.map((m) => (
+            {validMounts.length > 0
+              ? validMounts.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>

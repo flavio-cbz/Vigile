@@ -54,6 +54,29 @@ export const formatUptime = (seconds: number | undefined | null): string => {
   return `${days}j ${remainingHours}h`;
 };
 
+/**
+ * Formats a signed duration in seconds into a compact relative label with dynamic units.
+ * e.g., -30 → "-30s", -300 → "-5min", -10800 → "-3h", -93600 → "-1j 2h"
+ * Used for chart axis ticks / tooltips so long windows don't render as "-300min".
+ */
+export const formatRelativeDuration = (seconds: number): string => {
+  const sign = seconds < 0 ? '-' : '';
+  const abs = Math.abs(seconds);
+  if (abs < 60) return `${sign}${Math.round(abs)}s`;
+  const minutes = Math.floor(abs / 60);
+  if (minutes < 60) return `${sign}${minutes}min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0
+      ? `${sign}${hours}h${remainingMinutes.toString().padStart(2, '0')}`
+      : `${sign}${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${sign}${days}j ${remainingHours}h` : `${sign}${days}j`;
+};
+
 export const formatDateTime = (timestamp: number | null | undefined): string => {
   if (!timestamp) {
     return translate('common.unknown');

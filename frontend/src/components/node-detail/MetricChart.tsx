@@ -3,8 +3,6 @@ import { Cpu, Database, Layers } from 'lucide-react';
 import {
   AreaChart,
   Area,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -71,7 +69,6 @@ const METRIC_CONFIG = {
 interface MetricChartProps {
   metric: 'cpu' | 'ram' | 'disk';
   mappedHistory: Array<StatsPoint & { chartIndex: number }>;
-  chartStyle: 'area' | 'line';
   locale: string;
   focusedMetric: 'all' | 'cpu' | 'ram' | 'disk';
   onSetFocusedMetric: (metric: 'all' | 'cpu' | 'ram' | 'disk') => void;
@@ -82,12 +79,14 @@ interface MetricChartProps {
   DISK_COLORS: string[];
   baseline?: NodeBaseline | null;
   alerts?: AlertRecord[];
+  onSelectAlert?: (alert: AlertRecord) => void;
 }
 
 export const MetricChart: React.FC<MetricChartProps> = ({
-  metric, mappedHistory, chartStyle, locale, focusedMetric,
+  metric, mappedHistory, locale, focusedMetric,
   onSetFocusedMetric, getRelativeTimeLabel, filteredHistory,
   diskChartData, uniqueMounts, DISK_COLORS, baseline, alerts,
+  onSelectAlert,
 }) => {
   const localT = (frText: string, enText: string) => {
     return locale === 'fr' ? frText : enText;
@@ -107,6 +106,9 @@ export const MetricChart: React.FC<MetricChartProps> = ({
   const deltaStr = Math.abs(delta).toFixed(1);
   const trendText = delta > 1.0 ? `hausse de ${deltaStr} points` : delta < -1.0 ? `baisse de ${deltaStr} points` : 'stable';
   const secondaryPhrase = `Pic à ${maxVal}%, moyenne ${avgVal}%, ${trendText}`;
+
+  // Large series re-animate on every 20s poll — disable animation to avoid jank.
+  const isAnimationActive = mappedHistory.length <= 300;
 
   const curVal = lastVal;
   const mBase = baseline?.metrics?.[metric];
@@ -174,7 +176,26 @@ export const MetricChart: React.FC<MetricChartProps> = ({
       <div className="h-60 w-full mt-2 font-mono text-[10px]">
         <ResponsiveContainer width="100%" height="100%">
           {isDisk ? (
-            <LineChart data={diskChartData} margin={CHART_MARGIN}>
+            <AreaChart data={diskChartData} margin={CHART_MARGIN}>
+              <defs>
+                {uniqueMounts.length === 0 ? (
+                  <linearGradient id={cfg.gradientId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={color} stopOpacity={0.2} />
+                    <stop offset="95%" stopColor={color} stopOpacity={0.0} />
+                  </linearGradient>
+                ) : (
+                  uniqueMounts.map((mp, idx) => {
+                    const c = DISK_COLORS[idx % DISK_COLORS.length];
+                    const gradId = `colorDisk_${idx}`;
+                    return (
+                      <linearGradient key={mp} id={gradId} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={c} stopOpacity={0.2} />
+                        <stop offset="95%" stopColor={c} stopOpacity={0.0} />
+                      </linearGradient>
+                    );
+                  })
+                )}
+              </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(245, 241, 235, 0.04)" />
               <XAxis
                 dataKey="chartIndex"
@@ -183,7 +204,10 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 tickLine={false}
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
-              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} />} />
+              <Tooltip
+                wrapperStyle={{ pointerEvents: 'auto' }}
+                content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} onSelectAlert={onSelectAlert} />}
+              />
               <ReferenceLine
                 y={85}
                 stroke="var(--severity-critical)"
@@ -197,31 +221,39 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 }}
               />
               {uniqueMounts.length === 0 ? (
-                <Line
+                <Area
                   type="monotone"
                   dataKey="Global"
                   name={localT(cfg.nameFr, cfg.nameEn)}
                   stroke={color}
                   strokeWidth={2}
-                  dot={false}
+                  fillOpacity={1}
+                  fill={`url(#${cfg.gradientId})`}
                   activeDot={ACTIVE_DOT}
+                  isAnimationActive={isAnimationActive}
                 />
               ) : (
-                uniqueMounts.map((mp, idx) => (
-                  <Line
-                    key={mp}
-                    type="monotone"
-                    dataKey={mp}
-                    name={mp}
-                    stroke={DISK_COLORS[idx % DISK_COLORS.length]}
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={ACTIVE_DOT}
-                  />
-                ))
+                uniqueMounts.map((mp, idx) => {
+                  const c = DISK_COLORS[idx % DISK_COLORS.length];
+                  const gradId = `colorDisk_${idx}`;
+                  return (
+                    <Area
+                      key={mp}
+                      type="monotone"
+                      dataKey={mp}
+                      name={mp}
+                      stroke={c}
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill={`url(#${gradId})`}
+                      activeDot={ACTIVE_DOT}
+                      isAnimationActive={isAnimationActive}
+                    />
+                  );
+                })
               )}
-            </LineChart>
-          ) : chartStyle === 'area' ? (
+            </AreaChart>
+          ) : (
             <AreaChart data={mappedHistory} margin={CHART_MARGIN}>
               <defs>
                 <linearGradient id={cfg.gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -239,7 +271,10 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 tickLine={false}
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
-              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} />} />
+              <Tooltip
+                wrapperStyle={{ pointerEvents: 'auto' }}
+                content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} onSelectAlert={onSelectAlert} />}
+              />
               {mBase && !isLimited && (
                 <>
                   <ReferenceArea y1={0} y2={mBase.p75} fill="rgba(34, 197, 94, 0.03)" />
@@ -262,44 +297,9 @@ export const MetricChart: React.FC<MetricChartProps> = ({
                 fillOpacity={1}
                 fill={`url(#${cfg.gradientId})`}
                 activeDot={ACTIVE_DOT}
+                isAnimationActive={isAnimationActive}
               />
             </AreaChart>
-          ) : (
-            <LineChart data={mappedHistory} margin={CHART_MARGIN}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(245, 241, 235, 0.04)" />
-              <XAxis
-                dataKey="chartIndex"
-                type="number"
-                domain={[0, mappedHistory.length - 1]}
-                tickFormatter={getRelativeTimeLabel}
-                stroke="var(--text-3)"
-                tickLine={false}
-              />
-              <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
-              <Tooltip content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} />} />
-              {mBase && !isLimited && (
-                <>
-                  <ReferenceArea y1={0} y2={mBase.p75} fill="rgba(34, 197, 94, 0.03)" />
-                  <ReferenceArea y1={mBase.p75} y2={mBase.p90} fill="rgba(245, 158, 11, 0.05)" />
-                  <ReferenceArea y1={mBase.p90} y2={mBase.p99} fill="rgba(245, 158, 11, 0.08)" />
-                  <ReferenceArea y1={mBase.p99} y2={100} fill="rgba(239, 68, 68, 0.08)" />
-                </>
-              )}
-              <ReferenceLine
-                y={mBase?.absolute_critical || 85}
-                stroke="var(--severity-critical)"
-                strokeDasharray="4 4"
-              />
-              <Line
-                type="monotone"
-                dataKey={cfg.dataKey}
-                name={localT(cfg.nameFr, cfg.nameEn)}
-                stroke={color}
-                strokeWidth={2}
-                dot={false}
-                activeDot={ACTIVE_DOT}
-              />
-            </LineChart>
           )}
         </ResponsiveContainer>
       </div>

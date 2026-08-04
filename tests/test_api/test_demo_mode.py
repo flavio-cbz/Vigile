@@ -167,6 +167,35 @@ async def test_demo_node_stats(client: AsyncClient, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_demo_node_stats_with_range(client: AsyncClient, auth_headers):
+    now = time.time()
+    start = int(now - 3600)
+    end = int(now + 60)
+    response = await client.get(
+        f"/api/nodes/demo-node-01/stats?limit=1440&start={start}&end={end}",
+        headers=auth_headers("admin"),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    # 1h window -> 62 points at 60s step (both bounds included), all inside the range, newest first
+    assert len(data["snapshots"]) == 62
+    for snap in data["snapshots"]:
+        assert start <= snap["collected_at"] <= end
+    assert data["snapshots"][0]["collected_at"] >= data["snapshots"][-1]["collected_at"]
+
+    # 7d window -> spread across the week (step > 60s), still bounded by limit
+    start_week = int(now - 7 * 86400)
+    response_week = await client.get(
+        f"/api/nodes/demo-node-01/stats?limit=1440&start={start_week}&end={end}",
+        headers=auth_headers("admin"),
+    )
+    data_week = response_week.json()
+    assert 0 < len(data_week["snapshots"]) <= 1440
+    span = data_week["snapshots"][0]["collected_at"] - data_week["snapshots"][-1]["collected_at"]
+    assert span > 6 * 86400
+
+
+@pytest.mark.asyncio
 async def test_demo_node_logs(client: AsyncClient, auth_headers):
     response = await client.get(
         "/api/nodes/demo-node-01/logs?lines=5",

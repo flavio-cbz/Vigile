@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { Link } from 'react-router';
+import { X, ExternalLink, Cpu } from 'lucide-react';
 import type { AlertRecord } from './types';
 
 const ALERT_NAME_LABELS: Record<string, { fr: string; en: string }> = {
@@ -100,13 +101,16 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({ alert, local
     ? `${alert.threshold}`
     : null;
 
+  const topProc = alert.details?.top_process;
+  const topProcs = alert.details?.top_processes;
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md bg-surface border border-border-strong rounded-2xl shadow-2xl animate-fade-in"
+        className="relative w-full max-w-md bg-surface border border-border-strong rounded-2xl shadow-2xl animate-fade-in overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* En-tête */}
@@ -129,7 +133,7 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({ alert, local
         </div>
 
         {/* Corps */}
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-3 max-h-[75vh] overflow-y-auto">
           {/* Message complet */}
           <div>
             <div className="text-[9px] font-interface font-bold uppercase tracking-wider text-text-3 mb-1">
@@ -139,6 +143,45 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({ alert, local
               {alert.message}
             </p>
           </div>
+
+          {/* Processus le plus gourmand */}
+          {topProc && (
+            <div className="p-3 border border-amber-500/30 rounded-xl bg-amber-500/10 space-y-2">
+              <div className="text-[9px] font-interface font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                {localT('PROCESSUS SUSPECT IDENTIFIÉ', 'SUSPECT PROCESS IDENTIFIED')}
+              </div>
+              <div className="flex items-baseline justify-between font-mono">
+                <span className="text-sm font-black text-amber-200">{topProc.name}</span>
+                <span className="text-xs font-bold text-amber-300">
+                  {typeof topProc.cpu_percent === 'number' ? `${topProc.cpu_percent.toFixed(1)}% CPU` : ''}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-[10px] font-mono text-text-3 border-t border-amber-500/20 pt-1.5">
+                <span>PID : {topProc.pid}</span>
+                {topProc.mem_rss_kb != null && (
+                  <span>RAM : {(topProc.mem_rss_kb / 1024).toFixed(1)} MB</span>
+                )}
+                {topProc.state && <span>État : {topProc.state}</span>}
+              </div>
+
+              {topProcs && topProcs.length > 1 && (
+                <div className="pt-1 space-y-1">
+                  <div className="text-[8px] font-interface font-bold uppercase text-amber-400/80">
+                    {localT('Top processus de cette période :', 'Top processes in timeframe:')}
+                  </div>
+                  <div className="space-y-0.5">
+                    {topProcs.slice(0, 3).map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-[9px] font-mono text-text-2 bg-surface/50 px-2 py-0.5 rounded">
+                        <span className="truncate max-w-[180px]">{p.name} (PID {p.pid})</span>
+                        <span className="font-bold text-amber-300">{typeof p.cpu_percent === 'number' ? `${p.cpu_percent.toFixed(1)}%` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Valeur et seuil */}
           {(valueStr || thresholdStr) && (
@@ -206,10 +249,19 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({ alert, local
         </div>
 
         {/* Pied */}
-        <div className="p-3 border-t border-border flex justify-end">
+        <div className="p-3 border-t border-border flex items-center justify-between gap-2 bg-surface-2/30">
+          <Link
+            to={`/events/${alert.id}`}
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-interface font-bold uppercase tracking-wider border border-accent/40 text-accent hover:bg-accent/10 rounded cursor-pointer transition-all duration-150"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            {localT('Page Événement', 'Event Page')}
+          </Link>
+
           <button
             onClick={onClose}
-            className="px-4 py-1.5 text-[10px] font-interface font-bold uppercase tracking-wider border border-border hover:border-accent/40 text-text-2 hover:text-accent hover:bg-accent/5 rounded cursor-pointer transition-all duration-150"
+            className="px-4 py-1.5 text-[10px] font-interface font-bold uppercase tracking-wider border border-border hover:border-text-3 text-text-2 hover:text-text-1 rounded cursor-pointer transition-all duration-150"
           >
             {localT('Fermer', 'Close')}
           </button>

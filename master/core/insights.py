@@ -813,9 +813,9 @@ class InsightsManager:
         if disk_total == 0:
             return None
 
-        # Query metrics snapshots from the last 24 hours (86400 seconds)
+        # Query metrics snapshots from up to the last 30 days (2592000 seconds)
         now = time.time()
-        limit_time = now - 86400
+        limit_time = now - 2592000
 
         snapshots = []
         async with db.execute(

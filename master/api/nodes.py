@@ -1126,7 +1126,7 @@ async def get_node_stats(
         demo_node = get_demo_node(node_id)
         if demo_node is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
-        snapshots = get_demo_metrics(node_id, limit)
+        snapshots = get_demo_metrics(node_id, limit, start=start, end=end)
         return NodeStatsResponse(
             node_id=node_id,
             snapshots=[MetricsSnapshotResponse(**s) for s in snapshots],
@@ -1171,7 +1171,8 @@ async def get_node_stats(
                 AVG(disk_percent) AS disk_percent,
                 MAX(uptime_seconds) AS uptime_seconds,
                 AVG(processes) AS processes,
-                MAX(disks_json) AS disks_json
+                MAX(disks_json) AS disks_json,
+                MAX(top_processes_json) AS top_processes_json
             FROM metrics_snapshots
             WHERE node_id = ? AND collected_at >= ? AND collected_at <= ?
             GROUP BY CAST(collected_at / {bucket_size} AS INT)
@@ -1187,7 +1188,7 @@ async def get_node_stats(
                 mem_total_bytes, mem_used_bytes, mem_percent,
                 swap_total_bytes, swap_used_bytes,
                 disk_total_bytes, disk_used_bytes, disk_percent,
-                uptime_seconds, processes, disks_json
+                uptime_seconds, processes, disks_json, top_processes_json
             FROM metrics_snapshots
             WHERE node_id = ? AND collected_at >= ? AND collected_at <= ?
             ORDER BY collected_at DESC
@@ -1202,7 +1203,7 @@ async def get_node_stats(
             mem_total_bytes, mem_used_bytes, mem_percent,
             swap_total_bytes, swap_used_bytes,
             disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes, disks_json
+            uptime_seconds, processes, disks_json, top_processes_json
         FROM metrics_snapshots
         WHERE node_id = ?
         ORDER BY collected_at DESC
@@ -1218,6 +1219,11 @@ async def get_node_stats(
                     d["disks"] = json.loads(d["disks_json"])
                 except Exception:
                     d["disks"] = None
+            if d.get("top_processes_json"):
+                try:
+                    d["top_processes"] = json.loads(d["top_processes_json"])
+                except Exception:
+                    d["top_processes"] = None
             rows.append(d)
 
     return NodeStatsResponse(

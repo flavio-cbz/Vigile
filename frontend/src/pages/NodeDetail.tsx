@@ -60,7 +60,6 @@ export const NodeDetail: React.FC = () => {
     insightsMeta,
     statsHistory,
     loadingStats,
-    fetchStatsHistory,
     services,
     loadingServices,
     fetchServicesList,
@@ -81,14 +80,17 @@ export const NodeDetail: React.FC = () => {
     restartingContainer,
     setRestartingContainer,
     fetchNodeBaseline,
+    timeRange,
+    setTimeRange,
+    refreshStatsForRange,
   } = data;
 
   useEffect(() => {
     if (id) {
       void fetchNodeBaseline();
-      void fetchStatsHistory();
+      void refreshStatsForRange();
     }
-  }, [id, fetchNodeBaseline, fetchStatsHistory]);
+  }, [id, fetchNodeBaseline, refreshStatsForRange]);
 
   const tabs = useNodeDetailTabs({
     insightsCount: displayInsights?.length ?? 0,
@@ -113,7 +115,7 @@ export const NodeDetail: React.FC = () => {
     if (effectiveTab === 'containers' && activePlugins?.includes('docker') && !loadingContainers) fetchContainersList();
   }, [effectiveTab, activePlugins, id, fetchServicesList, fetchContainersList, loadingServices, loadingContainers]);
 
-  usePolling('detail_metrics_poll', () => fetchStatsHistory(true), 20000, effectiveTab === 'metrics');
+  usePolling('detail_metrics_poll', () => refreshStatsForRange(), 20000, effectiveTab === 'metrics');
   usePolling('detail_logs_poll', () => fetchNodeLogs(true), 15000, effectiveTab === 'logs');
 
   const handleRestartService = async (serviceName: string) => {
@@ -201,8 +203,9 @@ export const NodeDetail: React.FC = () => {
             nodeId={id}
             statsHistory={statsHistory}
             loading={loadingStats}
-            onRefresh={fetchStatsHistory}
-            onFetchHistoryWithRange={(start, end) => fetchStatsHistory(true, start, end)}
+            timeRange={timeRange}
+            onRefresh={refreshStatsForRange}
+            onSetTimeRange={setTimeRange}
             dataWindowHours={insightsMeta?.data_window_hours}
             observationReady={insightsMeta?.observation_ready}
             nodeBaseline={data.nodeBaseline}

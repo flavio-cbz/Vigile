@@ -35,6 +35,13 @@ describe('estimateDiskSaturation', () => {
     expect(disk.growth_gb_per_day).toBe(0);
   });
 
+  it('reports negative growth rate when disk space is being freed', () => {
+    const est = estimateDiskSaturation(buildHistory({ snapshots: 24, stepGb: -2 / 24 }));
+    const disk = est['/'];
+    expect(disk).toBeDefined();
+    expect(disk.growth_gb_per_day).toBeLessThan(0);
+  });
+
   it('returns empty when fewer than 4 snapshots', () => {
     expect(estimateDiskSaturation(buildHistory({ snapshots: 3, stepGb: 0.1 }))).toEqual({});
   });

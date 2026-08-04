@@ -7,19 +7,17 @@ export type TimeRangePreset = '1h' | '6h' | '12h' | '24h' | '7d' | '30d' | 'cust
 
 interface MetricsOverviewProps {
   timeRange: TimeRangePreset;
-  chartStyle: 'area' | 'line';
   isRefreshing: boolean;
   lastRefreshed: string;
   locale: string;
   nodeId?: string;
   onTimeRangeChange: (range: TimeRangePreset, customStartSec?: number, customEndSec?: number) => void;
-  onChartStyleChange: (style: 'area' | 'line') => void;
   onRefresh: () => void;
 }
 
 export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
-  timeRange, chartStyle, isRefreshing, lastRefreshed, locale, nodeId,
-  onTimeRangeChange, onChartStyleChange, onRefresh,
+  timeRange, isRefreshing, lastRefreshed, locale, nodeId,
+  onTimeRangeChange, onRefresh,
 }) => {
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [showCustomPicker, setShowCustomPicker] = useState(false);
@@ -128,28 +126,6 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
             </button>
           </div>
 
-          <div className="inline-flex bg-surface-2 p-1 rounded-lg border border-border">
-            <button
-              onClick={() => onChartStyleChange('area')}
-              className={`px-2 py-1 text-[10px] font-interface font-bold uppercase rounded transition-all cursor-pointer ${
-                chartStyle === 'area'
-                  ? 'bg-surface-3 text-accent border border-accent/20'
-                  : 'text-text-3 hover:text-text-2'
-              }`}
-            >
-              {localT('AIRES', 'AREA')}
-            </button>
-            <button
-              onClick={() => onChartStyleChange('line')}
-              className={`px-2 py-1 text-[10px] font-interface font-bold uppercase rounded transition-all cursor-pointer ${
-                chartStyle === 'line'
-                  ? 'bg-surface-3 text-accent border border-accent/20'
-                  : 'text-text-3 hover:text-text-2'
-              }`}
-            >
-              {localT('LIGNES', 'LINE')}
-            </button>
-          </div>
 
           <button
             onClick={handleRecalculate}

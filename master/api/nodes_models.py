@@ -113,6 +113,7 @@ class MetricsSnapshotResponse(BaseModel):
     disk_used_bytes: int
     disk_percent: float
     disks: list[DiskMountResponse] | None = None
+    top_processes: list[dict] | None = None
     uptime_seconds: float
     processes: int | None = None
 

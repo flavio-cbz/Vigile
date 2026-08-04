@@ -133,7 +133,9 @@ export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks, onNavigat
                     {d.growth_gb_per_day != null && (
                       <span className="text-text-3 flex items-center gap-1 text-[9px]">
                         {growthPositive ? <TrendingUp className="w-3 h-3 text-amber-400" /> : <TrendingDown className="w-3 h-3 text-emerald-400" />}
-                        {d.growth_gb_per_day.toFixed(2)} Go/j
+                        {Math.abs(d.growth_gb_per_day) < 0.1 && d.growth_gb_per_day !== 0
+                          ? `${d.growth_gb_per_day > 0 ? '+' : ''}${Math.round(d.growth_gb_per_day * 1024)} Mo/j`
+                          : `${d.growth_gb_per_day > 0 ? '+' : ''}${d.growth_gb_per_day.toFixed(2)} Go/j`}
                       </span>
                     )}
                   </div>
