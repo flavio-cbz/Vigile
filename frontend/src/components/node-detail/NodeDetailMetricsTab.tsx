@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import { Spinner } from '../primitives/Spinner';
 import { useLocale } from '../../i18n';
 import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
+import type { StatsSnapshot } from '../../hooks/useNodeDetailData';
 import { estimateDiskSaturation } from './diskUtils';
 import { formatRelativeDuration } from '../../utils/formatTime';
 import { MetricsOverview, type TimeRangePreset } from './MetricsOverview';
@@ -30,7 +31,8 @@ function generateSparklinePaths(points: number[], width = 120, height = 32, padd
 }
 
 export const NodeDetailMetricsTab: React.FC<{
-  statsHistory: StatsPoint[];
+  statsHistory?: StatsPoint[];
+  fullDiskHistory?: StatsSnapshot[];
   loading: boolean;
   nodeId?: string;
   onRefresh: () => void;
@@ -41,7 +43,7 @@ export const NodeDetailMetricsTab: React.FC<{
   nodeBaseline?: NodeBaseline | null;
   nodeAlerts?: AlertRecord[];
 }> = ({
-  statsHistory, loading, nodeId, onRefresh, timeRange, onSetTimeRange,
+  statsHistory = [], fullDiskHistory = [], loading, nodeId, onRefresh, timeRange, onSetTimeRange,
   dataWindowHours, observationReady = true, nodeBaseline, nodeAlerts,
 }) => {
   const { locale, t } = useLocale();
@@ -68,7 +70,7 @@ export const NodeDetailMetricsTab: React.FC<{
     onSetTimeRange(preset, customStartSec, customEndSec);
   };
 
-  const filteredHistory = statsHistory;
+  const filteredHistory = statsHistory || [];
 
   const mappedHistory = useMemo(() => {
     return filteredHistory.map((point, idx) => ({
@@ -77,15 +79,15 @@ export const NodeDetailMetricsTab: React.FC<{
     }));
   }, [filteredHistory]);
 
-  const lastSnap = statsHistory[statsHistory.length - 1];
+  const lastSnap = filteredHistory[filteredHistory.length - 1] || null;
 
-  const cpuHistory = useMemo(() => statsHistory.map(p => p.cpu), [statsHistory]);
-  const ramHistory = useMemo(() => statsHistory.map(p => p.ram), [statsHistory]);
-  const diskHistory = useMemo(() => statsHistory.map(p => p.disk), [statsHistory]);
+  const cpuHistory = useMemo(() => filteredHistory.map(p => p.cpu), [filteredHistory]);
+  const ramHistory = useMemo(() => filteredHistory.map(p => p.ram), [filteredHistory]);
+  const diskHistory = useMemo(() => filteredHistory.map(p => p.disk), [filteredHistory]);
 
   const uniqueMounts = useMemo(() => {
     const set = new Set<string>();
-    statsHistory.forEach(point => {
+    filteredHistory.forEach(point => {
       if (point.disks) {
         point.disks.forEach(d => {
           if (d.mount_point !== '/boot/efi') {
@@ -95,7 +97,7 @@ export const NodeDetailMetricsTab: React.FC<{
       }
     });
     return Array.from(set);
-  }, [statsHistory]);
+  }, [filteredHistory]);
 
   const DISK_COLORS = ['#f59e0b', '#10b981', '#3b82f6', '#ec4899', '#8b5cf6', '#06b6d4'];
 
@@ -145,15 +147,16 @@ export const NodeDetailMetricsTab: React.FC<{
   const diskSpark = useMemo(() => generateSparklinePaths(diskHistory.slice(-15)), [diskHistory]);
 
   const enrichedDisks = useMemo(() => {
-    const lastSnap = statsHistory[statsHistory.length - 1];
+    const lastSnap = filteredHistory[filteredHistory.length - 1];
     const disks = (lastSnap?.disks || []).filter(d => d.mount_point !== '/boot/efi');
-    const estimates = estimateDiskSaturation(statsHistory);
+    const diskHistoryForEstimate = fullDiskHistory.length > 0 ? fullDiskHistory : filteredHistory;
+    const estimates = estimateDiskSaturation(diskHistoryForEstimate);
     return disks.map(d => ({
       ...d,
       days_left: estimates[d.mount_point]?.days_left ?? null,
       growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
     }));
-  }, [statsHistory]);
+  }, [filteredHistory, fullDiskHistory]);
 
   const getStatus = (val: number, type: 'cpu' | 'ram' | 'disk') => {
     const mBase = nodeBaseline?.metrics?.[type];
@@ -193,7 +196,7 @@ export const NodeDetailMetricsTab: React.FC<{
     setFocusedMetric(prev => prev === metric ? 'all' : metric);
   };
 
-  if (loading && statsHistory.length === 0) {
+  if (loading && filteredHistory.length === 0) {
     return (
       <div className="py-24 text-center text-text-3 flex flex-col items-center justify-center gap-3">
         <Spinner size="md" />
@@ -204,7 +207,7 @@ export const NodeDetailMetricsTab: React.FC<{
     );
   }
 
-  if (statsHistory.length === 0) {
+  if (filteredHistory.length === 0) {
     return (
       <div className="py-24 border border-dashed border-border rounded-2xl bg-surface/40 text-center text-text-3 flex flex-col items-center justify-center gap-2">
         <Activity className="w-8 h-8 text-text-3 opacity-40" />

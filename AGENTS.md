@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-07-23T00:00:00+00:00
-**Commit:** da42dbc
-**Branch:** refactor/plugin-engine-v2
+**Generated:** 2026-08-04T00:00:00+00:00
+**Commit:** 2f0cb40
+**Branch:** master
 **Updated by /init-deep:** root updated, subdirectory files (re)created.
 
 ## OVERVIEW
@@ -51,67 +51,7 @@ docs/                    # Planning, known limits, and session logs
 | `ActionProposal` | Class | [action_proposal.py](master/core/action_proposal.py) | Medium | Operator-approved action model (PENDING to APPROVED to EXECUTED/FAILED) |
 | `DiskScanResult` | Class | [disk_scan.py](master/schemas/disk_scan.py) | Medium | Pydantic v2 schema validating Worker DISK_SCAN output before cache write (fail-closed against malicious workers) |
 | `handleDiskScan` | Function | [disk_scan.go](worker/disk_scan.go) | Medium | Go stdlib disk-scan intent handler — dynamic whitelist via `params.mounts`, allocated size via `stat.Blocks×stat.Blksize`, 45s timeout, 2 MB payload cap |
-| `DiskAnalysisPlugin` | Class | [disk_analysis/__init__.py](master/plugins/disk_analysis/__init__.py) | Low | Frontend-only plugin for the GrandPerspective-style treemap view |
-| `worker_join_handler` | Function | [worker_handler.py](master/ws/worker_handler.py) | High | Entry point router `/ws/worker/join` for worker connections |
-| `verify_chain` | Function | [audit.py](master/core/audit.py) | Medium | Full SHA256 chain verification walking the entire audit log table |
-| `run_migrations` | Function | [migrations.py](master/db/migrations.py) | Medium | Idempotent table creation, indexes registration, and admin seeder |
-
-## CONVENTIONS
-- **No ORM**: Raw SQL text queries via `aiosqlite`.
-# PROJECT KNOWLEDGE BASE
-
-**Generated:** 2026-07-23T00:00:00+00:00
-**Commit:** da42dbc
-**Branch:** refactor/plugin-engine-v2
-**Updated by /init-deep:** root updated, subdirectory files (re)created.
-
-## OVERVIEW
-Vigile is a zero-trust fleet management server and agent system. The Python/FastAPI Master node coordinates authenticated operator commands via an LLM agent with human-in-the-loop validation, communicating with autonomous, zero-dependency Go Workers over WebSocket.
-
-## STRUCTURE
-```text
-master/                  # Control plane FastAPI server
-├── api/                 # REST API layer (auth, nodes, services, chat)
-├── core/                # Trusted domain logic (state, crypto, LLM, audit)
-├── db/                  # Raw SQL SQLite database & Alembic migrations
-├── plugins/             # OS systemd/Docker/metrics/disk_analysis telemetry plugins
-├── ws/                  # Two-phase WebSocket enrollment & operational connection handler
-├── static/              # Compiled React SPA files served directly by FastAPI
-worker/                  # Zero-dependency autonomous Go agent binary (DISK_SCAN handler)
-frontend/                # React Vite SPA for operator interaction & Copilot (d3-hierarchy treemap)
-tests/                   # Pytest test suite (93% coverage)
-scripts/                 # Dev launcher and Docker-based simulation tests
-docs/                    # Planning, known limits, and session logs
-```
-
-## WHERE TO LOOK
-
-| Task | Location | Notes |
-|------|----------|-------|
-| Core logic (state machine, crypto, audit, LLM, insights, plugin engine) | [master/core/](master/core/) | See [master/core/AGENTS.md](master/core/AGENTS.md) |
-| REST API endpoints (auth, nodes, services, chat, admin, audit, demo) | [master/api/](master/api/) | See [master/api/AGENTS.md](master/api/AGENTS.md) |
-| Go Worker binary | [worker/](worker/) | See [worker/AGENTS.md](worker/AGENTS.md) |
-| Database (pure SQL, migrations, alembic) | [master/db/](master/db/) | Single small dir; see root CODE MAP for `run_migrations`. |
-| Plugins (metrics, systemd, docker, disk_analysis, plex, clean_logs) | [master/plugins/](master/plugins/) | See [master/plugins/AGENTS.md](master/plugins/AGENTS.md) |
-| WebSocket protocol handler | [master/ws/](master/ws/) | Single dir: `worker_handler.py` (`worker_join_handler`), see root CODE MAP. |
-| Pytest test suite | [tests/](tests/) | See [tests/AGENTS.md](tests/AGENTS.md) |
-| Simulation & dev launcher | [scripts/](scripts/) | Single dir; see root COMMANDS for invocation. |
-| React SPA | [frontend/](frontend/) | See [frontend/AGENTS.md](frontend/AGENTS.md) |
-
-## CODE MAP
-
-| Symbol | Type | Location | Refs | Role |
-|--------|------|----------|------|------|
-| `SecurityManager` | Class | [security_manager.py](master/core/security_manager.py) | High | Cryptography, JOIN_TOKEN (HMAC), JWT, Ed25519 challenge/response verification |
-| `NodeManager` | Class | [node_manager.py](master/core/node_manager.py) | High | Worker lifecycle state machine and active WebSocket registries |
-| `PluginManager` | Class | [plugin_manager.py](master/core/plugin_manager.py) | Medium | Hook-based plugin loading and sync/async hook dispatching |
-| `RateLimiter` | Class | [rate_limiter.py](master/core/rate_limiter.py) | Medium | Sliding window rate limiting per IP + endpoint with lifespan cleanups |
-| `LLMClient` | Class | [llm_client.py](master/core/llm_client.py) | Medium | Native HTTP client for OpenAI-compatible chat completion & streams |
-| `StructuredLLM` | Class | [structured_llm.py](master/core/structured_llm.py) | Medium | System prompts for JSON schema validation & LLM retry feedback loops |
-| `ActionProposal` | Class | [action_proposal.py](master/core/action_proposal.py) | Medium | Operator-approved action model (PENDING to APPROVED to EXECUTED/FAILED) |
-| `DiskScanResult` | Class | [disk_scan.py](master/schemas/disk_scan.py) | Medium | Pydantic v2 schema validating Worker DISK_SCAN output before cache write (fail-closed against malicious workers) |
-| `handleDiskScan` | Function | [disk_scan.go](worker/disk_scan.go) | Medium | Go stdlib disk-scan intent handler — dynamic whitelist via `params.mounts`, allocated size via `stat.Blocks×stat.Blksize`, 45s timeout, 2 MB payload cap |
-| `DiskAnalysisPlugin` | Class | [disk_analysis/__init__.py](master/plugins/disk_analysis/__init__.py) | Low | Frontend-only plugin for the GrandPerspective-style treemap view |
+| `DiskAnalysisPlugin` | Class | [disk_analysis/__init__.py](master/plugins/disk_analysis/__init__.py) | Low | Backend+frontend plugin: scheduled DISK_SCAN intents + GrandPerspective-style treemap UI (Tier 2 shipped) |
 | `worker_join_handler` | Function | [worker_handler.py](master/ws/worker_handler.py) | High | Entry point router `/ws/worker/join` for worker connections |
 | `verify_chain` | Function | [audit.py](master/core/audit.py) | Medium | Full SHA256 chain verification walking the entire audit log table |
 | `run_migrations` | Function | [migrations.py](master/db/migrations.py) | Medium | Idempotent table creation, indexes registration, and admin seeder |
@@ -178,8 +118,8 @@ To ensure the integrity, consistency, and long-term maintainability of the proje
 - **No Blind Local Patching**: Local hotfixes or workarounds are strictly forbidden if they introduce style divergence, bypass defined abstractions, or conflict with the architectural guidelines of this project.
 
 ## NOTES
-- `data/` and `__pycache__` are gitignored.
-- `AGENTS.md` and `RULES.md` are gitignored to preserve developer workspace preferences.
+- `data/`, `__pycache__`, `.venv/` are gitignored.
+- Root `AGENTS.md` + `RULES.md` are tracked in git; subdirectory `AGENTS.md` files (e.g. `master/core/AGENTS.md`) are gitignored to preserve developer workspace preferences.
 - SQLite WAL mode enables parallel reads but writes are serialized.
 - Auto-generated secrets (`secrets.token_hex(32)`) occur dynamically if config values are blank in development.
 - Copilot `RESTART_CONTAINER` proposals normalize `container_id`/`container`/`name`/`target` to canonical `{"container_id": ..., "target": ...}` before persistence when a single safe match exists, and revalidate at approval for legacy pending proposals.
@@ -187,6 +127,7 @@ To ensure the integrity, consistency, and long-term maintainability of the proje
 - DISK_SCAN security review (2026-07-19, self-review after Oracle timeout): **SHIP with notes**. PASS: symlink safety in walk (skip on `os.ModeSymlink`), dynamic whitelist fail-closed (empty `mounts` → reject), Pydantic schema validation rejects unknown fields (`extra="forbid"`) and caps `children` at 100. GAPs: (a) **Rate-limit on `force=true`** — no per-node in-flight lock or `RateLimiter` dep; admin can trigger concurrent 45s scans → worker WS exhaustion. Open a follow-up issue before Tier 3. (b) **Cache write + audit log are separate transactions** — a crash between them leaves cache-without-audit; consistent with existing codebase split-transaction pattern but not ideal. (c) **TOCTOU on `EvalSymlinks` vs `ReadDir`** — low severity, requires root on worker host (which is already a trusted actor). (d) **No Master-side size cap on `result["output"]` before `model_validate_json`** — minor defense-in-depth.
 - **Frontend build**: `master/static/assets/` must be rebuilt after any CSS/TSX change (`npm run build` in `frontend/` then copy `dist/assets/*` to `master/static/assets/` and update `master/static/index.html`). Stale builds cause missing CSS classes and black screen in Copilot panel (fixed: added ErrorBoundary around CopilotPanel in RootLayout.tsx).
 - **No ErrorBoundary in main.tsx**: any React render error crashes the entire SPA to a blank screen. CopilotPanel is now wrapped in ErrorBoundary; consider wrapping the whole app root eventually.
+- **Interactive Recharts tooltip (MetricsTooltip, 2026-08-04)**: Recharts v3 renders the tooltip via portal INSIDE the `recharts-wrapper` div, and that same div carries all mouse handlers (`onMouseMove`/`onMouseEnter`/`onMouseLeave`). Consequence: moving the cursor off the hovered point toward the tooltip card recomputes the active index on every mousemove → the tooltip jumps point-to-point (DOM re-created at the new position) or closes entirely (index null → `active:false` → custom content returns null), making the "Détail" link / event card unclickable. **Fix**: `onMouseMove={(e) => e.stopPropagation()}` on the `MetricsTooltip` Card root — once the cursor enters the card, the chart never sees the mousemove, the index freezes, and the card becomes clickable. Do NOT remove the stopPropagation "as cleanup": it is load-bearing. Related recharts v3 facts: `active` prop forces sticky display, `defaultIndex` is the programmatic index control, `activeIndex` prop was removed in v3.
 - **React error #185 (Maximum update depth exceeded) — fixed in CopilotPanel.tsx**: The diagnostic/proposal trigger `useEffect` previously depended on `activeSession` and `isStreaming`, which caused it to re-run whenever `sendMessage()`'s finally block called `fetchSessions()`. `fetchSessions` updated `activeSession` in Zustand, triggering the effect again, which called `sendMessage()` again → infinite loop → error #185. **Fix**: replaced the effect with a `useRef(false)` guard (`triggerProcessedRef`) that tracks whether the trigger has already been processed for the current panel open. The effect now runs once per `copilotContext` change and is immune to `activeSession`/`isStreaming` changes caused by message streaming. Dependencies simplified to `[copilotOpen, copilotContext, sendMessage, nodeId]`.
 - **Disk growth estimation is level-shift aware (2026-08-03)**: `master/core/insights.py::_calculate_disk_insight` and `frontend/src/components/node-detail/diskUtils.ts::estimateDiskSaturation` treat IQR-outlier deltas as PERMANENT LEVEL SHIFTS (mass deletion / bulk import), not noise. The series is rebuilt backwards from the latest value ignoring those jumps, so a mass deletion no longer zeroes the growth estimate (previously the −50 GB step dominated the least-squares slope → `max(0, slope)` → 0 Go/jour "Disque stable"). Both implementations mirror each other; a spike (backup written then deleted) still nets out to a flat rebuilt series. Guard: fewer than 3 inlier deltas → "Tendance disque fluctuante" (backend) / growth 0 confidence low (frontend).
 
@@ -199,6 +140,22 @@ File-by-file audit (4 specialists + cross-critique + Oracle verification) found 
 - **Infra**: 30 new issues (live API key in .env, zero Go/frontend tests, CI no pre-commit/securité)
 
 Full report: `.sisyphus/reports/audit-missed-report.md`
+
+## AUDIT FIXES (2026-08-04)
+Corrections de l'audit `vigile_audit.md` appliquées et vérifiées (21 fichiers, suite complète **579 passed / 2 deselected**). Points notables entrés dans la mémoire projet :
+- `hook_bus.py`: `except Exception` → `except BaseException` dans `call()`/`call_first()` (ne pas avaler KeyboardInterrupt/SystemExit) ; `unregister()` prunes `_metrics`.
+- `circuit_breaker.py`: `reset()` est **async** (sous `_lock`) — tout appelant sync doit être migré.
+- `plugin_engine.py`: classe `_Lifecycle` supprimée (zéro référence) ; `_scan_py_file` version sentinelle `0.0.0` ; validation zip-slip + `manifest.id` traversal.
+- `structured_llm.py`: paramètre renommé `max_retries` → `max_attempts` (API publique — caller `chat_stream.py:712` + tests mis à jour) ; stripping `<think>` en boucle (imbriqués).
+- `outbox.py`: claim `processed=2` anti-double-sweep + reset en échec ; `replay_unprocessed` reset les claims orphelins ; sémantique at-least-once documentée.
+- `security_manager.py`: `ExpiredTokenError(SecurityError, ValueError)` (MRO double pour compat `except ValueError`) ; `load_or_generate_master_key` utilise `O_EXCL` + re-read sur course.
+- `alert_engine.py`: `_alert_rate_limiter` clés composites `f"{node_id}:{alert_name}"` — purge par préfixe dans `cleanup_orphaned_alerts` (le `pop(nid)` nu ne matchait jamais) ; auto-résolution `node_reboot_detected`/`node_connection_flap` ; doublon `cpu_high_load` supprimé (== `cpu_load_per_core_high`).
+- `investigation_manager.py`: DI via paramètre constructeur `insights` + `set_insights()` (plus d'import `master.api.deps`) ; statut `'skipped'` persisté.
+- `insights.py`: `_generate_profile_with_own_connection` — le fallback pool doit attraper `RuntimeError` en plus de `TimeoutError` (queue module-level liée à un event loop antérieur en environnement de test).
+- `worker_query_port.py`: 4 méthodes read-only déléguent à `query()` (chemin unique).
+- Rejetés : `proposal_dispatcher` PD-2 (stub `send_intent()` volontaire), PD-3 (code mort), `proposal_autoexpire` AE-1 (faux positif).
+
+Full report: `vigile_audit.md`
 
 ## FIELD VALIDATION 2026-06-17 (youcloud.ovh, prod stack)
 Live test of the worker against the production deployment on youcloud.ovh:

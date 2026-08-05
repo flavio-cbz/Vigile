@@ -462,10 +462,11 @@ class PluginLifecycleManager:
         db = self._db_conn()
         if db is not None:
             try:
-                await db.execute(
-                    "UPDATE plugins SET status = ? WHERE id = ?",
-                    (runtime_state, plugin_id),
-                )
+                async with transaction(db) as tx_db:
+                    await tx_db.execute(
+                        "UPDATE plugins SET status = ? WHERE id = ?",
+                        (runtime_state, plugin_id),
+                    )
             except Exception:
                 pass
 

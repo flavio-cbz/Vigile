@@ -104,6 +104,9 @@ class HookBus:
         removed = before - len(self._hooks[hook_name])
         if not self._hooks[hook_name]:
             del self._hooks[hook_name]
+        # Prune the per-hook:plugin metric key (no-op if absent) — without this
+        # the metrics dict grows unboundedly across hot-reload/unregister cycles.
+        self._metrics.pop(f"{hook_name}:{plugin_name}", None)
         return removed
 
     def has_hook(self, hook_name: str) -> bool:
@@ -138,7 +141,7 @@ class HookBus:
             error = False
             try:
                 result = fn(**kwargs)
-            except Exception:
+            except BaseException:
                 logger.exception(
                     "HookBus: hook '%s' impl from '%s' raised an exception",
                     hook_name,
@@ -167,7 +170,7 @@ class HookBus:
             error = False
             try:
                 result = fn(**kwargs)
-            except Exception:
+            except BaseException:
                 logger.exception(
                     "HookBus: hook '%s' impl from '%s' raised an exception",
                     hook_name,
@@ -284,7 +287,7 @@ class HookBus:
         for plugin_name, fn in impls:
             inner = self._run_async_hook(plugin_name, fn, hook_name, **kwargs)
             tasks.append(
-                asyncio.ensure_future(asyncio.wait_for(inner, timeout=effective_timeout))
+                asyncio.create_task(asyncio.wait_for(inner, timeout=effective_timeout))
             )
 
         results_raw = await asyncio.gather(*tasks, return_exceptions=True)

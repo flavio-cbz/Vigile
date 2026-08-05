@@ -4,7 +4,8 @@ Vigile — Nodes API: Pydantic request/response models
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Any
+from pydantic import BaseModel, Field, field_validator
 
 
 class GenerateJoinRequest(BaseModel):
@@ -94,6 +95,13 @@ class DiskMountResponse(BaseModel):
     used_bytes: int
     percent: float
 
+    @field_validator("total_bytes", "used_bytes", mode="before")
+    @classmethod
+    def round_int_fields(cls, v: Any) -> int | None:
+        if v is None:
+            return None
+        return int(round(float(v)))
+
 
 class MetricsSnapshotResponse(BaseModel):
     """Single metrics snapshot exposed via the stats endpoint."""
@@ -117,9 +125,27 @@ class MetricsSnapshotResponse(BaseModel):
     uptime_seconds: float
     processes: int | None = None
 
+    @field_validator(
+        "mem_total_bytes",
+        "mem_used_bytes",
+        "swap_total_bytes",
+        "swap_used_bytes",
+        "disk_total_bytes",
+        "disk_used_bytes",
+        "cpu_cores",
+        "processes",
+        mode="before",
+    )
+    @classmethod
+    def round_int_fields(cls, v: Any) -> int | None:
+        if v is None:
+            return None
+        return int(round(float(v)))
+
 
 class NodeStatsResponse(BaseModel):
     """Node stats endpoint response."""
 
     node_id: str
     snapshots: list[MetricsSnapshotResponse]
+

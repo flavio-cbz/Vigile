@@ -23,6 +23,7 @@ from master.api.deps import (
     get_worker_query_port,
     require_role,
 )
+from master.api.nodes_helpers import ARCH_MAP
 from master.api.nodes_router import router
 from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
@@ -71,12 +72,6 @@ async def update_worker(
             detail=f"Worker disconnected: cannot update node {node_id} while offline",
         )
 
-    ARCH_MAP = {
-        "x86_64": "amd64",
-        "aarch64": "arm64",
-        "armv7l": "armv7",
-        "arm": "armv7",
-    }
     raw_os = (node.get("os") or "linux").lower()
     raw_arch = (node.get("arch") or "amd64").lower()
     node_os = raw_os
@@ -139,14 +134,14 @@ async def update_worker(
 )
 async def get_disk_scan(
     node_id: Annotated[str, Path(description="Node UUID")],
+    claims: Annotated[dict, _operator_plus],
+    db: DB,
     path: str = Query("/"),
     force: bool = False,
     max_depth: int = Query(4, ge=0, le=20),
     min_size_bytes: int = Query(10 * 1024 * 1024, ge=0),
-    claims: Annotated[dict, _operator_plus] = None,
     nm: NodeManager = Depends(get_node_manager),
     port: WorkerQueryPort = Depends(get_worker_query_port),
-    db: DB = None,
 ) -> dict[str, Any]:
     """
     Scan disk usage tree for a node's filesystem.
@@ -154,8 +149,6 @@ async def get_disk_scan(
     Results are cached for 5 minutes per node. Pass ``force=true``
     (admin only) to bypass the cache and trigger a fresh scan.
     """
-    if claims is None:
-        claims = {}
     if force:
         if claims.get("role") not in ("admin",):
             raise HTTPException(

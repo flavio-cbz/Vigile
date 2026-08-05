@@ -107,6 +107,12 @@ _RETRYABLE_ERRORS: tuple[type[Exception], ...] = (
     LLMServerError,
 )
 
+#: Extra body keys accepted from kwargs; everything else is rejected to
+#: prevent arbitrary parameter injection (model, api_key, ...).
+_BODY_KWARGS_WHITELIST = frozenset(
+    {"tools", "tool_choice", "response_format", "stop", "seed", "max_tokens", "temperature"}
+)
+
 
 class LLMClient:
     """
@@ -146,14 +152,15 @@ class LLMClient:
         self._retry_jitter = retry_jitter
         # Use shared singleton client unless a custom one is injected (e.g. tests)
         self._client: httpx.AsyncClient = client if client is not None else get_shared_client(timeout=self.timeout)
+        self._owns_client: bool = client is not None
         self._cb = CircuitBreaker(
-            name=f"llm:{model}",
+            name=f"llm:{model}@{self.base_url}",
             failure_threshold=3,
             timeout=120.0,
         )
         # Health tracking
         self._last_success_time: float = 0.0
-        self._error_timestamps: deque[float] = deque()
+        self._error_timestamps: deque[float] = deque(maxlen=1000)
 
     async def complete(
         self,
@@ -295,6 +302,9 @@ class LLMClient:
             ) as resp:
                 if resp.status_code >= 400:
                     try:
+                        # Body not buffered on a streaming response: read it
+                        # first, otherwise resp.text raises ResponseNotRead.
+                        await resp.aread()
                         error_text = resp.text[:200]
                     except Exception:
                         error_text = "<unreadable response>"
@@ -384,11 +394,14 @@ class LLMClient:
     async def close(self) -> None:
         """Close the HTTP client.
 
-        For shared clients, this closes the pool — subsequent get_shared_client()
-        calls will create a fresh one. For injected clients (tests), only that
-        instance is closed.
+        Only the client injected via the ``client=`` constructor argument is
+        closed. The shared module-level pool (get_shared_client) is left
+        untouched: closing it would break every other LLMClient instance
+        sharing the pool. Application shutdown closes the pool via
+        llm_http_pool.close_shared_client().
         """
-        await self._client.aclose()
+        if self._owns_client:
+            await self._client.aclose()
 
     def _build_headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -402,10 +415,18 @@ class LLMClient:
         stream: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        unexpected = set(kwargs) - _BODY_KWARGS_WHITELIST
+        if unexpected:
+            raise ValueError(
+                f"Paramètres LLM non reconnus: {sorted(unexpected)}. "
+                f"Autorisés: {sorted(_BODY_KWARGS_WHITELIST)}."
+            )
         body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": stream,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
         }
         body.update(kwargs)
         return body

@@ -50,11 +50,20 @@ class Scheduler:
 
         ``tasks_spec`` is a list of mappings with keys ``name``,
         ``interval_secs`` and ``handler`` (the method name on ``instance``).
-        Existing tasks for ``plugin_id`` are left untouched — call
-        :meth:`stop` first to avoid duplicates.
+        If a task with the same key already exists and is still running,
+        it is cancelled first and replaced — re-starting a plugin's
+        schedules is idempotent.
         """
         for spec in tasks_spec:
             key = f"{plugin_id}:{spec['name']}"
+            existing = self._tasks.get(key)
+            if existing is not None and not existing.done():
+                logger.warning(
+                    "Scheduler: task '%s' for plugin '%s' already running — cancelling it before restart",
+                    spec["name"],
+                    plugin_id,
+                )
+                existing.cancel()
             task = asyncio.create_task(self._loop(plugin_id, spec, instance))
             self._tasks[key] = task
             logger.info(
@@ -154,10 +163,8 @@ class Scheduler:
                 else:
                     await loop.run_in_executor(None, method)
             except asyncio.CancelledError:
-                # Propagate cancellation but keep the counter consistent.
-                self._active_callbacks[plugin_id] = max(
-                    0, self._active_callbacks.get(plugin_id, 1) - 1
-                )
+                # Propagate cancellation; the finally block below decrements
+                # the counter on every exit path (normal, exception, cancel).
                 raise
             except Exception:
                 logger.exception(
@@ -166,7 +173,6 @@ class Scheduler:
                     plugin_id,
                 )
             finally:
-                # Only decrement if we did not re-raise CancelledError above.
                 current = self._active_callbacks.get(plugin_id, 0)
                 if current > 0:
                     self._active_callbacks[plugin_id] = current - 1

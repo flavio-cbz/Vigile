@@ -46,7 +46,7 @@ function loadSavedMetricsRange(): SavedMetricsRange {
   return { preset: '1h' };
 }
 
-interface StatsSnapshot {
+export interface StatsSnapshot {
   collected_at: number;
   cpu_percent: number;
   mem_percent: number;
@@ -105,6 +105,7 @@ export interface NodeDetailData {
   timeRange: TimeRangePreset;
   setTimeRange: (preset: TimeRangePreset, startSec?: number, endSec?: number) => void;
   refreshStatsForRange: () => Promise<void>;
+  fullDiskHistory: StatsSnapshot[];
 }
 
 export function useNodeDetailData(nodeId: string | undefined, activePlugins: string[] | null): NodeDetailData {
@@ -115,6 +116,7 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
 
   const [statsHistory, setStatsHistory] = useState<StatsPoint[]>([]);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [fullDiskHistory, setFullDiskHistory] = useState<StatsSnapshot[]>([]);
 
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [loadingServices, setLoadingServices] = useState(false);
@@ -237,7 +239,29 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     void fetchStatsForRange(next);
   }, [fetchStatsForRange]);
 
-  const refreshStatsForRange = useCallback(() => fetchStatsForRange(rangeRef.current), [fetchStatsForRange]);
+  // Fetch ALL disk history (wide range, limit=5000) — used for disk-fill
+  // predictions, independent of the chart's active time-range filter.
+  const fetchFullDiskHistory = useCallback(async () => {
+    if (!nodeId) return;
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const yearAgo = now - 365 * 86400;
+      const data = await api<{ snapshots: StatsSnapshot[] }>(
+        `/api/nodes/${nodeId}/stats?limit=5000&start=${yearAgo}&end=${now}`,
+        { skipToast: true },
+      );
+      if (data && data.snapshots) {
+        setFullDiskHistory(data.snapshots);
+      }
+    } catch (err) {
+      console.error('Failed to fetch full disk history:', err);
+    }
+  }, [nodeId]);
+
+  const refreshStatsForRange = useCallback(async () => {
+    await fetchStatsForRange(rangeRef.current);
+    void fetchFullDiskHistory();
+  }, [fetchStatsForRange, fetchFullDiskHistory]);
 
   const fetchServicesList = useCallback(async () => {
     if (!nodeId) return;
@@ -341,9 +365,11 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
       if (containersEnabled) fetchContainersList();
       fetchLogSources();
       fetchLogHistogram();
+      void fetchFullDiskHistory();
     };
     init();
-  }, [fetchNodeDetails, fetchServicesList, fetchContainersList, fetchLogSources, fetchLogHistogram, servicesEnabled, containersEnabled]);
+  }, [fetchNodeDetails, fetchServicesList, fetchContainersList, fetchLogSources, fetchLogHistogram, fetchFullDiskHistory, servicesEnabled, containersEnabled]);
+
 
   const displayInsights: InsightRecord[] = [...insights];
   if (node && !node.online) {
@@ -416,5 +442,6 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     timeRange,
     setTimeRange,
     refreshStatsForRange,
+    fullDiskHistory,
   };
 }

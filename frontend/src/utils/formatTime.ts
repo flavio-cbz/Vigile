@@ -43,7 +43,7 @@ export const formatOfflineDuration = (timestamp: number | null | undefined): str
  * e.g., "12/06 à 14:30"
  */
 export const formatUptime = (seconds: number | undefined | null): string => {
-  if (seconds === undefined || seconds === null) return '—';
+  if (seconds === undefined || seconds === null || isNaN(seconds)) return '—';
   if (seconds < 60) return `${Math.round(seconds)}s`;
   const minutes = seconds / 60;
   if (minutes < 60) return `${Math.round(minutes)}m`;
@@ -60,6 +60,7 @@ export const formatUptime = (seconds: number | undefined | null): string => {
  * Used for chart axis ticks / tooltips so long windows don't render as "-300min".
  */
 export const formatRelativeDuration = (seconds: number): string => {
+  if (seconds == null || isNaN(seconds)) return '—';
   const sign = seconds < 0 ? '-' : '';
   const abs = Math.abs(seconds);
   if (abs < 60) return `${sign}${Math.round(abs)}s`;

@@ -113,10 +113,6 @@ BUILTIN_THRESHOLDS: list[AlertThreshold] = [
     AlertThreshold("cpu_high_percent", "cpu_percent",
                     warning_at=80.0, critical_at=95.0, resolve_at=60.0,
                     message_template="CPU {value:.1f}% (seuil > {threshold}%)"),
-    # Charge CPU normalisée (load_5m / nb_coeurs) — alias de cpu_load_per_core_high
-    AlertThreshold("cpu_high_load", "cpu_load_per_core",
-                    warning_at=2.0, critical_at=4.0, resolve_at=1.5,
-                    message_template="Charge CPU {value:.1f} par coeur (seuil > {threshold})"),
     # Température CPU / système
     AlertThreshold("temperature_high", "temp_celsius",
                     warning_at=75.0, critical_at=85.0, resolve_at=70.0,
@@ -329,6 +325,13 @@ class AlertEngine:
                     metric_value=uptime,
                     db=db,
                 )
+        elif (
+            prev_uptime is not None
+            and "node_reboot_detected" in self._active_alerts[node_id]
+        ):
+            # Uptime stable/croissant sur un rapport suivant → le nœud est
+            # revenu après le reboot : auto-résolution (comme les alertes métriques)
+            await self._resolve_alert(node_id, "node_reboot_detected", db)
 
     # -------------------------------------------------------------------
     # -------------------------------------------------------------------
@@ -435,6 +438,10 @@ class AlertEngine:
                             f"reconnexions dans l'heure",
                             db=db,
                         )
+                elif "node_connection_flap" in self._active_alerts[node_id]:
+                    # Les reconnexions sont retombées sous le seuil (vieillissement
+                    # de la fenêtre glissante) → auto-résolution
+                    await self._resolve_alert(node_id, "node_connection_flap", db)
 
     # -------------------------------------------------------------------
     # Suivi des échecs d'intents
@@ -668,7 +675,13 @@ class AlertEngine:
                 del self._active_alerts[nid]
             # Also clean rate limiter and intent failures
             for nid in orphaned:
-                self._alert_rate_limiter.pop(nid, None)
+                # _alert_rate_limiter keys are composite "f{node_id}:{alert_name}"
+                # — a bare node-id pop never matches, so drop keys by prefix.
+                prefix = f"{nid}:"
+                for key in [
+                    k for k in self._alert_rate_limiter.keys() if k.startswith(prefix)
+                ]:
+                    del self._alert_rate_limiter[key]
                 self._intent_failures.pop(nid, None)
                 self._reconnect_counts.pop(nid, None)
                 self._last_snapshot.pop(nid, None)

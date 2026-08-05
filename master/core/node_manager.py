@@ -41,8 +41,6 @@ from typing import Any, Generator
 import aiosqlite
 from fastapi import WebSocket
 
-DEFAULT_TIMEOUT: float = 30.0
-
 from master.core.audit import AuditAction, log_action
 from master.core.enums import NodeState
 from master.core.lock import LoopBoundLock
@@ -53,6 +51,8 @@ from master.db.disk_scan_cache import (
     set_node_disk_mounts,
 )
 from master.schemas.disk_scan import DiskNode, DiskScanResult
+
+DEFAULT_TIMEOUT: float = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,9 @@ _VALID_NODE_FIELDS: set[str] = {
     "node_group",
     "disabled",
 }
+
+# patch_metadata allow-list — deliberately narrower than _VALID_NODE_FIELDS (never state/public_key)
+_PATCH_METADATA_FIELDS: frozenset[str] = frozenset({"updated_at", "name", "node_group"})
 
 
 class NodeManager:
@@ -241,8 +244,8 @@ class NodeManager:
     async def update_all_nodes_cache(self, node_id: str | None = None) -> None:
         """Query and cache active services and Docker containers for online node(s)."""
         from master.core.plugin_utils import parse_worker_list
+        from master.plugins.docker import ContainerSummary, parse_container_list
         from master.plugins.systemd import ServiceInfo
-        from master.plugins.docker import ContainerSummary
 
         db = get_db_conn()
         connected = [node_id] if node_id else self.connected_node_ids()
@@ -531,9 +534,8 @@ class NodeManager:
                     raise ValueError(f"Invalid node field: {k}")
             fields.update(extra_fields)
 
-        updates = {k: v for k, v in fields.items()}
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [node_id]
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [node_id]
 
         await db.execute(
             "UPDATE nodes SET " + set_clause + " WHERE id = ?",
@@ -557,7 +559,11 @@ class NodeManager:
         except Exception:
             logger.exception("Failed to publish node.state event")
 
-        # Notify registered callbacks without blocking
+        # Notify registered callbacks without blocking. Callbacks receive the
+        # CALLER's `db` (shared app-wide connection in prod, closed only at
+        # shutdown; contextvar-scoped in request contexts). All registered
+        # callbacks (lifespan.py) guard db usage with try/except — a closed
+        # connection degrades to a warning, never a crash. Keep it that way.
         for cb in self._state_change_callbacks:
             asyncio.create_task(cb(node_id, new_state, db))
 
@@ -750,9 +756,8 @@ class NodeManager:
             details["group"] = group
         if len(fields) == 1:
             return
-        _ALLOWED_UPDATE_FIELDS = {"updated_at", "name", "node_group"}
         for k in fields:
-            if k not in _ALLOWED_UPDATE_FIELDS:
+            if k not in _PATCH_METADATA_FIELDS:
                 raise ValueError(f"Invalid update field: {k}")
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         values = list(fields.values()) + [node_id]
@@ -810,6 +815,18 @@ class NodeManager:
             except Exception:
                 pass
         logger.warning("NodeManager locked down: all active connections closed.")
+
+        # Security-critical event: append audit chain entry. Never let a
+        # logging failure prevent the lockdown itself.
+        try:
+            await log_action(
+                get_db_conn(),
+                user_id="system",
+                action=AuditAction.LOCKDOWN,
+                details={"connections_closed": len(conns)},
+            )
+        except Exception:
+            logger.warning("Failed to log lockdown audit entry")
 
     # -----------------------------------------------------------------------
     # Connection management (called from WebSocket handler)
@@ -925,11 +942,14 @@ class NodeManager:
             if intent_max_age is not None:
                 self._intent_max_age[intent_id] = intent_max_age
 
-            # Send type last to prevent intent dict from overwriting the message type
-            await conn.websocket.send_json({**intent, "type": "INTENT"})
-            logger.info(
-                "Intent sent to node %s: action=%s id=%s", node_id, intent.get("action"), intent_id
-            )
+        # Send OUTSIDE the lock (no I/O under the shared registry lock). Safe:
+        # the held `conn` reference stays valid; the unregister_connection()
+        # future-cancellation race pre-exists (its intent cleanup runs unlocked).
+        # Send type last to prevent intent dict from overwriting the message type
+        await conn.websocket.send_json({**intent, "type": "INTENT"})
+        logger.info(
+            "Intent sent to node %s: action=%s id=%s", node_id, intent.get("action"), intent_id
+        )
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
@@ -1092,18 +1112,18 @@ class NodeManager:
             self._disk_scan_inflight.add(node_id)
 
         # Respect 12h TTL unless forced.
-        if not force:
-            last = self._disk_scan_last_run.get(node_id, 0.0)
-            # Deterministic ±30 min stagger derived from node_id so the
-            # fleet doesn't all scan in the same minute.
-            stagger = (int(hashlib.md5(node_id.encode()).hexdigest(), 16) % 60) - 30
-            if time.time() - last < 12 * 3600 + stagger:
-                async with self._lock:
-                    self._disk_scan_inflight.discard(node_id)
-                return
-
-        logger.info("Node %s: triggered background disk scan (force=%s)", node_id, force)
         try:
+            if not force:
+                last = self._disk_scan_last_run.get(node_id, 0.0)
+                # Deterministic ±30 min stagger derived from node_id so the
+                # fleet doesn't all scan in the same minute.
+                stagger = (
+                    int(hashlib.md5(node_id.encode(), usedforsecurity=False).hexdigest(), 16) % 60
+                ) - 30
+                if time.time() - last < 12 * 3600 + stagger:
+                    return
+
+            logger.info("Node %s: triggered background disk scan (force=%s)", node_id, force)
             result = await self._send_intent(
                 node_id,
                 {
@@ -1117,70 +1137,61 @@ class NodeManager:
                 },
                 timeout=45.0,
             )
-        except (TimeoutError, RuntimeError) as exc:
-            logger.warning(
-                "Node %s: background disk scan failed: %s", node_id, exc
-            )
-            async with self._lock:
-                self._disk_scan_inflight.discard(node_id)
-            return
 
-        if not result.get("success"):
-            logger.warning(
-                "Node %s: background disk scan worker reported error: %s",
-                node_id,
-                result.get("error"),
-            )
-            async with self._lock:
-                self._disk_scan_inflight.discard(node_id)
-            return
+            if not result.get("success"):
+                logger.warning(
+                    "Node %s: background disk scan worker reported error: %s",
+                    node_id,
+                    result.get("error"),
+                )
+                return
 
-        try:
-            parsed = DiskScanResult.model_validate_json(result["output"])
-        except Exception:
-            logger.warning(
-                "Node %s: background disk scan invalid result schema", node_id
-            )
-            async with self._lock:
-                self._disk_scan_inflight.discard(node_id)
-            return
-
-        try:
-            await set_cached_disk_scan(db, node_id, result["output"], time.time())
-        except Exception as exc:
-            logger.warning(
-                "Node %s: failed to cache background disk-scan result: %s", node_id, exc
-            )
-
-        # Extract mount list from the worker's own disk report and persist it.
-        try:
-            all_nodes = [parsed.root] + list(_flatten_disk_nodes(parsed.root))
-            mounts = list({d.path for d in all_nodes if d.path})
-        except Exception:
-            mounts = []
-        if mounts:
             try:
-                await set_node_disk_mounts(db, node_id, mounts)
+                parsed = DiskScanResult.model_validate_json(result["output"])
+            except Exception:
+                logger.warning("Node %s: background disk scan invalid result schema", node_id)
+                return
+
+            try:
+                await set_cached_disk_scan(db, node_id, result["output"], time.time())
             except Exception as exc:
                 logger.warning(
-                    "Node %s: failed to persist disk mounts: %s", node_id, exc
+                    "Node %s: failed to cache background disk-scan result: %s", node_id, exc
                 )
 
-        try:
-            await log_action(
-                db,
-                user_id="system",
-                action=AuditAction.DISK_SCAN,
-                node_id=node_id,
-                details={"background": True, "path": "/", "max_depth": 4},
-            )
-        except Exception:
-            pass
+            # Extract mount list from the worker's own disk report and persist it.
+            try:
+                all_nodes = [parsed.root] + list(_flatten_disk_nodes(parsed.root))
+                mounts = list({d.path for d in all_nodes if d.path})
+            except Exception:
+                mounts = []
+            if mounts:
+                try:
+                    await set_node_disk_mounts(db, node_id, mounts)
+                except Exception as exc:
+                    logger.warning("Node %s: failed to persist disk mounts: %s", node_id, exc)
 
-        async with self._lock:
-            self._disk_scan_last_run[node_id] = time.time()
-            self._disk_scan_inflight.discard(node_id)
-        logger.info("Node %s: background disk scan complete", node_id)
+            try:
+                await log_action(
+                    db,
+                    user_id="system",
+                    action=AuditAction.DISK_SCAN,
+                    node_id=node_id,
+                    details={"background": True, "path": "/", "max_depth": 4},
+                )
+            except Exception:
+                pass
+
+            async with self._lock:
+                self._disk_scan_last_run[node_id] = time.time()
+            logger.info("Node %s: background disk scan complete", node_id)
+        except (TimeoutError, RuntimeError) as exc:
+            logger.warning("Node %s: background disk scan failed: %s", node_id, exc)
+        finally:
+            # Single in-flight release covering every branch (incl. unexpected
+            # exceptions, which previously leaked the in-flight marker).
+            async with self._lock:
+                self._disk_scan_inflight.discard(node_id)
 
     # -----------------------------------------------------------------------
     # Query helpers
@@ -1192,7 +1203,8 @@ class NodeManager:
         if row is None:
             return None
         d = dict(row)
-        d["online"] = node_id in self._connections
+        async with self._lock:
+            d["online"] = node_id in self._connections
         return d
 
     async def list_nodes(
@@ -1232,7 +1244,8 @@ class NodeManager:
         async with db.execute(sql, params) as cursor:
             async for row in cursor:
                 d = dict(row)
-                d["online"] = d["id"] in self._connections
+                async with self._lock:
+                    d["online"] = d["id"] in self._connections
                 rows.append(d)
         return rows
 

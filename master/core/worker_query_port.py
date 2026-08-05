@@ -103,12 +103,32 @@ class WorkerQueryPort:
         return await self.query(node_id, "GET_STATS")
 
     async def list_services(self, node_id: str) -> list[dict[str, Any]]:
-        """Send LIST_SERVICES intent to a connected Worker."""
+        """Send LIST_SERVICES intent to a connected Worker.
+
+        Args:
+            node_id: UUID of the target Worker.
+
+        Returns:
+            List of service dicts (each with name, state, status, etc.).
+
+        Raises:
+            RuntimeError: If the node is not connected.
+        """
         result = await self.query(node_id, "LIST_SERVICES")
         return result.get("output", [])
 
     async def list_containers(self, node_id: str) -> list[dict[str, Any]]:
-        """Send LIST_CONTAINERS intent to a connected Worker."""
+        """Send LIST_CONTAINERS intent to a connected Worker.
+
+        Args:
+            node_id: UUID of the target Worker.
+
+        Returns:
+            List of container dicts (each with id, name, image, state, ports, etc.).
+
+        Raises:
+            RuntimeError: If the node is not connected.
+        """
         result = await self.query(node_id, "LIST_CONTAINERS")
         return result.get("output", [])
 
@@ -117,7 +137,19 @@ class WorkerQueryPort:
         node_id: str,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Send READ_LOGS intent to a connected Worker."""
+        """Send READ_LOGS intent to a connected Worker.
+
+        Args:
+            node_id: UUID of the target Worker.
+            params: Optional dict with log query parameters
+                (e.g. ``{"service": "nginx", "lines": 50}``).
+
+        Returns:
+            Dict with log output from the Worker.
+
+        Raises:
+            RuntimeError: If the node is not connected.
+        """
         return await self.query(node_id, "READ_LOGS", params)
 
     async def list_log_files(

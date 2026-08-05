@@ -6,8 +6,16 @@ from __future__ import annotations
 
 import time
 
-from master.api.demo_data import is_demo
+from master.api.demo_data import DEMO_NODE_METRICS, is_demo
 from master.api.deps import DB
+
+# Worker arch normalization (shared by update_worker endpoints)
+ARCH_MAP = {
+    "x86_64": "amd64",
+    "aarch64": "arm64",
+    "armv7l": "armv7",
+    "arm": "armv7",
+}
 
 
 def _node_to_response(node: dict) -> dict:
@@ -38,25 +46,9 @@ def _node_to_response(node: dict) -> dict:
 async def _add_node_metrics(db: DB, node_dict: dict, claims: dict) -> dict:
     """Fetch and merge the latest metrics snapshot for a node."""
     if is_demo(claims):
-        # Return some mock metrics for demo nodes
-        if node_dict["id"] == "demo-node-01":
-            node_dict.update(
-                {
-                    "cpu_percent": 12.5,
-                    "memory_percent": 45.2,
-                    "disk_percent": 38.4,
-                    "uptime_seconds": 3600.0,
-                }
-            )
-        elif node_dict["id"] == "demo-node-02":
-            node_dict.update(
-                {
-                    "cpu_percent": 8.0,
-                    "memory_percent": 30.1,
-                    "disk_percent": 42.0,
-                    "uptime_seconds": 1800.0,
-                }
-            )
+        demo_metrics = DEMO_NODE_METRICS.get(node_dict["id"])
+        if demo_metrics:
+            node_dict.update(demo_metrics)
         return node_dict
 
     async with db.execute(
@@ -86,24 +78,9 @@ async def _add_bulk_node_metrics(db: DB, node_dicts: list[dict], claims: dict) -
     """Fetch and merge the latest metrics snapshots for a list of nodes in bulk."""
     if is_demo(claims):
         for nd in node_dicts:
-            if nd["id"] == "demo-node-01":
-                nd.update(
-                    {
-                        "cpu_percent": 12.5,
-                        "memory_percent": 45.2,
-                        "disk_percent": 38.4,
-                        "uptime_seconds": 3600.0,
-                    }
-                )
-            elif nd["id"] == "demo-node-02":
-                nd.update(
-                    {
-                        "cpu_percent": 8.0,
-                        "memory_percent": 30.1,
-                        "disk_percent": 42.0,
-                        "uptime_seconds": 1800.0,
-                    }
-                )
+            demo_metrics = DEMO_NODE_METRICS.get(nd["id"])
+            if demo_metrics:
+                nd.update(demo_metrics)
         return node_dicts
 
     node_ids = [n["id"] for n in node_dicts]

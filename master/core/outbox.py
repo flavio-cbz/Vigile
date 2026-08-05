@@ -177,14 +177,18 @@ class Outbox:
         Fetch and dispatch all unprocessed outbox entries.
 
         For each entry:
-          1. Look up registered handlers for ``entry["event_type"]``.
-          2. Call every matching handler with ``(entry_dict, db)``.
-          3. On success → mark the entry as processed (``processed=1``,
+          1. Claim the entry (``processed=2``) so a concurrent sweep cannot
+             double-dispatch it; an entry already claimed by another sweep is
+             skipped.
+          2. Look up registered handlers for ``entry["event_type"]``.
+          3. Call every matching handler with ``(entry_dict, db)``.
+          4. On success → mark the entry as processed (``processed=1``,
              ``processed_at=now``).
-          4. On failure → increment ``retry_count`` and store the error
-             message; the entry will be retried on the next sweep.  After
-             ``max_retries`` failures it is dead-lettered (marked processed
-             with a ``PERMANENTLY FAILED`` error) instead of retrying forever.
+          5. On failure → undo the claim (``processed=0``), increment
+             ``retry_count`` and store the error message; the entry will be
+             retried on the next sweep.  After ``max_retries`` failures it is
+             dead-lettered (marked processed with a ``PERMANENTLY FAILED``
+             error) instead of retrying forever.
 
         Handlers are awaited sequentially per entry (entries are processed in
         FIFO order) to preserve event ordering for the same aggregate.
@@ -218,6 +222,21 @@ class Outbox:
             # Also notify wildcard subscribers (event_type = "*")
             handlers.extend(self._handlers.get("*", []))
 
+            # Claim the entry before dispatching: two sweeps may have both
+            # SELECTed the same `processed = 0` rows. The first UPDATE wins
+            # (rowcount 1); the loser sees rowcount 0 and skips.
+            async with transaction(conn) as tx_db:
+                cursor = await tx_db.execute(
+                    """UPDATE outbox
+                       SET processed = 2
+                       WHERE id = ? AND processed = 0""",
+                    (entry["id"],),
+                )
+                claimed = cursor.rowcount == 1
+            if not claimed:
+                # Another sweep claimed this entry first — skip it.
+                continue
+
             if not handlers:
                 # No handler registered — mark as processed to avoid
                 # accumulating undeliverable entries.
@@ -228,6 +247,10 @@ class Outbox:
             success = True
             error_msg: str | None = None
 
+            # At-least-once contract: a failure in ANY handler marks the whole
+            # entry failed and re-dispatches ALL its handlers on the next
+            # sweep. Handlers MUST be idempotent. Durable per-handler state
+            # would require a schema change (out of scope — see audit).
             for handler in handlers:
                 try:
                     await handler(entry, conn)
@@ -303,6 +326,13 @@ class Outbox:
             Number of entries successfully (re-)processed.
         """
         logger.info("Outbox replaying unprocessed entries")
+        conn = self._resolve_db(db)
+        # Startup recovery: a crash mid-dispatch leaves entries claimed as
+        # processed=2 that were never completed. Reset those stale in-flight
+        # claims so they are re-dispatched below. Safe here: replay runs at
+        # startup, before any sweep loop is running.
+        async with transaction(conn) as tx_db:
+            await tx_db.execute("UPDATE outbox SET processed = 0 WHERE processed = 2")
         return await self.process_pending(db=db, batch_size=batch_size)
 
     async def cleanup_old(
@@ -360,7 +390,7 @@ class Outbox:
             async with transaction(conn) as tx_db:
                 await tx_db.execute(
                     """UPDATE outbox
-                       SET processed = 1, processed_at = ?, retry_count = retry_count
+                       SET processed = 1, processed_at = ?
                        WHERE id = ?""",
                     (now, entry_id),
                 )
@@ -388,10 +418,13 @@ class Outbox:
                     self._max_retries,
                 )
             else:
+                # Undo the processed=2 claim so the entry is re-dispatched on
+                # the next sweep (retry_count is bumped by the caller loop).
                 async with transaction(conn) as tx_db:
                     await tx_db.execute(
                         """UPDATE outbox
-                           SET retry_count = ?, error = ?, processed_at = ?
+                           SET processed = 0, retry_count = ?, error = ?,
+                               processed_at = ?
                            WHERE id = ?""",
                         (current_retry + 1, error, now, entry_id),
                     )

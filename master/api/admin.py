@@ -18,6 +18,17 @@ Endpoints:
   - GET  /api/admin/alerts/summary         → Alert summary with counts by severity
   - POST /api/admin/alerts/{alert_id}/acknowledge → Acknowledge an alert
   - GET  /api/admin/alerts/metrics         → Prometheus alert metrics
+
+Threat model (plugin upload/install):
+- `compile(..., "exec")` + AST checks in `install_plugin` / `upload_plugin` verify
+  only Python syntax and the `register(pm)` contract. They are NOT a security
+  sandbox: uploaded plugin code runs in-process with the privileges of the
+  Master process. This is by design of the feature — safe only because these
+  endpoints are strictly admin-gated (`require_role("admin")`).
+  DO NOT widen the role check. A declarative sandbox (subprocess isolation
+  with RLIMIT, capability allow-list, schema-validated hooks) is a separate
+  architectural project — the PluginEngine v2 subprocess isolation is the
+  reference direction, not an in-route sandbox.
 """
 
 import ast
@@ -58,6 +69,56 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 def _get_active_plugin_engine() -> Any:
     return _pm_mod.plugin_engine if _pm_mod.plugin_engine is not None else _pm_mod.plugin_manager
+
+
+def _masked_settings_dict(settings: Any) -> dict[str, Any]:
+    """Build the admin-facing settings response with sensitive values masked.
+
+    Shared by GET /settings and POST /settings/llm so the two responses cannot
+    drift. Secrets (server_secret_key, jwt_secret_key, llm_api_key) are replaced
+    with a placeholder; filesystem paths are intentionally NOT exposed
+    (master_key_path removed — path disclosure; database_path kept because the
+    frontend displays it in GeneralSettingsTab).
+    """
+    masked_server_secret = "••••••••" if settings.server_secret_key else ""
+    masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
+    masked_llm_key = "••••••••" if settings.llm_api_key else ""
+
+    return {
+        "master_url": settings.master_url,
+        "host": settings.host,
+        "port": settings.port,
+        "debug": settings.debug,
+        "database_path": settings.database_path,
+        "server_secret_key": masked_server_secret,
+        "jwt_secret_key": masked_jwt_secret,
+        "jwt_algorithm": settings.jwt_algorithm,
+        "jwt_access_token_ttl": settings.jwt_access_token_ttl,
+        "jwt_refresh_token_ttl": settings.jwt_refresh_token_ttl,
+        "join_token_ttl": settings.join_token_ttl,
+        "worker_token_ttl": settings.worker_token_ttl,
+        "worker_token_rotation": settings.worker_token_rotation,
+        "heartbeat_interval": settings.heartbeat_interval,
+        "heartbeat_lost_threshold": settings.heartbeat_lost_threshold,
+        "heartbeat_stale_threshold": settings.heartbeat_stale_threshold,
+        "cors_origins": settings.cors_origins,
+        "trusted_proxies": settings.trusted_proxies,
+        "enforce_https": settings.enforce_https,
+        "llm_base_url": settings.llm_base_url,
+        "llm_api_key": masked_llm_key,
+        "llm_model": settings.llm_model,
+        "plugins_dir": settings.plugins_dir,
+    }
+
+
+def _escape_prometheus_label(value: str) -> str:
+    """Escape a label VALUE for the Prometheus text exposition format.
+
+    Per the spec, label values are double-quoted strings where `\\`, `"` and
+    newlines must be escaped. Without this, an alert_name containing a quote or
+    newline would corrupt the exposition format / inject fake metric lines.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 
@@ -157,38 +218,7 @@ async def get_system_settings(
     settings=Depends(get_settings),
 ) -> JSONResponse:
     """Return system settings with sensitive keys masked. Admin or operator only."""
-    masked_server_secret = "••••••••" if settings.server_secret_key else ""
-    masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
-    masked_llm_key = "••••••••" if settings.llm_api_key else ""
-
-    return JSONResponse(
-        {
-            "master_url": settings.master_url,
-            "host": settings.host,
-            "port": settings.port,
-            "debug": settings.debug,
-            "database_path": settings.database_path,
-            "server_secret_key": masked_server_secret,
-            "jwt_secret_key": masked_jwt_secret,
-            "jwt_algorithm": settings.jwt_algorithm,
-            "jwt_access_token_ttl": settings.jwt_access_token_ttl,
-            "jwt_refresh_token_ttl": settings.jwt_refresh_token_ttl,
-            "join_token_ttl": settings.join_token_ttl,
-            "worker_token_ttl": settings.worker_token_ttl,
-            "worker_token_rotation": settings.worker_token_rotation,
-            "heartbeat_interval": settings.heartbeat_interval,
-            "heartbeat_lost_threshold": settings.heartbeat_lost_threshold,
-            "heartbeat_stale_threshold": settings.heartbeat_stale_threshold,
-            "master_key_path": settings.master_key_path,
-            "cors_origins": settings.cors_origins,
-            "trusted_proxies": settings.trusted_proxies,
-            "enforce_https": settings.enforce_https,
-            "llm_base_url": settings.llm_base_url,
-            "llm_api_key": masked_llm_key,
-            "llm_model": settings.llm_model,
-            "plugins_dir": settings.plugins_dir,
-        }
-    )
+    return JSONResponse(_masked_settings_dict(settings))
 
 
 @router.post("/settings/llm", summary="Update LLM settings")
@@ -225,6 +255,10 @@ async def update_llm_settings(
                 indent=2,
                 ensure_ascii=False,
             )
+        # The API key is persisted plaintext by design (no encryption here);
+        # restrict the file to the Master process user so other local accounts
+        # cannot read it.
+        os.chmod(override_path, 0o600)
 
     try:
         await anyio.to_thread.run_sync(_write_overrides)
@@ -255,38 +289,7 @@ async def update_llm_settings(
         },
     )
 
-    masked_server_secret = "••••••••" if settings.server_secret_key else ""
-    masked_jwt_secret = "••••••••" if settings.jwt_secret_key else ""
-    masked_llm_key = "••••••••" if settings.llm_api_key else ""
-
-    return JSONResponse(
-        {
-            "master_url": settings.master_url,
-            "host": settings.host,
-            "port": settings.port,
-            "debug": settings.debug,
-            "database_path": settings.database_path,
-            "server_secret_key": masked_server_secret,
-            "jwt_secret_key": masked_jwt_secret,
-            "jwt_algorithm": settings.jwt_algorithm,
-            "jwt_access_token_ttl": settings.jwt_access_token_ttl,
-            "jwt_refresh_token_ttl": settings.jwt_refresh_token_ttl,
-            "join_token_ttl": settings.join_token_ttl,
-            "worker_token_ttl": settings.worker_token_ttl,
-            "worker_token_rotation": settings.worker_token_rotation,
-            "heartbeat_interval": settings.heartbeat_interval,
-            "heartbeat_lost_threshold": settings.heartbeat_lost_threshold,
-            "heartbeat_stale_threshold": settings.heartbeat_stale_threshold,
-            "master_key_path": settings.master_key_path,
-            "cors_origins": settings.cors_origins,
-            "trusted_proxies": settings.trusted_proxies,
-            "enforce_https": settings.enforce_https,
-            "llm_base_url": settings.llm_base_url,
-            "llm_api_key": masked_llm_key,
-            "llm_model": settings.llm_model,
-            "plugins_dir": settings.plugins_dir,
-        }
-    )
+    return JSONResponse(_masked_settings_dict(settings))
 
 
 @router.post("/settings/llm/test", summary="Test LLM connection")
@@ -383,10 +386,10 @@ async def list_plugins(
         if plugin_id in seen_ids:
             continue
         seen_ids.add(plugin_id)
-        _lp = getattr(active_pm, "_loaded_plugins", [])
+        loaded = getattr(active_pm, "loaded_plugins", [])
 
         is_loaded = any(
-            k in _lp or k in active_pm.loaded_plugins
+            k in loaded
             for k in (plugin_id, name, plugin_file_stem(plugin_id))
         )
         db_state = (
@@ -401,7 +404,7 @@ async def list_plugins(
         if not os.path.isfile(path):
             path = os.path.join(plugins_dir, name, "manifest.json")
 
-        module_name = f"vigile.plugins.{name}" if name != plugin_id else f"vigile.plugins.{name}"
+        module_name = f"vigile.plugins.{name}"
 
         meta = {
             "name": name.replace("_", " ").title(),
@@ -632,6 +635,13 @@ async def install_plugin(
     plugin_path = os.path.join(settings.plugins_dir, f"{plugin_name}.py")
     os.makedirs(settings.plugins_dir, exist_ok=True)
 
+    # Defense in depth: the literal / \ .. check above cannot catch a symlink
+    # inside plugins_dir pointing elsewhere — resolve and re-anchor.
+    if not Path(plugin_path).resolve().is_relative_to(Path(settings.plugins_dir).resolve()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Nom d'extension invalide."
+        )
+
     # 6. Write to disk using run_sync to prevent blocking the event loop (as per Phase 1)
     def _write_file():
         with open(plugin_path, "w", encoding="utf-8") as f:
@@ -733,6 +743,11 @@ async def upload_plugin(
 
     plugin_path = os.path.join(settings.plugins_dir, filename)
     os.makedirs(settings.plugins_dir, exist_ok=True)
+
+    # Defense in depth: the literal / \ .. check above cannot catch a symlink
+    # inside plugins_dir pointing elsewhere — resolve and re-anchor.
+    if not Path(plugin_path).resolve().is_relative_to(Path(settings.plugins_dir).resolve()):
+        raise HTTPException(status_code=400, detail="Nom de fichier invalide.")
 
     def _write_uploaded_plugin() -> None:
         with open(plugin_path, "wb") as f:
@@ -850,20 +865,11 @@ async def toggle_plugin(
             enabled = bool(row[0])
 
     new_state = not enabled
-    async with transaction(db):
-        await db.execute(
-            "INSERT INTO plugins (id, enabled, config_json) VALUES (?, ?, '{}') "
-            "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
-            (plugin_id_canonical, int(new_state)),
-        )
-        await log_action(
-            db,
-            user_id=claims["sub"],
-            action=AuditAction.TOGGLE_PLUGIN,
-            details={"plugin_id": plugin_id_canonical, "enabled": new_state},
-        )
 
-    # Reload or Unload dynamically
+    # Apply the runtime change FIRST; persist to the DB only once it succeeded,
+    # so the plugins table always reflects the real runtime state (no divergence
+    # when load/unload fails — previously the DB was committed before the load
+    # result was known).
     active_pm = _get_active_plugin_engine()
     target_load_id = plugin_id_canonical
     if hasattr(active_pm, "get_manifest"):
@@ -889,11 +895,24 @@ async def toggle_plugin(
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Plugin '{plugin_id_canonical}' enabled in DB but failed to load in runtime.",
+                detail=f"Plugin '{plugin_id_canonical}' introuvable ou échec du chargement en runtime.",
             )
     else:
         # Single targeted unload — engine handles hooks, scheduler, routes, pages, DB
         await active_pm.unload_plugin(target_load_id)
+
+    async with transaction(db):
+        await db.execute(
+            "INSERT INTO plugins (id, enabled, config_json) VALUES (?, ?, '{}') "
+            "ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
+            (plugin_id_canonical, int(new_state)),
+        )
+        await log_action(
+            db,
+            user_id=claims["sub"],
+            action=AuditAction.TOGGLE_PLUGIN,
+            details={"plugin_id": plugin_id_canonical, "enabled": new_state},
+        )
 
     return JSONResponse(
         {
@@ -934,15 +953,26 @@ async def delete_plugin(
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
 
     active_pm = _get_active_plugin_engine()
-    for k in {plugin_id_canonical, plugin_stem, raw_plugin_id}:
-        if hasattr(active_pm, "uninstall"):
-            try:
-                await active_pm.uninstall(k)
-            except Exception as e:
-                logger.error("Failed to uninstall plugin '%s' via engine: %s", k, e)
-                await active_pm.unload_plugin(k)
-        else:
-            await active_pm.unload_plugin(k)
+    # Resolve the canonical runtime id ONCE (manifest id wins; aliases are
+    # display names / stems of the same plugin) and uninstall exactly once —
+    # the engine handles hooks, scheduler, routes, pages, DB cleanup internally.
+    target_uninstall_id = plugin_id_canonical
+    if hasattr(active_pm, "get_manifest"):
+        manifest = (
+            active_pm.get_manifest(plugin_id_canonical)
+            or active_pm.get_manifest(plugin_stem)
+            or active_pm.get_manifest(raw_plugin_id)
+        )
+        if manifest and manifest.id:
+            target_uninstall_id = manifest.id
+    if hasattr(active_pm, "uninstall"):
+        try:
+            await active_pm.uninstall(target_uninstall_id)
+        except Exception as e:
+            logger.error("Failed to uninstall plugin '%s' via engine: %s", target_uninstall_id, e)
+            await active_pm.unload_plugin(target_uninstall_id)
+    else:
+        await active_pm.unload_plugin(target_uninstall_id)
 
     # 2. Remove file/directory from disk
     try:
@@ -997,7 +1027,7 @@ async def list_alerts(
     Liste paginée des alertes. Filtrable par nœud, statut, sévérité.
     Accessible aux rôles operator et admin.
     """
-    conditions = ["1=1"]
+    conditions = ["1=1"]  # constant — all filter values below are bound as `?` parameters
     params: list = []
 
     if node_id:
@@ -1082,9 +1112,10 @@ async def acknowledge_alert(
     claims=Depends(require_role("operator")),
 ) -> JSONResponse:
     """Marque une alerte comme acquittée (la supprime de la vue active)."""
+    now = time.time()
     async with db.execute(
         "UPDATE alerts SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ? AND status = 'firing'",
-        (time.time(), time.time(), alert_id),
+        (now, now, alert_id),
     ) as cursor:
         await db.commit()
         if cursor.rowcount == 0:
@@ -1118,7 +1149,7 @@ async def alerts_prometheus_metrics(
         rows = await cursor.fetchall()
     for row in rows:
         lines.append(
-            f'vigile_alerts_total{{severity="{row["severity"]}",status="{row["status"]}"}} {row["cnt"]}'
+            f'vigile_alerts_total{{severity="{_escape_prometheus_label(row["severity"])}",status="{_escape_prometheus_label(row["status"])}"}} {row["cnt"]}'
         )
 
     lines.append("")
@@ -1133,7 +1164,7 @@ async def alerts_prometheus_metrics(
         rows = await cursor.fetchall()
     for row in rows:
         lines.append(
-            f'vigile_active_alerts{{severity="{row["severity"]}"}} {row["cnt"]}'
+            f'vigile_active_alerts{{severity="{_escape_prometheus_label(row["severity"])}"}} {row["cnt"]}'
         )
 
     lines.append("")
@@ -1147,7 +1178,9 @@ async def alerts_prometheus_metrics(
     ) as cursor:
         rows = await cursor.fetchall()
     for row in rows:
-        safe_name = row["alert_name"].replace("-", "_").replace(".", "_")
+        # The -/. → _ rewrite is a label-name cosmetic; the value itself must
+        # still be escaped per the exposition spec (\ → \\, " → \", \n → \n).
+        safe_name = _escape_prometheus_label(row["alert_name"].replace("-", "_").replace(".", "_"))
         lines.append(
             f'vigile_alert_names_total{{alert_name="{safe_name}"}} {row["cnt"]}'
         )

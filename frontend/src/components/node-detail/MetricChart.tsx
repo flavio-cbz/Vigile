@@ -205,7 +205,7 @@ export const MetricChart: React.FC<MetricChartProps> = ({
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
               <Tooltip
-                wrapperStyle={{ pointerEvents: 'auto' }}
+                wrapperStyle={{ pointerEvents: 'auto', outline: 'none' }}
                 content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} onSelectAlert={onSelectAlert} />}
               />
               <ReferenceLine
@@ -272,7 +272,7 @@ export const MetricChart: React.FC<MetricChartProps> = ({
               />
               <YAxis stroke="var(--text-3)" tickLine={false} domain={[0, 100]} />
               <Tooltip
-                wrapperStyle={{ pointerEvents: 'auto' }}
+                wrapperStyle={{ pointerEvents: 'auto', outline: 'none' }}
                 content={<MetricsTooltip locale={locale} history={filteredHistory} alerts={alerts} onSelectAlert={onSelectAlert} />}
               />
               {mBase && !isLimited && (

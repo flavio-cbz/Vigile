@@ -59,8 +59,13 @@ class InvalidTokenError(SecurityError):
     pass
 
 
-class ExpiredTokenError(SecurityError):
-    """Raised when a token has expired."""
+class ExpiredTokenError(SecurityError, ValueError):
+    """Raised when a token has expired.
+
+    Multiple inheritance with ValueError keeps compatibility with existing
+    ``except ValueError`` call sites (e.g. worker_handler.py) while remaining
+    distinguishable by type.
+    """
 
     pass
 
@@ -285,7 +290,13 @@ class SecurityManager:
     def sign_policy_bundle(self, payload: dict[str, Any]) -> str:
         """
         Signs a PolicyBundle payload using Master's Ed25519 private key.
-        Uses RFC 8785 (JCS) deterministic JSON canonicalization.
+
+        Canonicalization is sorted-key JSON (``json.dumps(sort_keys=True)``),
+        NOT RFC 8785 (JCS). For cross-platform deterministic signatures the
+        payload must contain only JSON primitives: no floats (float repr
+        varies by platform) and no dicts with numeric keys (int/str key
+        ordering differs between runtimes).
+
         Returns the base64url-encoded Ed25519 signature string.
         """
         # Ensure payload excludes any existing signature field
@@ -342,6 +353,8 @@ class SecurityManager:
         """
         try:
             claims = jwt.decode(token, self._jwt_worker_secret, algorithms=[self._jwt_algorithm])
+        except jwt.ExpiredSignatureError as exc:
+            raise ExpiredTokenError("Worker token has expired") from exc
         except JWTError as exc:
             try:
                 unverified = jwt.get_unverified_claims(token)
@@ -509,7 +522,18 @@ def load_or_generate_master_key(key_path: str) -> Ed25519PrivateKey:
             encryption_algorithm=NoEncryption(),
         )
         os.makedirs(os.path.dirname(os.path.abspath(key_path)), exist_ok=True)
-        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            # Another process won the race and created the key first — use theirs.
+            with open(key_path, "rb") as f:
+                raw = f.read()
+            private_key = Ed25519PrivateKey.from_private_bytes(raw)
+            logger.info(
+                "Master Ed25519 key already created concurrently — loaded from %s",
+                key_path,
+            )
+            return private_key
         with os.fdopen(fd, "wb") as f:
             f.write(raw)
         logger.warning("New master Ed25519 keypair generated and saved to %s", key_path)

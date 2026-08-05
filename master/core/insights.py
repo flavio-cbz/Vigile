@@ -47,11 +47,17 @@ OBSERVATION_THRESHOLDS: dict[str, float] = {
 
 @dataclasses.dataclass(frozen=True)
 class DataWindow:
-    """Computed observation window for a node's metrics history."""
+    """Computed observation window for a node's metrics history.
+
+    ``cpu_ready`` reflects the CPU/RAM observation threshold only (2h) — it is
+    the coarse "observation_ready" gate exposed by get_insights. Per-type
+    readiness (disk 24h, profile 24h) is computed separately via
+    ``OBSERVATION_THRESHOLDS`` in get_insights' ``per_type_readiness``.
+    """
 
     hours: float
     snapshot_count: int
-    ready: bool
+    cpu_ready: bool
     first_seen_at: float | None
     last_seen_at: float | None
 
@@ -61,6 +67,23 @@ def _format_profile_ts(ts: float | None) -> str | None:
     if not ts:
         return None
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _truncate_prompt_strings(obj: Any, max_len: int = 128) -> Any:
+    """Recursively truncate every string value to bound LLM prompt size.
+
+    Worker-controlled strings (service/container names, images, process
+    names) must never be injected raw into an LLM prompt: a malicious worker
+    could otherwise send a multi-megabyte payload. Values longer than
+    ``max_len`` are cut; everything else passes through unchanged.
+    """
+    if isinstance(obj, str):
+        return obj[:max_len]
+    if isinstance(obj, dict):
+        return {k: _truncate_prompt_strings(v, max_len) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_truncate_prompt_strings(v, max_len) for v in obj]
+    return obj
 
 
 class HeavyProcessConfig(BaseModel):
@@ -160,8 +183,9 @@ class InsightsManager:
         # guarding against duplicate concurrent generations per node.
         self._profiling_nodes: set[str] = set()
         # In-memory cache for get_insights() responses (5 min TTL).
-        # Keyed by node_id → (epoch_timestamp, response_dict).
-        self._insights_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        # Keyed by node_id → (cache_key, epoch_timestamp, response_dict).
+        # cache_key = (node_id, latest_snapshot_ts, profile_generated_at_ts, locale).
+        self._insights_cache: dict[str, tuple[tuple[Any, ...], float, dict[str, Any]]] = {}
         self._INSIGHTS_CACHE_TTL: float = 300.0  # 5 minutes
 
     def invalidate_cache(self, node_id: str) -> None:
@@ -201,30 +225,78 @@ class InsightsManager:
         force: bool = False,
         locale: str = "fr",
     ) -> NodeProfile:
+        """Generate a node profile, bounded by a 60s global timeout.
+
+        The generation runs up to 2 worker intents (8s each) plus a possibly
+        unbounded LLM call; the timeout guarantees a hung LLM or worker can
+        never pin a profiling slot (or a pooled DB connection) indefinitely.
+        """
+        return await asyncio.wait_for(
+            self._generate_profile_impl(node_id, db, nm, force=force, locale=locale),
+            timeout=60.0,
+        )
+
+    async def _generate_profile_with_own_connection(
+        self,
+        node_id: str,
+        db: aiosqlite.Connection,
+        nm: NodeManager,
+        locale: str,
+    ) -> None:
+        """Run profile generation on a dedicated pooled connection.
+
+        ``get_insights`` receives the request-scoped ``db`` (a connection
+        checked out via ``database_session()``); once the HTTP request ends it
+        is released back to the pool — and reused by other requests, or closed
+        at shutdown. A background profiling task holding that handle would hit
+        a re-assigned or closed connection. Acquire a dedicated connection via
+        ``database_session()`` instead, falling back to the caller-provided
+        one when no pool is available (e.g. unit tests).
+        """
+        from master.db.database import database_session
+
+        session = None
+        try:
+            session = await asyncio.wait_for(
+                database_session().__aenter__(), timeout=1.0
+            )
+            task_db = session
+        except (TimeoutError, asyncio.TimeoutError, RuntimeError):
+            # Pool unavailable: not initialized, or (unit tests) the module-level
+            # queue is bound to a previous event loop. Fall back to the
+            # caller-provided connection, as documented above.
+            task_db = db
+        try:
+            await self.generate_profile(node_id, task_db, nm, locale=locale)
+        finally:
+            if session is not None:
+                if getattr(session, "in_transaction", False):
+                    try:
+                        await session.rollback()
+                    except aiosqlite.Error:
+                        pass
+                await session.__aexit__(None, None, None)
+
+    async def _generate_profile_impl(
+        self,
+        node_id: str,
+        db: aiosqlite.Connection,
+        nm: NodeManager,
+        force: bool = False,
+        locale: str = "fr",
+    ) -> NodeProfile:
         logger.info("Generating profile for node %s (force=%s)...", node_id, force)
 
         node = await nm.get_node(db, node_id)
         if not node:
             raise ValueError(f"Node not found: {node_id}")
 
-        hostname = node.get("hostname") or ""
-
-        services: list[dict[str, Any]] = []
-        containers: list[dict[str, Any]] = []
-
-        cached_services = node.get("cached_services_json")
-        if cached_services:
-            try:
-                services = json.loads(cached_services)
-            except json.JSONDecodeError:
-                pass
-
-        cached_containers = node.get("cached_containers_json")
-        if cached_containers:
-            try:
-                containers = json.loads(cached_containers)
-            except json.JSONDecodeError:
-                pass
+        services: list[dict[str, Any]] = self._load_cached_json(
+            node, "cached_services_json"
+        )
+        containers: list[dict[str, Any]] = self._load_cached_json(
+            node, "cached_containers_json"
+        )
 
         if node.get("online"):
             if not services:
@@ -407,6 +479,23 @@ class InsightsManager:
             logger.debug("Failed to collect plugin patterns: %s", e)
             return []
 
+    @staticmethod
+    def _load_cached_json(node: dict[str, Any], key: str) -> list[dict[str, Any]]:
+        """Load a cached JSON list column from a node row.
+
+        Returns an empty list when the column is missing, malformed, or not
+        a JSON array. Shared by profile generation, service classification,
+        and CPU culprit matching.
+        """
+        raw = node.get(key)
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        return data if isinstance(data, list) else []
+
     def _classify_services_fallback(
         self,
         services: list[dict[str, Any]],
@@ -460,25 +549,11 @@ class InsightsManager:
         if not node:
             raise ValueError(f"Node not found: {node_id}")
 
-        hostname = node.get("hostname") or ""
-
         if services is None:
-            services = []
-            cached = node.get("cached_services_json")
-            if cached:
-                try:
-                    services = json.loads(cached)
-                except Exception:
-                    pass
+            services = self._load_cached_json(node, "cached_services_json")
 
         if containers is None:
-            containers = []
-            cached = node.get("cached_containers_json")
-            if cached:
-                try:
-                    containers = json.loads(cached)
-                except Exception:
-                    pass
+            containers = self._load_cached_json(node, "cached_containers_json")
 
         if self._sllm and self._llm_client and self._llm_client.base_url:
             lang = (
@@ -492,8 +567,8 @@ class InsightsManager:
                         "role": "user",
                         "content": (
                             f"Classify every container and service running on server '{node.get('name')}'.\n\n"
-                            f"Systemd services:\n{json.dumps(services[:30], indent=2)}\n\n"
-                            f"Docker containers (with image):\n{json.dumps(containers[:30], indent=2)}\n\n"
+                            f"Systemd services:\n{json.dumps(_truncate_prompt_strings(services[:30]), indent=2)}\n\n"
+                            f"Docker containers (with image):\n{json.dumps(_truncate_prompt_strings(containers[:30]), indent=2)}\n\n"
                             f"For each entry, determine:\n"
                             f"- category: one of {[e.value for e in ServiceCategory]}\n"
                             f"- label: short human-friendly description in French\n"
@@ -577,7 +652,7 @@ class InsightsManager:
                 return DataWindow(
                     hours=hours,
                     snapshot_count=row[2],
-                    ready=hours >= OBSERVATION_THRESHOLDS.get("cpu", MIN_OBSERVATION_HOURS),
+                    cpu_ready=hours >= OBSERVATION_THRESHOLDS.get("cpu", MIN_OBSERVATION_HOURS),
                     first_seen_at=row[0],
                     last_seen_at=row[1],
                 )
@@ -585,7 +660,7 @@ class InsightsManager:
             logger.debug("Could not query metrics_snapshots for node %s: %s", node_id, ex)
 
         return DataWindow(
-            hours=0.0, snapshot_count=0, ready=False,
+            hours=0.0, snapshot_count=0, cpu_ready=False,
             first_seen_at=None, last_seen_at=None,
         )
 
@@ -598,7 +673,9 @@ class InsightsManager:
         if profile is None:
             return "none"
         if window.snapshot_count == 0:
-            return "high"
+            # A profile without any metrics data (or a failed window query)
+            # must not claim high confidence.
+            return "low"
         if window.hours < MIN_OBSERVATION_HOURS:
             return "low"
         if window.hours < TARGET_OBSERVATION_HOURS:
@@ -642,7 +719,9 @@ class InsightsManager:
                 if node_id not in self._profiling_nodes:
                     self._profiling_nodes.add(node_id)
                     task = self._spawn_task(
-                        self.generate_profile(node_id, db, nm, locale=locale),
+                        self._generate_profile_with_own_connection(
+                            node_id, db, nm, locale
+                        ),
                         name=f"profile:{node_id}",
                     )
                     task.add_done_callback(
@@ -661,7 +740,7 @@ class InsightsManager:
                         }
                     ],
                     "data_window_hours": round(window.hours, 1),
-                    "observation_ready": window.ready,
+                    "observation_ready": window.cpu_ready,
                     "profile_confidence": "low",
                     "next_profile_refresh_at": None,
                     "profile_generated_at": None,
@@ -680,7 +759,7 @@ class InsightsManager:
                         }
                     ],
                     "data_window_hours": round(window.hours, 1),
-                    "observation_ready": window.ready,
+                    "observation_ready": window.cpu_ready,
                     "profile_confidence": "none",
                     "next_profile_refresh_at": None,
                     "profile_generated_at": None,
@@ -699,7 +778,7 @@ class InsightsManager:
         ):
             self._profiling_nodes.add(node_id)
             task = self._spawn_task(
-                self.generate_profile(node_id, db, nm, locale=locale),
+                self._generate_profile_with_own_connection(node_id, db, nm, locale),
                 name=f"reprofile:{node_id}",
             )
             task.add_done_callback(
@@ -785,7 +864,7 @@ class InsightsManager:
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "insights": insights,
             "data_window_hours": round(window.hours, 1),
-            "observation_ready": window.ready,
+            "observation_ready": window.cpu_ready,
             "profile_confidence": confidence,
             "next_profile_refresh_at": (
                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(next_refresh_ts))
@@ -813,19 +892,17 @@ class InsightsManager:
         if disk_total == 0:
             return None
 
-        # Query metrics snapshots from up to the last 30 days (2592000 seconds)
-        now = time.time()
-        limit_time = now - 2592000
-
+        # Intentionally no time cap: the slope regression should use the full
+        # observation history, not just the last 30 days.
         snapshots = []
         async with db.execute(
             """
             SELECT collected_at, disk_used_bytes
             FROM metrics_snapshots
-            WHERE node_id = ? AND collected_at >= ?
+            WHERE node_id = ?
             ORDER BY collected_at ASC
             """,
-            (node_id, limit_time),
+            (node_id,),
         ) as cursor:
             async for r in cursor:
                 if isinstance(r, (tuple, list)):
@@ -1066,6 +1143,52 @@ class InsightsManager:
             },
         }
 
+    @staticmethod
+    def _format_culprit_insight(
+        culprit: HeavyProcessConfig,
+        culprit_pct: float | None,
+        culprit_ram_pct: float | None,
+        cpu_percent: float,
+        prefix_en: str,
+        prefix_fr: str,
+        locale: str,
+    ) -> tuple[str, str]:
+        """Build the (headline, detail) pair for a matched heavy-process culprit.
+
+        Shared by the CPU > 75% and CPU > 40% branches, which differ only in
+        severity/icon and the headline prefix.
+        """
+        raw_name = culprit.container_name or culprit.service_name or culprit.label or "inconnu"
+        culprit_display_name = raw_name[0].upper() + raw_name[1:] if raw_name else "Inconnu"
+        cpu_val = culprit_pct if culprit_pct is not None else cpu_percent
+        ram_val = culprit_ram_pct if culprit_ram_pct is not None else 0.0
+
+        resource_parts = []
+        if cpu_val >= 5.0:
+            resource_parts.append(f"{cpu_val:.0f}% CPU" if locale == "en" else f"{cpu_val:.0f}% du processeur")
+        if ram_val >= 5.0:
+            resource_parts.append(f"{ram_val:.0f}% RAM" if locale == "en" else f"{ram_val:.0f}% de la RAM")
+
+        resource_str = (" and " if locale == "en" else " et ").join(resource_parts)
+        headline = (
+            f"{prefix_en} · {culprit_display_name}"
+            if locale == "en"
+            else f"{prefix_fr} · {culprit_display_name}"
+        )
+        if resource_str:
+            detail = (
+                f"Service '{raw_name}' uses {resource_str}."
+                if locale == "en"
+                else f"Le service '{raw_name}' utilise {resource_str}."
+            )
+        else:
+            detail = (
+                f"Service '{raw_name}' is active."
+                if locale == "en"
+                else f"Le service '{raw_name}' est actif."
+            )
+        return headline, detail
+
     def _calculate_cpu_insight(
         self,
         latest_snap: dict[str, Any],
@@ -1086,29 +1209,17 @@ class InsightsManager:
         elif isinstance(latest_snap.get("top_processes"), list):
             top_procs = latest_snap["top_processes"]
 
-        active_containers = []
-        cached_containers = node.get("cached_containers_json")
-        if cached_containers:
-            try:
-                active_containers = [
-                    c.get("name")
-                    for c in json.loads(cached_containers)
-                    if c.get("state") == "running" or "up" in c.get("status", "").lower()
-                ]
-            except json.JSONDecodeError:
-                pass
+        active_containers = [
+            c.get("name")
+            for c in self._load_cached_json(node, "cached_containers_json")
+            if c.get("state") == "running" or "up" in c.get("status", "").lower()
+        ]
 
-        active_services = []
-        cached_services = node.get("cached_services_json")
-        if cached_services:
-            try:
-                active_services = [
-                    s.get("service")
-                    for s in json.loads(cached_services)
-                    if s.get("state") == "active"
-                ]
-            except json.JSONDecodeError:
-                pass
+        active_services = [
+            s.get("service")
+            for s in self._load_cached_json(node, "cached_services_json")
+            if s.get("state") == "active"
+        ]
 
         culprit = None
         culprit_pct: float | None = None
@@ -1171,23 +1282,11 @@ class InsightsManager:
             if culprit:
                 severity = "warning"
                 icon = "🔥"
-                raw_name = culprit.container_name or culprit.service_name or culprit.label or "inconnu"
-                culprit_display_name = raw_name[0].upper() + raw_name[1:] if raw_name else "Inconnu"
-                cpu_val = culprit_pct if culprit_pct is not None else cpu_percent
-                ram_val = culprit_ram_pct if culprit_ram_pct is not None else 0.0
-
-                resource_parts = []
-                if cpu_val >= 5.0:
-                    resource_parts.append(f"{cpu_val:.0f}% CPU" if locale == "en" else f"{cpu_val:.0f}% du processeur")
-                if ram_val >= 5.0:
-                    resource_parts.append(f"{ram_val:.0f}% RAM" if locale == "en" else f"{ram_val:.0f}% de la RAM")
-                
-                resource_str = (" and " if locale == "en" else " et ").join(resource_parts)
-                headline = f"Intense activity · {culprit_display_name}" if locale == "en" else f"Activité intense · {culprit_display_name}"
-                if resource_str:
-                    detail = f"Service '{raw_name}' uses {resource_str}." if locale == "en" else f"Le service '{raw_name}' utilise {resource_str}."
-                else:
-                    detail = f"Service '{raw_name}' is active." if locale == "en" else f"Le service '{raw_name}' est actif."
+                headline, detail = self._format_culprit_insight(
+                    culprit, culprit_pct, culprit_ram_pct, cpu_percent,
+                    prefix_en="Intense activity", prefix_fr="Activité intense",
+                    locale=locale,
+                )
             elif top_procs and top_procs[0].get("cpu_percent", 0) > 10:
                 severity = "warning"
                 icon = "⚠️"
@@ -1203,23 +1302,11 @@ class InsightsManager:
             if culprit:
                 severity = "info"
                 icon = "⚡"
-                raw_name = culprit.container_name or culprit.service_name or culprit.label or "inconnu"
-                culprit_display_name = raw_name[0].upper() + raw_name[1:] if raw_name else "Inconnu"
-                cpu_val = culprit_pct if culprit_pct is not None else cpu_percent
-                ram_val = culprit_ram_pct if culprit_ram_pct is not None else 0.0
-
-                resource_parts = []
-                if cpu_val >= 5.0:
-                    resource_parts.append(f"{cpu_val:.0f}% CPU" if locale == "en" else f"{cpu_val:.0f}% du processeur")
-                if ram_val >= 5.0:
-                    resource_parts.append(f"{ram_val:.0f}% RAM" if locale == "en" else f"{ram_val:.0f}% de la RAM")
-                
-                resource_str = (" and " if locale == "en" else " et ").join(resource_parts)
-                headline = f"Moderate load · {culprit_display_name}" if locale == "en" else f"Charge modérée · {culprit_display_name}"
-                if resource_str:
-                    detail = f"Service '{raw_name}' uses {resource_str}." if locale == "en" else f"Le service '{raw_name}' utilise {resource_str}."
-                else:
-                    detail = f"Service '{raw_name}' is active." if locale == "en" else f"Le service '{raw_name}' est actif."
+                headline, detail = self._format_culprit_insight(
+                    culprit, culprit_pct, culprit_ram_pct, cpu_percent,
+                    prefix_en="Moderate load", prefix_fr="Charge modérée",
+                    locale=locale,
+                )
             elif top_procs and top_procs[0].get("cpu_percent", 0) > 5:
                 severity = "info"
                 icon = "🏃"
@@ -1385,7 +1472,25 @@ class InsightsManager:
             if row:
                 latest_snap = dict(row)
 
-        snap_str = json.dumps(latest_snap) if latest_snap else "Metrics unavailable"
+        snap_for_prompt = dict(latest_snap) if latest_snap else None
+        if snap_for_prompt:
+            # The raw top_processes_json string is worker-controlled and can be
+            # arbitrarily large — parse and re-serialize it bounded instead of
+            # dumping it raw into the prompt.
+            raw_top = snap_for_prompt.pop("top_processes_json", None)
+            if raw_top:
+                try:
+                    top = json.loads(raw_top)
+                    snap_for_prompt["top_processes"] = _truncate_prompt_strings(
+                        top[:10] if isinstance(top, list) else top
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    snap_for_prompt["top_processes"] = None
+        snap_str = (
+            json.dumps(snap_for_prompt)[:8000]
+            if snap_for_prompt
+            else "Metrics unavailable"
+        )
 
         # Fetch recent audit log entries for this node (last 6 hours)
         recent_audit = []
@@ -1502,7 +1607,12 @@ async def calculate_node_baseline(db: Any, node_id: str) -> dict[str, Any]:
         if not vals:
             return {"mean": 0.0, "std": 0.0, "p75": 50.0, "p90": 75.0, "p99": 90.0, "absolute_warning": abs_warn, "absolute_critical": abs_crit}
         mean_val = sum(vals) / len(vals)
-        variance = sum((x - mean_val) ** 2 for x in vals) / len(vals)
+        if len(vals) > 1:
+            # Sample variance (n-1): snapshots are a sample of the node's
+            # activity, not the full population.
+            variance = sum((x - mean_val) ** 2 for x in vals) / (len(vals) - 1)
+        else:
+            variance = 0.0
         std_val = variance ** 0.5
         p75 = _percentile(vals, 75.0)
         p90 = _percentile(vals, 90.0)

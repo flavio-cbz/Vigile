@@ -117,12 +117,20 @@ export const PluginRouter: React.FC = () => {
         // Map dynamic React-Router route pattern
         // Example: /plugins/docker/containers/:containerId
         const relativePath = page.route.replace('/plugins/', '');
+        const basePluginPath = page.plugin_id;
         return (
-          <Route
-            key={`${page.plugin_id}-${page.id}`}
-            path={relativePath}
-            element={<PluginWrapper page={page} />}
-          />
+          <React.Fragment key={`${page.plugin_id}-${page.id}`}>
+            <Route
+              path={relativePath}
+              element={<PluginWrapper page={page} />}
+            />
+            {relativePath !== basePluginPath && (
+              <Route
+                path={basePluginPath}
+                element={<PluginWrapper page={page} />}
+              />
+            )}
+          </React.Fragment>
         );
       })}
     </Routes>

@@ -251,22 +251,28 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
 
 async def _add_dropped_status_to_investigations_if_present(db: aiosqlite.Connection) -> None:
     """
-    Migration 010: add 'dropped' to the investigations.status CHECK constraint.
+    Migration 010: add 'dropped' and 'skipped' to the investigations.status
+    CHECK constraint.
 
     SQLite cannot ALTER a CHECK constraint, so the table is rebuilt following
     the _drop_join_tokens_fk_if_present precedent. Old rows all satisfy the
-    new constraint ('dropped' is added, not removed). Idempotent: no-op once
-    the live table DDL already contains 'dropped'.
+    new constraint (values are added, not removed). Idempotent: no-op once
+    the live table DDL already contains both 'dropped' and 'skipped'.
     """
     async with db.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='investigations'"
     ) as cursor:
         row = await cursor.fetchone()
 
-    if row is None or "dropped" in (row[0] or ""):
+    if row is None:
+        return
+    ddl = row[0] or ""
+    if "dropped" in ddl and "skipped" in ddl:
         return
 
-    logger.info("Migration 010: rebuilding investigations to accept status='dropped'.")
+    logger.info(
+        "Migration 010: rebuilding investigations to accept status='dropped' and 'skipped'."
+    )
     new_ddl = CREATE_INVESTIGATIONS.replace(
         "CREATE TABLE IF NOT EXISTS investigations",
         "CREATE TABLE IF NOT EXISTS investigations_new",

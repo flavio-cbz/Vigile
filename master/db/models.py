@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS investigations (
     alert_name        TEXT NOT NULL,              -- ex: "disk_usage_high"
     severity          TEXT NOT NULL DEFAULT 'warning',
     status            TEXT NOT NULL DEFAULT 'queued'
-                      CHECK(status IN ('queued', 'in_progress', 'completed', 'failed', 'dropped')),
+                      CHECK(status IN ('queued', 'in_progress', 'completed', 'failed', 'dropped', 'skipped')),
     context_json      TEXT NOT NULL DEFAULT '{}', -- Snapshot context at time of fire
     result            TEXT,                       -- Phase 3 LLM diagnostic result (JSON)
     created_at        REAL NOT NULL,

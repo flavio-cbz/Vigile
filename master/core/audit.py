@@ -66,6 +66,7 @@ class AuditAction(StrEnum):
     RESTART_SERVICE = "RESTART_SERVICE"
     RESTART_CONTAINER = "RESTART_CONTAINER"
     DISK_SCAN = "DISK_SCAN"
+    LOCKDOWN = "LOCKDOWN"
 
 
 # Serialize writes to prevent sequence collision

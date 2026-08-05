@@ -97,6 +97,18 @@ class RouteRegistrar:
 
         self._app.include_router(router)
         self._mounted_routes[plugin_id] = mounted
+
+        # Ensure dynamic plugin routes are evaluated BEFORE static files catch-all mounted at "/"
+        from starlette.routing import Mount
+        regular_routes = []
+        static_routes = []
+        for r in self._app.router.routes:
+            if isinstance(r, Mount) or getattr(r, "name", "") == "static" or getattr(r, "path", "") == "/":
+                static_routes.append(r)
+            else:
+                regular_routes.append(r)
+        self._app.router.routes = regular_routes + static_routes
+
         logger.info(
             "RouteRegistrar: mounted %d routes for plugin '%s'",
             len(mounted),

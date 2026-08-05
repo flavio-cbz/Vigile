@@ -220,6 +220,7 @@ export const NodeDetail: React.FC = () => {
           <NodeDetailMetricsTab
             nodeId={id}
             statsHistory={statsHistory}
+            fullDiskHistory={data.fullDiskHistory}
             loading={loadingStats}
             timeRange={timeRange}
             onRefresh={refreshStatsForRange}

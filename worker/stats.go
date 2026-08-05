@@ -199,49 +199,55 @@ type procStatSample struct {
 }
 
 func getCPUPercent() float64 {
-	data, err := os.ReadFile(procPrefix + "/proc/stat")
-	if err != nil {
-		return 0
-	}
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "cpu ") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
+	// Retry loop: the first call has no baseline (prevTotal == 0), so it
+	// stores one sample, sleeps 500ms and samples again. The loop replaces
+	// the former self-recursion: a single call never recurses onto itself.
+	for {
+		data, err := os.ReadFile(procPrefix + "/proc/stat")
+		if err != nil {
 			return 0
 		}
-		var idle, total uint64
-		for i, f := range fields[1:] {
-			v, err := strconv.ParseUint(f, 10, 64)
-			if err != nil {
-				slog.Warn("stats: parse cpu field", "field", f, "error", err)
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "cpu ") {
+				continue
 			}
-			total += v
-			if i == 3 || i == 4 { // idle + iowait (fields 4 and 5 in /proc/stat)
-				idle += v
+			fields := strings.Fields(line)
+			if len(fields) < 5 {
+				return 0
 			}
-		}
-		if prevTotal.Load() == 0 {
+			var idle, total uint64
+			for i, f := range fields[1:] {
+				v, err := strconv.ParseUint(f, 10, 64)
+				if err != nil {
+					slog.Warn("stats: parse cpu field", "field", f, "error", err)
+				}
+				total += v
+				if i == 3 || i == 4 { // idle + iowait (fields 4 and 5 in /proc/stat)
+					idle += v
+				}
+			}
+			if prevTotal.Load() == 0 {
+				prevIdle.Store(idle)
+				prevTotal.Store(total)
+				time.Sleep(500 * time.Millisecond)
+				break // re-sample from the top; the loop exits once a delta exists
+			}
+			diffIdle := idle - prevIdle.Load()
+			diffTotal := total - prevTotal.Load()
 			prevIdle.Store(idle)
 			prevTotal.Store(total)
-			time.Sleep(500 * time.Millisecond)
-			return getCPUPercent()
+			if diffTotal == 0 {
+				return 0
+			}
+			pct := math.Round((1-float64(diffIdle)/float64(diffTotal))*1000) / 10
+			slog.Debug("CPU usage", "diffIdle", diffIdle, "diffTotal", diffTotal, "percent", pct)
+			return pct
 		}
-		diffIdle := idle - prevIdle.Load()
-		diffTotal := total - prevTotal.Load()
-		prevIdle.Store(idle)
-		prevTotal.Store(total)
-		if diffTotal == 0 {
-			return 0
-		}
-		pct := math.Round((1-float64(diffIdle)/float64(diffTotal))*1000) / 10
-		slog.Debug("CPU usage", "diffIdle", diffIdle, "diffTotal", diffTotal, "percent", pct)
-		return pct
+		// No "cpu " line found: nothing to compute.
+		return 0
 	}
-	return 0
 }
 
 func getLoadAvg(index int) float64 {
@@ -286,24 +292,60 @@ func getMemField(field string) int64 {
 	return 0
 }
 
-func getMemUsed() int64 {
-	total := getMemField("MemTotal")
-	available := getMemField("MemAvailable")
-	if available > 0 {
+// readMemInfo parses /proc/meminfo once into a field-name → bytes map so a
+// collection pass does not re-read the file per metric (getMemUsed previously
+// read it up to 5 times per cycle).
+func readMemInfo() map[string]int64 {
+	data, err := os.ReadFile(procPrefix + "/proc/meminfo")
+	if err != nil {
+		return nil
+	}
+	info := make(map[string]int64, 8)
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		kv := strings.Fields(parts[1])
+		if len(kv) < 1 {
+			continue
+		}
+		v, err := strconv.ParseInt(kv[0], 10, 64)
+		if err != nil {
+			slog.Warn("stats: parse meminfo", "field", parts[0], "error", err)
+			continue
+		}
+		info[parts[0]] = v * 1024 // kB → bytes
+	}
+	return info
+}
+
+// memUsedFromInfo derives used bytes from a single parsed /proc/meminfo map.
+func memUsedFromInfo(info map[string]int64) int64 {
+	if info == nil {
+		return 0
+	}
+	total := info["MemTotal"]
+	if available := info["MemAvailable"]; available > 0 {
 		return total - available
 	}
-	free := getMemField("MemFree")
-	buffers := getMemField("Buffers")
-	cached := getMemField("Cached")
-	return total - free - buffers - cached
+	return total - info["MemFree"] - info["Buffers"] - info["Cached"]
+}
+
+func getMemUsed() int64 {
+	return memUsedFromInfo(readMemInfo())
 }
 
 func getMemPercent() float64 {
-	total := getMemField("MemTotal")
+	info := readMemInfo()
+	if info == nil {
+		return 0
+	}
+	total := info["MemTotal"]
 	if total == 0 {
 		return 0
 	}
-	used := getMemUsed()
+	used := memUsedFromInfo(info)
 	return math.Round(float64(used)/float64(total)*1000) / 10
 }
 
@@ -552,7 +594,8 @@ func getNetworkStats() (bytesRecv, bytesSent, pktsRecv, pktsSent, errIn, errOut,
 			continue
 		}
 		iface := strings.TrimSpace(parts[0])
-		if iface == "lo" {
+		// HasPrefix also excludes loopback aliases (lo:0, lo:1, …).
+		if strings.HasPrefix(iface, "lo") {
 			continue
 		}
 		fields := strings.Fields(parts[1])
@@ -767,10 +810,15 @@ func getContextSwitches() int64 {
 }
 
 func getCPUThrottling() int64 {
-	pattern := "/sys/devices/system/cpu/cpu*/thermal_throttle/core_throttle_count"
+	pattern := procPrefix + "/sys/devices/system/cpu/cpu*/thermal_throttle/core_throttle_count"
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
-		return 0
+		// Try without procPrefix for sysfs (sysfs is never under /proc),
+		// mirroring getTemperature's container /host mount fallback.
+		matches, err = filepath.Glob("/sys/devices/system/cpu/cpu*/thermal_throttle/core_throttle_count")
+		if err != nil || len(matches) == 0 {
+			return 0
+		}
 	}
 	var total int64
 	for _, path := range matches {
@@ -815,7 +863,10 @@ func parseProcStat(data []byte) (name, state string, utime, stime, starttime uin
 	if err != nil {
 		slog.Warn("stats: parse starttime", "error", err)
 	}
-	if rssUint, err := strconv.ParseUint(fields[22], 10, 64); err == nil {
+	// Per proc(5), rss is field 24 → fields[21] after the parenthesized comm.
+	// fields[22] would be rsslim (field 25), which is usually max-uint64 on
+	// 64-bit hosts and would overflow the int64 guard below, zeroing RSS.
+	if rssUint, err := strconv.ParseUint(fields[21], 10, 64); err == nil {
 		if rssUint > 9223372036854775807 {
 			rssPages = 0
 		} else {
@@ -842,6 +893,9 @@ func getTopProcesses(limit int) []ProcessInfo {
 	now := float64(time.Now().UnixMicro()) / 1_000_000
 	uptime := getUptime()
 	procs := make([]ProcessInfo, 0, len(entries))
+	// live tracks every numeric PID seen in this /proc pass so stale samples
+	// can be garbage-collected afterwards (see the Range below).
+	live := make(map[int]struct{}, len(entries))
 	for _, pidStr := range entries {
 		if !isNumeric(pidStr) {
 			continue
@@ -859,6 +913,7 @@ func getTopProcesses(limit int) []ProcessInfo {
 			slog.Warn("stats: parse pid", "pid", pidStr, "error", err)
 			continue
 		}
+		live[pid] = struct{}{}
 
 		totalJiffies := utime + stime
 
@@ -893,12 +948,23 @@ func getTopProcesses(limit int) []ProcessInfo {
 			PID:        pid,
 			Name:       pName,
 			CPUPercent: cpuPct,
-			MemRSSKB:   rssPages * 4,
+			MemRSSKB:   rssPages * (int64(os.Getpagesize()) / 1024), // pages → kB using the real page size (64KB on ARM64)
 			State:      pState,
 		})
 	}
 	sort.Slice(procs, func(i, j int) bool {
 		return procs[i].CPUPercent > procs[j].CPUPercent
+	})
+	// Garbage-collect samples for PIDs that no longer exist, keeping the map
+	// bounded by the current process list (short-lived processes would
+	// otherwise leak entries forever).
+	prevProcSamples.Range(func(k, v interface{}) bool {
+		if pid, ok := k.(int); ok {
+			if _, alive := live[pid]; !alive {
+				prevProcSamples.Delete(pid)
+			}
+		}
+		return true
 	})
 	if len(procs) > limit {
 		procs = procs[:limit]
@@ -921,6 +987,11 @@ func handleGetStats(ctx context.Context, intent Intent) IntentResult {
 // buildStatusReport builds a STATUS_REPORT message from metrics.
 func buildStatusReport(ctx context.Context) map[string]interface{} {
 	m := collectMetrics(ctx)
+	// NOTE: keep these keys in sync with (a) MetricsSnapshot's JSON tags above
+	// and (b) MetricsSnapshot (Pydantic) in master/plugins/metrics/__init__.py.
+	// The explicit map is intentional: marshaling MetricsSnapshot directly would
+	// drop zero-valued omitempty fields from the wire format, which the master
+	// then stores as NULL instead of 0 — a silent semantics change.
 	return map[string]interface{}{
 		"type":                "STATUS_REPORT",
 		"version":             Version,

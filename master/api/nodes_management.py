@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import time
+import uuid
 try:
     from typing import Annotated
 except ImportError:
@@ -18,7 +19,7 @@ from typing import Any, List
 from fastapi import Depends, HTTPException, Path, Query, Request, status
 
 from master.api.demo_data import DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
-from master.api.deps import DB, CurrentUser, get_node_manager, get_security, get_worker_query_port, require_role
+from master.api.deps import DB, get_node_manager, get_security, get_worker_query_port, require_role
 from master.api.nodes_helpers import _add_bulk_node_metrics, _add_node_metrics, _node_to_response
 from master.core.worker_query_port import WorkerQueryPort
 from master.api.nodes_models import (
@@ -205,7 +206,12 @@ async def regenerate_join_token(
     invalidated = await nm.invalidate_join_tokens(db, node_id)
     logger.info("Invalidated %d join tokens for node %s", invalidated, node_id)
 
-    token, payload = sec.generate_join_token(node_id=node_id, ip_prefix="")
+    token, payload = sec.generate_join_token(
+        node_id=node_id,
+        ip_prefix="",
+        name=existing.get("name") or "",
+        group=existing.get("node_group") or "",
+    )
     token_hash = sec.join_token_hash(token)
 
     token_id = str(uuid.uuid4())
@@ -381,7 +387,7 @@ async def patch_node(
     node_id: Annotated[str, Path(description="Node UUID")],
     body: NodePatchRequest,
     db: DB,
-    claims: CurrentUser,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeResponse:
     """
@@ -408,7 +414,7 @@ async def patch_node(
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    user_role = claims.get("role", "viewer")
+    user_role = claims.get("role")
     has_disabled_field = body.disabled is not None
     has_metadata_field = body.name is not None or body.group is not None
 
@@ -502,8 +508,6 @@ async def get_bulk_status(
     nm: NodeManager = Depends(get_node_manager),
 ) -> BulkStatusResponse:
     """Get the latest metrics snapshots and container counts for all nodes in bulk."""
-    import json
-
     if is_demo(claims):
         demo_statuses = {}
         for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
@@ -611,7 +615,6 @@ async def get_node_stats(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    import json
     rows: list[dict] = []
     async with db.execute(
         """
@@ -636,6 +639,7 @@ async def get_node_stats(
                     d["disks"] = json.loads(d["disks_json"])
                 except Exception:
                     d["disks"] = None
+            d.pop("disks_json", None)
             rows.append(d)
 
     return NodeStatsResponse(
@@ -660,7 +664,11 @@ async def get_node_logs(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     lines: Annotated[int, Query(ge=1, le=500, description="Number of log lines")] = 50,
     service: Annotated[
-        str | None, Query(description="systemd service name (uses journalctl)")
+        str | None,
+        Query(
+            description="systemd service name (uses journalctl)",
+            pattern=r"^[a-zA-Z0-9_\-\.@:]{1,128}$",
+        ),
     ] = None,
     path: Annotated[
         str | None, Query(description="Log file path on the worker (/var/log/ only)")

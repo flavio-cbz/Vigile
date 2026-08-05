@@ -39,8 +39,10 @@ class InvestigationManager:
     saturating the LLM quota.
     """
 
-    def __init__(self, max_concurrent: int = 3) -> None:
-        self._insights: Any = None  # InsightsManager — lazy-loaded from DI
+    def __init__(
+        self, max_concurrent: int = 3, insights: Any | None = None
+    ) -> None:
+        self._insights: Any = insights  # InsightsManager — injected via set_insights()
         self._max_concurrent = max_concurrent
         # Hard concurrency cap: at most `max_concurrent` investigations run at
         # the same time. `_reserved` is the synchronous reservation counter —
@@ -76,14 +78,12 @@ class InvestigationManager:
             await asyncio.wait(pending, timeout=5.0)
         self._background_tasks.clear()
 
+    def set_insights(self, insights: Any) -> None:
+        """Inject the InsightsManager from the DI layer (edge wiring)."""
+        self._insights = insights
+
     def _get_insights(self) -> Any:
-        """Lazy-load InsightsManager from the DI layer."""
-        if self._insights is None:
-            try:
-                from master.api.deps import get_insights_manager
-                self._insights = get_insights_manager()
-            except Exception:
-                logger.warning("Failed to load InsightsManager — Phase 3 unavailable", exc_info=True)
+        """Return the injected InsightsManager (None if not wired)."""
         return self._insights
 
     def _get_node_manager(self) -> NodeManager:
@@ -242,7 +242,9 @@ class InvestigationManager:
                                 status = ?, result = ?, completed_at = ?, updated_at = ?
                                WHERE id = ?""",
                             (
-                                "completed" if result.get("status") == "completed" else "failed",
+                                result.get("status")
+                                if result.get("status") in ("completed", "skipped")
+                                else "failed",
                                 json.dumps(result),
                                 time.time(),
                                 time.time(),

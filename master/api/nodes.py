@@ -20,20 +20,19 @@ import posixpath
 import time
 import uuid
 try:
-    from typing import Annotated, List
+    from typing import Annotated
 except ImportError:
     from typing_extensions import Annotated  # type: ignore[attr-defined]
-    from typing import List
+from typing import List
 
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from master.api.demo_data import DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
+from master.api.demo_data import DEMO_NODE_METRICS, DEMO_NODES, get_demo_logs, get_demo_metrics, get_demo_node, is_demo
 from master.api.deps import (
     DB,
-    CurrentUser,
     Insights,
     get_locale,
     get_node_manager,
@@ -42,6 +41,7 @@ from master.api.deps import (
     get_worker_query_port,
     require_role,
 )
+from master.api.nodes_helpers import ARCH_MAP
 from master.api.rate_limits import KICKSTART_LIMIT
 from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
@@ -710,8 +710,6 @@ async def get_bulk_status(
     nm: NodeManager = Depends(get_node_manager),
 ) -> BulkStatusResponse:
     """Get the latest metrics snapshots and container counts for all nodes in bulk."""
-    import json
-
     if is_demo(claims):
         demo_statuses = {}
         for node_id in ["demo-node-01", "demo-node-02", "demo-node-03"]:
@@ -852,7 +850,7 @@ async def patch_node(
     node_id: Annotated[str, Path(description="Node UUID")],
     body: NodePatchRequest,
     db: DB,
-    claims: CurrentUser,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeResponse:
     """
@@ -879,7 +877,7 @@ async def patch_node(
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    user_role = claims.get("role", "viewer")
+    user_role = claims.get("role")
     has_disabled_field = body.disabled is not None
     has_metadata_field = body.name is not None or body.group is not None
 
@@ -1001,7 +999,12 @@ async def regenerate_join_token(
     invalidated = await nm.invalidate_join_tokens(db, node_id)
     logger.info("Invalidated %d join tokens for node %s", invalidated, node_id)
 
-    token, payload = sec.generate_join_token(node_id=node_id, ip_prefix="")
+    token, payload = sec.generate_join_token(
+        node_id=node_id,
+        ip_prefix="",
+        name=existing.get("name") or "",
+        group=existing.get("node_group") or "",
+    )
     token_hash = sec.join_token_hash(token)
 
     token_id = str(uuid.uuid4())
@@ -1192,7 +1195,6 @@ async def get_node_stats(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    import json
     rows: list[dict] = []
 
     if start is not None or end is not None:
@@ -1201,7 +1203,7 @@ async def get_node_stats(
         effective_end = end if end is not None else now
         duration = max(1.0, effective_end - effective_start)
 
-        if duration > 7 * 86400:
+        if duration >= 7 * 86400:
             bucket_size = 3600
         elif duration > 86400:
             bucket_size = 300
@@ -1275,11 +1277,13 @@ async def get_node_stats(
                     d["disks"] = json.loads(d["disks_json"])
                 except Exception:
                     d["disks"] = None
+            d.pop("disks_json", None)
             if d.get("top_processes_json"):
                 try:
                     d["top_processes"] = json.loads(d["top_processes_json"])
                 except Exception:
                     d["top_processes"] = None
+            d.pop("top_processes_json", None)
             rows.append(d)
 
     return NodeStatsResponse(
@@ -1434,7 +1438,11 @@ async def get_node_logs(
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     lines: Annotated[int, Query(ge=1, le=500, description="Number of log lines")] = 50,
     service: Annotated[
-        str | None, Query(description="systemd service name (uses journalctl)")
+        str | None,
+        Query(
+            description="systemd service name (uses journalctl)",
+            pattern=r"^[a-zA-Z0-9_\-\.@:]{1,128}$",
+        ),
     ] = None,
     path: Annotated[
         str | None, Query(description="Log file path on the worker (/var/log/ only)")
@@ -1708,25 +1716,9 @@ def _node_to_response(node: dict) -> dict:
 async def _add_node_metrics(db: DB, node_dict: dict, claims: dict) -> dict:
     """Fetch and merge the latest metrics snapshot for a node."""
     if is_demo(claims):
-        # Return some mock metrics for demo nodes
-        if node_dict["id"] == "demo-node-01":
-            node_dict.update(
-                {
-                    "cpu_percent": 12.5,
-                    "memory_percent": 45.2,
-                    "disk_percent": 38.4,
-                    "uptime_seconds": 3600.0,
-                }
-            )
-        elif node_dict["id"] == "demo-node-02":
-            node_dict.update(
-                {
-                    "cpu_percent": 8.0,
-                    "memory_percent": 30.1,
-                    "disk_percent": 42.0,
-                    "uptime_seconds": 1800.0,
-                }
-            )
+        demo_metrics = DEMO_NODE_METRICS.get(node_dict["id"])
+        if demo_metrics:
+            node_dict.update(demo_metrics)
         return node_dict
 
     async with db.execute(
@@ -1756,24 +1748,9 @@ async def _add_bulk_node_metrics(db: DB, node_dicts: list[dict], claims: dict) -
     """Fetch and merge the latest metrics snapshots for a list of nodes in bulk."""
     if is_demo(claims):
         for nd in node_dicts:
-            if nd["id"] == "demo-node-01":
-                nd.update(
-                    {
-                        "cpu_percent": 12.5,
-                        "memory_percent": 45.2,
-                        "disk_percent": 38.4,
-                        "uptime_seconds": 3600.0,
-                    }
-                )
-            elif nd["id"] == "demo-node-02":
-                nd.update(
-                    {
-                        "cpu_percent": 8.0,
-                        "memory_percent": 30.1,
-                        "disk_percent": 42.0,
-                        "uptime_seconds": 1800.0,
-                    }
-                )
+            demo_metrics = DEMO_NODE_METRICS.get(nd["id"])
+            if demo_metrics:
+                nd.update(demo_metrics)
         return node_dicts
 
     node_ids = [n["id"] for n in node_dicts]
@@ -2089,12 +2066,6 @@ async def update_worker(
             detail=f"Worker disconnected: cannot update node {node_id} while offline",
         )
 
-    ARCH_MAP = {
-        "x86_64": "amd64",
-        "aarch64": "arm64",
-        "armv7l": "armv7",
-        "arm": "armv7",
-    }
     raw_os = (node.get("os") or "linux").lower()
     raw_arch = (node.get("arch") or "amd64").lower()
     node_os = raw_os
@@ -2159,14 +2130,14 @@ _operator_plus = Depends(require_role("operator", "admin"))
 )
 async def get_disk_scan(
     node_id: Annotated[str, Path(description="Node UUID")],
+    claims: Annotated[dict, _operator_plus],
+    db: DB,
     path: str = Query("/"),
     force: bool = False,
     max_depth: int = Query(4, ge=0, le=20),
     min_size_bytes: int = Query(1 * 1024 * 1024, ge=0),
-    claims: Annotated[dict, _operator_plus] = None,
     nm: NodeManager = Depends(get_node_manager),
     port: WorkerQueryPort = Depends(get_worker_query_port),
-    db: DB = None,
 ) -> dict[str, Any]:
     """
     Scan disk usage tree for a node's filesystem.
@@ -2180,8 +2151,6 @@ async def get_disk_scan(
             detail="Plugin 'disk_analysis' est désactivé.",
         )
 
-    if claims is None:
-        claims = {}
     if force:
         if claims.get("role") not in ("admin",):
             raise HTTPException(

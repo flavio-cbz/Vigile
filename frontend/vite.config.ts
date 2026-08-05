@@ -18,8 +18,15 @@ export default defineConfig(({ mode }) => {
 
     build: {
       target: 'esnext',
-      minify: 'esbuild',
       cssMinify: true,
+      rolldownOptions: {
+        output: {
+          minify: {
+            compress: { dropConsole: true, dropDebugger: true },
+            mangle: true,
+          },
+        },
+      },
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -34,13 +41,9 @@ export default defineConfig(({ mode }) => {
       },
     },
 
-    esbuild: {
-      drop: ['console', 'debugger'],
-    },
-
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './src'),
+        '@': path.resolve(import.meta.dirname, './src'),
       },
     },
     server: {

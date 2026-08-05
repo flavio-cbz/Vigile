@@ -92,7 +92,13 @@ export const MetricsTooltip: React.FC<MetricsTooltipProps> = ({
   };
 
   return (
-    <Card className="backdrop-blur-md animate-fade-in min-w-[200px] max-w-[280px] z-50 pointer-events-auto shadow-xl border-border-strong">
+    <Card
+      className="backdrop-blur-md animate-fade-in min-w-[220px] max-w-[300px] z-50 pointer-events-auto shadow-xl border-border-strong select-none"
+      // Recharts v3 rend le tooltip par portal DANS le div recharts-wrapper qui porte
+      // onMouseMove : sans ce stopPropagation, survoler la carte recalcule l'index actif
+      // (tooltip qui saute de point en point ou se ferme) => Détail/carte injoignables.
+      onMouseMove={(e) => e.stopPropagation()}
+    >
       <CardHeader>
         <div className="text-[9px] font-mono text-text-3 uppercase tracking-wider">
           {localT('Temps', 'Time')} : {relativeLabel} {timeLabel ? `(${timeLabel})` : ''}

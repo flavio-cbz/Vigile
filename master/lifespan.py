@@ -270,6 +270,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 7c. Investigation Manager (alerte → Phase 3 automatique)
     alert_engine.on_alert_fired_callback = investigation_manager.on_alert_fired
+    try:
+        from master.api.deps import get_insights_manager
+
+        investigation_manager.set_insights(get_insights_manager())
+    except Exception:
+        logger.warning(
+            "Failed to wire InsightsManager into InvestigationManager — Phase 3 unavailable",
+            exc_info=True,
+        )
     logger.info("Investigation Manager initialized and wired to AlertEngine.")
 
     app.state.startup_time = time.time()

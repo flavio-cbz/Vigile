@@ -709,7 +709,7 @@ async def _try_extract_proposal(
                 },
             ],
             temperature=0.3,
-            max_retries=2,
+            max_attempts=2,
         )
         if not req.action or req.action == "NONE":
             return None

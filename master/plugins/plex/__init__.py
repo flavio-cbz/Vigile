@@ -10,9 +10,11 @@ exposes secure artwork proxying, and injects context into the AI Copilot.
 import json
 import logging
 import time
+import uuid
 from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 import httpx
 import aiosqlite
 
@@ -27,7 +29,10 @@ logger = logging.getLogger(__name__)
 # Default configurations
 DEFAULT_PLEX_PORT = 32400
 DEFAULT_CPU_THRESHOLD = 80
-DEFAULT_RETENTION_DAYS = 90
+DEFAULT_RETENTION_DAYS = 30
+
+class VerifyPinRequest(BaseModel):
+    pin_id: int
 
 # Allowed path prefixes for image proxying
 ALLOWED_ARTWORK_PREFIXES = (
@@ -45,7 +50,7 @@ ALLOWED_ARTWORK_PREFIXES = (
 def get_config_schema() -> dict[str, Any]:
     return {
         "name": "Plex Media Server",
-        "description": "Auto-detects Plex instances, reports active streaming sessions, logs watch history, and automates load investigation.",
+        "description": "Auto-detects Plex instances, reports active library streaming sessions, logs watch history, and automates load investigation.",
         "category": "Media",
         "schema": {
             "plex_token": {
@@ -53,6 +58,18 @@ def get_config_schema() -> dict[str, Any]:
                 "title": "Plex Auth Token",
                 "default": "",
                 "description": "Auth token to communicate with Plex API.",
+            },
+            "plex_server_url": {
+                "type": "string",
+                "title": "Plex Server URL",
+                "default": "",
+                "description": "Selected Plex Server address (e.g. http://192.168.1.50:32400 or leave empty for auto-detection).",
+            },
+            "plex_server_name": {
+                "type": "string",
+                "title": "Plex Server Name",
+                "default": "",
+                "description": "Friendly name of the selected Plex server.",
             },
             "plex_port_override": {
                 "type": "integer",
@@ -89,6 +106,28 @@ async def _get_plex_config(db: aiosqlite.Connection) -> dict:
     except Exception as e:
         logger.error("Plex plugin: Failed to query config: %s", e)
     return {}
+
+
+async def _save_plex_config(db: aiosqlite.Connection, updates: dict[str, Any]) -> dict[str, Any]:
+    """Updates and saves Plex plugin config JSON in database."""
+    config = await _get_plex_config(db)
+    config.update(updates)
+    config_json = json.dumps(config)
+    await db.execute(
+        "INSERT INTO plugins (id, enabled, config_json) VALUES ('plex', 1, ?) "
+        "ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json",
+        (config_json,),
+    )
+    await db.commit()
+    return config
+
+
+def _get_plex_client_id(config: dict) -> str:
+    """Gets existing client identifier or generates a stable default."""
+    client_id = config.get("plex_client_identifier")
+    if not client_id:
+        client_id = "vigile-master-" + str(uuid.uuid4())[:8]
+    return client_id
 
 
 async def detect_plex_instance(node_id: str, db: aiosqlite.Connection) -> dict[str, Any]:
@@ -170,6 +209,11 @@ async def _get_plex_client_and_url(node_id: str, db: aiosqlite.Connection, confi
     token = config.get("plex_token", "")
     if not token:
         return None
+
+    # Use explicitly selected Plex server URL if set
+    server_url = (config.get("plex_server_url") or "").strip()
+    if server_url:
+        return server_url.rstrip("/"), token
 
     node = await node_manager.get_node(db, node_id)
     if not node:
@@ -568,6 +612,171 @@ class PlexPlugin(PluginBase):
         )
         return stats.model_dump()
 
+    @route("/auth/pin", method="POST", roles=["admin", "operator"])
+    async def auth_pin_route(self, db: aiosqlite.Connection = Depends(get_db_conn)) -> dict:
+        """Create a Plex OAuth authentication PIN."""
+        config = await _get_plex_config(db)
+        client_id = _get_plex_client_id(config)
+        if not config.get("plex_client_identifier"):
+            await _save_plex_config(db, {"plex_client_identifier": client_id})
+
+        headers = {
+            "Accept": "application/json",
+            "X-Plex-Product": "Vigile Fleet Manager",
+            "X-Plex-Version": "1.0.0",
+            "X-Plex-Device": "Vigile Master",
+            "X-Plex-Client-Identifier": client_id,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.post("https://plex.tv/api/v2/pins?strong=true", headers=headers)
+                if resp.status_code not in (200, 201):
+                    raise HTTPException(status_code=502, detail=f"Plex API error: {resp.status_code}")
+                data = resp.json()
+                code = data.get("code")
+                pin_id = data.get("id")
+                auth_url = (
+                    f"https://app.plex.tv/auth/#!?clientID={client_id}"
+                    f"&code={code}&context%5Bdevice%5D%5Bproduct%5D=Vigile+Fleet+Manager"
+                )
+                return {
+                    "id": pin_id,
+                    "code": code,
+                    "auth_url": auth_url,
+                    "client_id": client_id,
+                }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Failed to create Plex PIN: %s", e)
+            raise HTTPException(status_code=502, detail="Failed to connect to Plex authentication servers.")
+
+    @route("/auth/verify", method="POST", roles=["admin", "operator"])
+    async def auth_verify_route(
+        self,
+        payload: VerifyPinRequest,
+        db: aiosqlite.Connection = Depends(get_db_conn),
+    ) -> dict:
+        """Check status of Plex PIN and save auth token if authorized."""
+        pin_id = payload.pin_id
+        config = await _get_plex_config(db)
+        client_id = _get_plex_client_id(config)
+        headers = {
+            "Accept": "application/json",
+            "X-Plex-Client-Identifier": client_id,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get(f"https://plex.tv/api/v2/pins/{pin_id}", headers=headers)
+                if resp.status_code != 200:
+                    return {"authenticated": False}
+                data = resp.json()
+                token = data.get("authToken") or data.get("auth_token")
+                if not token:
+                    return {"authenticated": False}
+
+                user_name = None
+                try:
+                    user_resp = await client.get(
+                        "https://plex.tv/api/v2/user",
+                        headers={"Accept": "application/json", "X-Plex-Token": token, "X-Plex-Client-Identifier": client_id},
+                    )
+                    if user_resp.status_code == 200:
+                        user_data = user_resp.json()
+                        user_name = user_data.get("username") or user_data.get("title") or user_data.get("email")
+                except Exception:
+                    logger.debug("Could not fetch Plex user details")
+
+                updated = await _save_plex_config(
+                    db,
+                    {
+                        "plex_token": token,
+                        "plex_username": user_name or "Plex User",
+                    },
+                )
+                return {
+                    "authenticated": True,
+                    "token": token,
+                    "user": user_name,
+                    "config": updated,
+                }
+        except Exception as e:
+            logger.error("Failed to verify Plex PIN %s: %s", pin_id, e)
+            raise HTTPException(status_code=502, detail="Failed to verify Plex authentication PIN.")
+
+    @route("/servers", method="GET", roles=["admin", "operator"])
+    async def servers_route(self, db: aiosqlite.Connection = Depends(get_db_conn)) -> dict:
+        """Fetch available Plex Media Servers for the authenticated user from Plex.tv."""
+        config = await _get_plex_config(db)
+        token = config.get("plex_token", "")
+        if not token:
+            raise HTTPException(status_code=400, detail="Plex est non connecté. Veuillez d'abord vous authentifier.")
+
+        client_id = _get_plex_client_id(config)
+        headers = {
+            "Accept": "application/json",
+            "X-Plex-Token": token,
+            "X-Plex-Client-Identifier": client_id,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get("https://plex.tv/api/v2/resources?includeHttps=1&includeRelays=1", headers=headers)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail="Erreur lors de la récupération des serveurs Plex.")
+                resources = resp.json()
+
+                servers = []
+                for res in resources:
+                    provides = res.get("provides", "")
+                    provides_str = ",".join(provides) if isinstance(provides, list) else str(provides)
+
+                    if "server" in provides_str:
+                        connections = []
+                        raw_conns = res.get("connections", [])
+                        for conn in raw_conns:
+                            connections.append({
+                                "uri": conn.get("uri"),
+                                "address": conn.get("address"),
+                                "port": conn.get("port"),
+                                "local": bool(conn.get("local")),
+                                "protocol": conn.get("protocol", "http"),
+                            })
+                        servers.append({
+                            "name": res.get("name"),
+                            "product": res.get("product"),
+                            "productVersion": res.get("productVersion"),
+                            "clientIdentifier": res.get("clientIdentifier"),
+                            "owned": bool(res.get("owned")),
+                            "connections": connections,
+                        })
+                return {"servers": servers, "count": len(servers)}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Failed to fetch Plex servers: %s", e)
+            raise HTTPException(status_code=502, detail="Impossible de joindre plex.tv pour lister les serveurs.")
+
+    @route("/config/server", method="POST", roles=["admin", "operator"])
+    async def save_server_config_route(
+        self,
+        payload: dict,
+        db: aiosqlite.Connection = Depends(get_db_conn),
+    ) -> dict:
+        """Save selected Plex server connection URL and preferences."""
+        server_url = (payload.get("server_url") or "").strip()
+        server_name = (payload.get("server_name") or "").strip()
+        client_identifier = (payload.get("client_identifier") or "").strip()
+
+        updates: dict[str, Any] = {
+            "plex_server_url": server_url,
+            "plex_server_name": server_name,
+        }
+        if client_identifier:
+            updates["plex_server_client_identifier"] = client_identifier
+
+        updated_config = await _save_plex_config(db, updates)
+        return {"status": "ok", "config": updated_config}
+
 
 # Backward compatibility functions for test_plex.py
 async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
@@ -599,4 +808,30 @@ async def users_route(node_id: str, db: aiosqlite.Connection) -> dict:
     ctx = PluginContext(plugin_id="plex", config={}, db=db)
     plugin = PlexPlugin(ctx)
     return await plugin.users_route(node_id, db=db)
+
+async def auth_pin_route(db: aiosqlite.Connection) -> dict:
+    from master.core.plugin_base import PluginContext
+    ctx = PluginContext(plugin_id="plex", config={}, db=db)
+    plugin = PlexPlugin(ctx)
+    return await plugin.auth_pin_route(db=db)
+
+async def auth_verify_route(payload: VerifyPinRequest | int, db: aiosqlite.Connection) -> dict:
+    from master.core.plugin_base import PluginContext
+    ctx = PluginContext(plugin_id="plex", config={}, db=db)
+    plugin = PlexPlugin(ctx)
+    req = payload if isinstance(payload, VerifyPinRequest) else VerifyPinRequest(pin_id=payload)
+    return await plugin.auth_verify_route(payload=req, db=db)
+
+async def servers_route(db: aiosqlite.Connection) -> dict:
+    from master.core.plugin_base import PluginContext
+    ctx = PluginContext(plugin_id="plex", config={}, db=db)
+    plugin = PlexPlugin(ctx)
+    return await plugin.servers_route(db=db)
+
+async def save_server_config_route(payload: dict, db: aiosqlite.Connection) -> dict:
+    from master.core.plugin_base import PluginContext
+    ctx = PluginContext(plugin_id="plex", config={}, db=db)
+    plugin = PlexPlugin(ctx)
+    return await plugin.save_server_config_route(payload=payload, db=db)
+
 

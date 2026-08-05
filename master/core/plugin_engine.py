@@ -33,6 +33,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from master.core.hook_bus import HookBus
@@ -201,7 +202,7 @@ class PluginRegistry:
         discovered[pid] = PluginManifest(
             id=pid,
             name=pid.replace("_", " ").title(),
-            version="1.0.0",
+            version="0.0.0",
             description="Plugin Python (format legacy).",
             category="System",
             loader="legacy",    # type: ignore[call-arg]
@@ -240,13 +241,24 @@ class PluginRegistry:
                     manifest_data = json.loads(mf.read().decode("utf-8"))
                 manifest = PluginManifest(**manifest_data)
 
-                extract_target = os.path.join(scan_dir, manifest.id)
+                # Valide manifest.id : il ne doit pas s'échapper du répertoire de scan
+                scan_dir_real = Path(scan_dir).resolve()
+                extract_target = (scan_dir_real / manifest.id).resolve()
+                if not extract_target.is_relative_to(scan_dir_real):
+                    self._errors[manifest.id] = "manifest.id invalide (traversal de chemin)"
+                    return
+
                 if os.path.exists(extract_target):
                     self._errors[manifest.id] = "Répertoire cible existe déjà"
                     return
 
                 tmp_dir = tempfile.mkdtemp(prefix=f"vigile_zip_{manifest.id}_")
                 try:
+                    # Zip-slip : chaque membre doit rester sous tmp_dir
+                    tmp_real = Path(tmp_dir).resolve()
+                    for member in zf.namelist():
+                        if not (tmp_real / member).resolve().is_relative_to(tmp_real):
+                            raise OSError(f"Entrée ZIP invalide: {member!r}")
                     zf.extractall(tmp_dir)
                     items = os.listdir(tmp_dir)
                     src = os.path.join(tmp_dir, items[0]) if len(items) == 1 and os.path.isdir(os.path.join(tmp_dir, items[0])) else tmp_dir
@@ -320,14 +332,18 @@ class PluginProcessWrapper:
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         raw_env = self._env if self._env is not None else os.environ
         env = {k: raw_env[k] for k in _ENV_WHITELIST if k in raw_env}
-        env.setdefault("PYTHONPATH", project_root)
+        # PYTHONPATH forcé : le subprocess worker doit importer master.* depuis
+        # le projet, sans héritage d'un PYTHONPATH hôte potentiellement pollué.
+        env["PYTHONPATH"] = project_root
         env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
-        env.setdefault("HOME", "/root")
+        env.setdefault("HOME", os.path.expanduser("~"))
         env.setdefault("LANG", "C.UTF-8")
 
         preexec_fn = None
         if _resource_mod is not None:
             def _set_limits():
+                # Garde-fous de RESSOURCES (mémoire/CPU) — pas une frontière de
+                # sécurité : le subprocess tourne toujours sur le noyau hôte.
                 try:
                     _resource_mod.setrlimit(_resource_mod.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
                     _resource_mod.setrlimit(_resource_mod.RLIMIT_CPU, (30, 30))
@@ -401,6 +417,15 @@ class PluginProcessWrapper:
             except Exception:
                 logger.exception("Erreur de parsing stdout du worker '%s'", self.plugin_id)
 
+        # EOF → le subprocess est mort : résoudre toutes les futures en attente
+        # pour éviter les hangs (snapshot : call_hook pop le dict pendant ce temps).
+        returncode = self.process.returncode if self.process else None
+        if self._init_future and not self._init_future.done():
+            self._init_future.set_exception(RuntimeError("subprocess terminated before initialization"))
+        for fut in list(self._pending_calls.values()):
+            if not fut.done():
+                fut.set_exception(RuntimeError(f"subprocess terminated (returncode={returncode})"))
+
     async def _read_stderr(self) -> None:
         while self.process and self.process.stderr:
             line = await self.process.stderr.readline()
@@ -409,6 +434,12 @@ class PluginProcessWrapper:
             logger.info("[%s-stderr] %s", self.plugin_id, line.decode().strip())
 
     async def _handle_db(self, msg: dict) -> None:
+        # Modèle de confiance : le sandbox fournit des limites de ressources
+        # (RLIMIT) et une isolation d'env — PAS un confinement SQL. La règle
+        # SELECT-only est une convention de surface API appliquée côté client
+        # dans PluginContext.db_query (plugin_base.py) ; le parent exécute
+        # telle quelle la requête qui arrive sur le canal IPC. Aucune
+        # validation supplémentaire ici (choix architectural).
         db_call_id = msg.get("db_call_id")
         if not self.engine.db:
             await self._send({"type": "db_result", "db_call_id": db_call_id, "status": "error", "error": "DB non initialisée"})
@@ -424,6 +455,8 @@ class PluginProcessWrapper:
             await self._send({"type": "db_result", "db_call_id": db_call_id, "status": "error", "error": str(e)})
 
     async def call_hook(self, hook_name: str, **kwargs: Any) -> Any:
+        # Auto-restart du subprocess mort — sans circuit breaker local : le
+        # CircuitBreaker (niveau HookBus) couvre le dispatch des hooks.
         if not self.process or self.process.returncode is not None:
             await self.start()
         call_id = f"{asyncio.get_running_loop().time()}-{os.urandom(4).hex()}"
@@ -435,18 +468,6 @@ class PluginProcessWrapper:
             return await fut
         finally:
             self._pending_calls.pop(call_id, None)
-
-
-# ---------------------------------------------------------------------------
-# _Lifecycle (backward-compat avec plugin_manager.py)
-# ---------------------------------------------------------------------------
-
-class _Lifecycle:
-    def __init__(self) -> None:
-        self._states: dict[str, str] = {}
-
-    def get_state(self, plugin_id: str) -> str | None:
-        return self._states.get(plugin_id)
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +531,9 @@ class PluginEngine:
 
     @property
     def db(self) -> Any | None:
+        # L'accès privé `._connection` est le seul moyen de vérifier la vivacité
+        # d'une connexion aiosqlite (aucun attribut public) ; get_db_conn()
+        # lève quand la base n'est pas initialisée.
         if self._explicit_db:
             try:
                 if self._explicit_db._connection is not None:
@@ -571,23 +595,26 @@ class PluginEngine:
         except Exception:
             db_states = {}
 
-        for plugin_id, manifest in self._registry.get_all_manifests().items():
-            if plugin_id not in db_states:
-                await self.db.execute(
-                    "INSERT INTO plugins (id, version, enabled, status, config_json) VALUES (?, ?, 1, 'DISCOVERED', '{}')",
-                    (plugin_id, manifest.version),
-                )
-                db_states[plugin_id] = True
+        try:
+            for plugin_id, manifest in self._registry.get_all_manifests().items():
+                if plugin_id not in db_states:
+                    await self.db.execute(
+                        "INSERT INTO plugins (id, version, enabled, status, config_json) VALUES (?, ?, 1, 'DISCOVERED', '{}')",
+                        (plugin_id, manifest.version),
+                    )
+                    db_states[plugin_id] = True
 
-            if db_states.get(plugin_id):
-                try:
-                    await self._load(plugin_id, manifest)
-                except Exception as e:
-                    logger.exception("Échec du chargement de '%s' au démarrage", plugin_id)
-                    self._set_state(plugin_id, "error", error=str(e))
-                    await self.db.execute("UPDATE plugins SET status = 'ERROR' WHERE id = ?", (plugin_id,))
-
-        await self.db.commit()
+                if db_states.get(plugin_id):
+                    try:
+                        await self._load(plugin_id, manifest)
+                    except Exception as e:
+                        logger.exception("Échec du chargement de '%s' au démarrage", plugin_id)
+                        self._set_state(plugin_id, "error", error=str(e))
+                        await self.db.execute("UPDATE plugins SET status = 'ERROR' WHERE id = ?", (plugin_id,))
+        finally:
+            # Le commit doit TOUJOURS s'exécuter, même si une itération de la
+            # boucle (INSERT ou UPDATE de statut ERROR) lève une exception.
+            await self.db.commit()
 
     async def scan(self, plugins_dir: str | None = None) -> "PluginEngine":
         dirs: list[str] = []
@@ -645,25 +672,6 @@ class PluginEngine:
             or self._registry.get_plugin_dir(plugin_id)
             or (getattr(self._settings, "plugins_dir", "master/plugins") if self._settings else "master/plugins")
         )
-        plugin_dir = os.path.join(p_dir, plugin_id)
-        init_file = os.path.join(plugin_dir, "__init__.py")
-        if not os.path.exists(init_file):
-            init_file = os.path.join(p_dir, f"{plugin_id}.py")
-
-        def _is_class_based(pid: str, target_file: str) -> bool:
-            if pid in PluginBase._decorated_registry:
-                return True
-            if getattr(manifest, "loader", None) == "class_based":
-                return True
-            return False
-
-        is_package = os.path.exists(os.path.join(p_dir, plugin_id, "__init__.py"))
-        use_sandbox = (
-            self._sandbox
-            and is_package
-            and not manifest.trusted
-            and not _is_class_based(plugin_id, init_file)
-        )
 
         loader_kind = self._registry.resolve_loader(manifest)
 
@@ -715,7 +723,12 @@ class PluginEngine:
             raise ImportError(f"Impossible de créer le spec pour {init_file}")
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        try:
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+        except Exception:
+            # Ne pas laisser un module à moitié exécuté dans sys.modules
+            sys.modules.pop(module_name, None)
+            raise
 
         plugin_class = PluginBase._decorated_registry.get(plugin_id)
         if plugin_class:
@@ -920,7 +933,7 @@ class PluginEngine:
     # ------------------------------------------------------------------
 
     async def shutdown(self) -> None:
-        for plugin_id in list(self._wrappers.keys()) + list(self._instances.keys()):
+        for plugin_id in set(self._wrappers) | set(self._instances):
             try:
                 # persist=False : un arrêt propre du serveur n'est PAS une
                 # désactivation opérateur — l'état enabled/status en DB est

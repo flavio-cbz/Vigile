@@ -84,8 +84,8 @@ class CircuitBreaker:
         If the circuit is HALF_OPEN the call is allowed as a probe; a success
         closes the circuit, a failure re-opens it.
 
-        Handles both coroutine and sync callables.  Sync callables are called
-        directly (not in an executor) and may block the event loop briefly.
+        Handles both coroutine and sync callables.  Sync callables are
+        offloaded to the default executor so they never block the event loop.
         """
         await self._check()
 
@@ -93,7 +93,8 @@ class CircuitBreaker:
             if asyncio.iscoroutinefunction(fn):
                 result = await fn(*args, **kwargs)
             else:
-                result = fn(*args, **kwargs)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
         except BaseException:
             await self.record_failure()
             raise
@@ -105,6 +106,8 @@ class CircuitBreaker:
         async with self._lock:
             if self._state is CircuitState.HALF_OPEN:
                 self._state = CircuitState.CLOSED
+            # Intentional even when CLOSED: consecutive-failure semantics — any
+            # success clears the streak regardless of the current state.
             self._failure_count = 0
 
     async def record_failure(self) -> None:
@@ -131,11 +134,12 @@ class CircuitBreaker:
     # Reset (testing / manual recovery)
     # ------------------------------------------------------------------
 
-    def reset(self) -> None:
+    async def reset(self) -> None:
         """Force the circuit back to CLOSED (testing or admin recovery)."""
-        self._state = CircuitState.CLOSED
-        self._failure_count = 0
-        self._last_failure_time = 0.0
+        async with self._lock:
+            self._state = CircuitState.CLOSED
+            self._failure_count = 0
+            self._last_failure_time = 0.0
 
     # ------------------------------------------------------------------
     # Internal

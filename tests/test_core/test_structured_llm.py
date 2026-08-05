@@ -68,7 +68,7 @@ async def test_structured_fail_after_retries(structured_llm):
     )
     with pytest.raises(ValueError) as exc_info:
         await sllm.create(
-            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=2
+            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_attempts=2
         )
     assert "failed after" in str(exc_info.value)
 
@@ -84,7 +84,7 @@ async def test_structured_empty_response(structured_llm):
     )
     with pytest.raises(ValueError) as exc_info:
         await sllm.create(
-            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=1
+            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_attempts=1
         )
     assert "empty" in str(exc_info.value).lower()
 
@@ -104,7 +104,7 @@ async def test_structured_empty_response_retry(structured_llm):
 
     client.complete = mock_complete
     result = await sllm.create(
-        ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=3
+        ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_attempts=3
     )
     assert isinstance(result, ResponseSchemaModel)
     assert calls == 2
@@ -113,20 +113,20 @@ async def test_structured_empty_response_retry(structured_llm):
 
 @pytest.mark.asyncio
 async def test_structured_max_retries_zero(structured_llm):
-    """StructuredLLM handles max_retries=0 and hits the loop fallthrough."""
+    """StructuredLLM handles max_attempts=0 and hits the loop fallthrough."""
     sllm, client = structured_llm
     with pytest.raises(ValueError) as exc_info:
         await sllm.create(
-            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_retries=0
+            ResponseSchemaModel, [{"role": "user", "content": "Extract"}], max_attempts=0
         )
     assert "loop completed without return or raise" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_default_max_retries():
-    """StructuredLLM uses default_max_retries when create() omits max_retries."""
+    """StructuredLLM uses default_max_attempts when create() omits max_attempts."""
     client = LLMClient(base_url="http://test/v1", api_key="k", model="m", timeout=5)
-    sllm = StructuredLLM(client, default_max_retries=2)
+    sllm = StructuredLLM(client, default_max_attempts=2)
 
     calls = 0
 

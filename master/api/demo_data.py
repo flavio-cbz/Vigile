@@ -229,8 +229,8 @@ def get_demo_metrics(
     snapshots: list[dict[str, Any]] = []
     for i in range(count):
         t = base_t - i * step
-        # Sine wave around base CPU with occasional spike
-        cycle = (i * 1.3) % 60
+        # Use timestamp (not index) so a given instant always yields the same value
+        cycle = (t / 100.0) % 60
         spike = 40 if i % 7 == 3 and node_id in ("demo-node-01", "demo-node-04") else 0
         cpu = profile["cpu_base"] + (cycle * 0.5) % 30 + spike
         mem_gb = profile["mem_gb"]
@@ -262,6 +262,26 @@ def get_demo_metrics(
             }
         )
     return snapshots
+
+
+# ---------------------------------------------------------------------------
+# Node metrics (shared demo values for _add_node_metrics / _add_bulk_node_metrics)
+# ---------------------------------------------------------------------------
+
+DEMO_NODE_METRICS: dict[str, dict[str, float]] = {
+    "demo-node-01": {
+        "cpu_percent": 12.5,
+        "memory_percent": 45.2,
+        "disk_percent": 38.4,
+        "uptime_seconds": 3600.0,
+    },
+    "demo-node-02": {
+        "cpu_percent": 8.0,
+        "memory_percent": 30.1,
+        "disk_percent": 42.0,
+        "uptime_seconds": 1800.0,
+    },
+}
 
 
 # ---------------------------------------------------------------------------

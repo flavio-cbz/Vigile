@@ -153,7 +153,7 @@ export const Sidebar: React.FC = () => {
     );
 
     if (isPlexActive) {
-      primaryItems.push({ to: '/plugins?open=plex', label: 'Plex', icon: Play });
+      primaryItems.push({ to: '/plugins/plex', label: 'Plex', icon: Play });
     }
 
     if (isDockerActive) {
