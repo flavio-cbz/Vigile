@@ -17,16 +17,17 @@ Design:
 The hash function is pure Python stdlib (hashlib) — no dependencies.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
 import uuid
-from master.core.enums import StrEnum
 from typing import Any
 
 import aiosqlite
 
+from master.core.enums import StrEnum
 from master.core.lock import LoopBoundLock
 
 logger = logging.getLogger(__name__)
@@ -128,54 +129,60 @@ async def log_action(
     timestamp = time.time()
     entry_id = str(uuid.uuid4())
     in_trans = db.in_transaction
+    sequence = 1
 
-    # Serialized via asyncio.Lock to prevent sequence collision under concurrency.
-    # (BEGIN IMMEDIATE alone isn't sufficient because await points inside the
-    # critical section allow other coroutines to interleave.)
     async with _audit_lock:
-        async with db.execute(
-            "SELECT sequence, entry_hash FROM audit_log ORDER BY sequence DESC LIMIT 1"
-        ) as cursor:
-            head = await cursor.fetchone()
+        for attempt in range(5):
+            async with db.execute(
+                "SELECT sequence, entry_hash FROM audit_log ORDER BY sequence DESC LIMIT 1"
+            ) as cursor:
+                head = await cursor.fetchone()
 
-        if head is None:
-            previous_hash = GENESIS_HASH
-            sequence = 1
-        else:
-            previous_hash = head["entry_hash"]
-            sequence = head["sequence"] + 1
+            if head is None:
+                previous_hash = GENESIS_HASH
+                sequence = 1
+            else:
+                previous_hash = head["entry_hash"]
+                sequence = head["sequence"] + 1
 
-        entry_hash = compute_entry_hash(
-            previous_hash=previous_hash,
-            sequence=sequence,
-            timestamp=timestamp,
-            action=action,
-            user_id=user_id,
-            node_id=node_id,
-            details_json=details_json,
-        )
+            entry_hash = compute_entry_hash(
+                previous_hash=previous_hash,
+                sequence=sequence,
+                timestamp=timestamp,
+                action=action,
+                user_id=user_id,
+                node_id=node_id,
+                details_json=details_json,
+            )
 
-        await db.execute(
-            """
-            INSERT INTO audit_log
-                (id, sequence, timestamp, user_id, action, node_id,
-                 details_json, previous_hash, entry_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                entry_id,
-                sequence,
-                timestamp,
-                user_id,
-                action,
-                node_id,
-                details_json,
-                previous_hash,
-                entry_hash,
-            ),
-        )
-        if not in_trans:
-            await db.commit()
+            try:
+                await db.execute(
+                    """
+                    INSERT INTO audit_log
+                        (id, sequence, timestamp, user_id, action, node_id,
+                         details_json, previous_hash, entry_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        entry_id,
+                        sequence,
+                        timestamp,
+                        user_id,
+                        action,
+                        node_id,
+                        details_json,
+                        previous_hash,
+                        entry_hash,
+                    ),
+                )
+                if not in_trans:
+                    await db.commit()
+                break
+            except Exception as exc:
+                if "UNIQUE constraint failed: audit_log.sequence" in str(exc) and attempt < 4:
+                    await asyncio.sleep(0.05)
+                    continue
+                raise
 
     logger.info(
         "AUDIT seq=%d action=%s user=%s node=%s",

@@ -49,7 +49,11 @@ from master.core.node_manager import NodeManager, NodeState
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityManager
+<<<<<<< HEAD
 from master.core.plugin_ids import is_plugin_active
+=======
+from master.core.worker_query_port import WorkerQueryPort
+>>>>>>> 1e78427 (feat(logs,worker) : refonte onglet logs (timeline, console, modal sources) et release worker v1.1.0)
 from master.db.disk_scan_cache import get_cached_disk_scan, set_cached_disk_scan
 from master.schemas.disk_scan import DiskScanResult
 
@@ -1049,8 +1053,19 @@ async def regenerate_join_token(
 
 
 # ---------------------------------------------------------------------------
-# Logs response model
+# Logs response models
 # ---------------------------------------------------------------------------
+
+
+class LogEntryResponse(BaseModel):
+    """Structured log line entry."""
+
+    timestamp: float
+    time_str: str
+    level: str = "info"
+    unit: str = "system"
+    message: str
+    raw: dict | None = None
 
 
 class LogsResponse(BaseModel):
@@ -1059,9 +1074,52 @@ class LogsResponse(BaseModel):
     node_id: str
     output: str
     lines: int
+    entries: list[LogEntryResponse] = Field(default_factory=list)
     service: str | None = None
     path: str | None = None
     error: str | None = None
+
+
+class LogSourceItem(BaseModel):
+    """Available log source."""
+
+    id: str
+    name: str
+    category: str  # "files" | "services" | "docker"
+    path: str | None = None
+    unit: str | None = None
+    size_bytes: int | None = None
+    mtime: float | None = None
+    error_count: int = 0
+    status: str | None = None
+
+
+class LogSourcesResponse(BaseModel):
+    """Response model for consolidated log sources."""
+
+    node_id: str
+    sources: list[LogSourceItem] = Field(default_factory=list)
+
+
+class HistogramBucket(BaseModel):
+    """1-hour bucket for 24h timeline."""
+
+    hour: str
+    timestamp: float
+    info: int = 0
+    warn: int = 0
+    error: int = 0
+    total: int = 0
+
+
+class LogHistogramResponse(BaseModel):
+    """Response model for 24h log histogram."""
+
+    node_id: str
+    buckets: list[HistogramBucket] = Field(default_factory=list)
+    total_errors: int = 0
+    total_warnings: int = 0
+    total_lines: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -1383,6 +1441,8 @@ async def get_node_logs(
     path: Annotated[
         str | None, Query(description="Log file path on the worker (/var/log/ only)")
     ] = None,
+    since: Annotated[str | None, Query(description="Filter logs since timestamp")] = None,
+    until: Annotated[str | None, Query(description="Filter logs until timestamp")] = None,
     nm: NodeManager = Depends(get_node_manager),
     port: WorkerQueryPort = Depends(get_worker_query_port),
 ) -> LogsResponse:
@@ -1402,10 +1462,21 @@ async def get_node_logs(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
         _effective_path = path if path else "/var/log/syslog"
         logs = get_demo_logs(service, _effective_path, lines)
+        mock_entries = [
+            LogEntryResponse(
+                timestamp=time.time() - (len(logs) - idx) * 10,
+                time_str=time.strftime("%H:%M:%S", time.gmtime(time.time() - (len(logs) - idx) * 10)),
+                level="error" if "fail" in l.lower() or "oom" in l.lower() or "error" in l.lower() else ("warn" if "warn" in l.lower() else "info"),
+                unit=service or (_effective_path.split("/")[-1]),
+                message=l,
+            )
+            for idx, l in enumerate(logs)
+        ]
         return LogsResponse(
             node_id=node_id,
             output="\n".join(logs),
             lines=len(logs),
+            entries=mock_entries,
             service=service,
             path=_effective_path if not service else None,
         )
@@ -1415,9 +1486,15 @@ async def get_node_logs(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
     effective_path = path
+    params: dict = {"lines": lines}
+    if since:
+        params["since"] = since
+    if until:
+        params["until"] = until
+
     if service:
         action = WorkerAction.READ_LOGS_SERVICE
-        params = {"service": service, "lines": lines}
+        params["service"] = service
     elif effective_path:
         clean_path = os.path.normpath(effective_path)
         if not clean_path.startswith("/var/log/") and clean_path != "/var/log":
@@ -1426,15 +1503,19 @@ async def get_node_logs(
                 detail="Path outside allowed prefix (/var/log/)",
             )
         action = WorkerAction.READ_LOGS
-        params = {"path": clean_path, "lines": lines}
+        params["path"] = clean_path
     else:
         action = WorkerAction.READ_LOGS
         effective_path = "/var/log/syslog"
-        params = {"path": effective_path, "lines": lines}
+        params["path"] = effective_path
 
+    port = WorkerQueryPort(nm)
     try:
         result = await port.query(
-            node_id, action, params, timeout=15.0
+            node_id,
+            action,
+            params,
+            timeout=15.0,
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -1447,14 +1528,153 @@ async def get_node_logs(
             detail="Worker did not respond to log request in time",
         )
 
+    raw_output = result.get("output", "")
+    parsed_entries: list[LogEntryResponse] = []
+    plain_output = raw_output
+
+    if raw_output.startswith("{") and "entries" in raw_output:
+        try:
+            payload = json.loads(raw_output)
+            if "entries" in payload:
+                parsed_entries = [LogEntryResponse(**e) for e in payload["entries"]]
+                plain_output = payload.get("output", raw_output)
+        except Exception:
+            pass
+
     return LogsResponse(
         node_id=node_id,
-        output=result.get("output", ""),
-        lines=lines,
+        output=plain_output,
+        lines=len(parsed_entries) if parsed_entries else lines,
+        entries=parsed_entries,
         service=service,
         path=effective_path if not service else None,
         error=result.get("error") if not result.get("success") else None,
     )
+
+
+@router.get(
+    "/{node_id}/log-sources",
+    response_model=LogSourcesResponse,
+    summary="Get all available log files, services and containers for a node (Operator+)",
+)
+async def get_node_log_sources(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+) -> LogSourcesResponse:
+    """Fetch consolidated log sources (systemd units, /var/log files, docker containers) from worker."""
+    if is_demo(claims):
+        return LogSourcesResponse(
+            node_id=node_id,
+            sources=[
+                LogSourceItem(id="auth", name="auth.log", category="files", path="/var/log/auth.log", size_bytes=524288, mtime=time.time() - 120, error_count=3),
+                LogSourceItem(id="syslog", name="syslog", category="files", path="/var/log/syslog", size_bytes=11400000, mtime=time.time() - 10),
+                LogSourceItem(id="nginx_acc", name="nginx/access.log", category="files", path="/var/log/nginx/access.log", size_bytes=4200000, mtime=time.time() - 60),
+                LogSourceItem(id="nginx_err", name="nginx/error.log", category="files", path="/var/log/nginx/error.log", size_bytes=128000, mtime=time.time() - 3600, error_count=1),
+                LogSourceItem(id="docker_svc", name="docker.service", category="services", unit="docker.service", status="active (running)", error_count=1),
+                LogSourceItem(id="sshd_svc", name="sshd.service", category="services", unit="sshd.service", status="active (running)"),
+                LogSourceItem(id="cron_svc", name="cron.service", category="services", unit="cron.service", status="active (running)"),
+                LogSourceItem(id="docker_grafana", name="docker:grafana", category="docker", status="running"),
+            ],
+        )
+
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    port = WorkerQueryPort(nm)
+    try:
+        result = await port.query(
+            node_id,
+            WorkerAction.LIST_LOG_SOURCES,
+            {},
+            timeout=15.0,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+    if not result.get("success"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error", "failed to list log sources"))
+
+    try:
+        raw = json.loads(result.get("output", "[]"))
+        sources = [LogSourceItem(**item) for item in raw]
+        return LogSourcesResponse(node_id=node_id, sources=sources)
+    except Exception as exc:
+        logger.warning("Node %s: failed to parse log sources: %s", node_id, exc)
+        return LogSourcesResponse(node_id=node_id, sources=[])
+
+
+@router.get(
+    "/{node_id}/logs/histogram",
+    response_model=LogHistogramResponse,
+    summary="Get 24-hour log volume aggregations by hour (Operator+)",
+)
+async def get_node_log_histogram(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+) -> LogHistogramResponse:
+    """Fetch 24h log volume and error metrics from the worker."""
+    if is_demo(claims):
+        now = time.time()
+        buckets = []
+        for i in range(24):
+            t = now - (23 - i) * 3600
+            hour_str = time.strftime("%Hh", time.gmtime(t))
+            err_count = 6 if i == 14 else (1 if i in (7, 13, 17, 21) else 0)
+            warn_count = 8 if i == 14 else (i % 3)
+            info_count = 40 + (i * 3) % 50
+            buckets.append(
+                HistogramBucket(
+                    hour=hour_str,
+                    timestamp=t,
+                    info=info_count,
+                    warn=warn_count,
+                    error=err_count,
+                    total=info_count + warn_count + err_count,
+                )
+            )
+        return LogHistogramResponse(
+            node_id=node_id,
+            buckets=buckets,
+            total_errors=12,
+            total_warnings=38,
+            total_lines=1480,
+        )
+
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    port = WorkerQueryPort(nm)
+    try:
+        result = await port.query(
+            node_id,
+            WorkerAction.LOG_HISTOGRAM,
+            {},
+            timeout=15.0,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+    if not result.get("success"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error", "failed to fetch log histogram"))
+
+    try:
+        raw = json.loads(result.get("output", "{}"))
+        return LogHistogramResponse(
+            node_id=node_id,
+            buckets=[HistogramBucket(**b) for b in raw.get("buckets", [])],
+            total_errors=raw.get("total_errors", 0),
+            total_warnings=raw.get("total_warnings", 0),
+            total_lines=raw.get("total_lines", 0),
+        )
+    except Exception as exc:
+        logger.warning("Node %s: failed to parse log histogram: %s", node_id, exc)
+        return LogHistogramResponse(node_id=node_id, buckets=[])
 
 
 # ---------------------------------------------------------------------------
@@ -1990,6 +2210,7 @@ async def get_disk_scan(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
+    port = WorkerQueryPort(nm)
     mounts = ["/"]
     try:
         stats_result = await port.query(

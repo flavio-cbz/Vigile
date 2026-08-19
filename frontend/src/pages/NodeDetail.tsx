@@ -67,14 +67,28 @@ export const NodeDetail: React.FC = () => {
     loadingContainers,
     fetchContainersList,
     logs,
+    logEntries,
     loadingLogs,
     logsService,
     setLogsService,
+    logsPath,
+    setLogsPath,
     logsLimit,
     setLogsLimit,
+    logsSince,
+    setLogsSince,
+    logsUntil,
+    setLogsUntil,
     logsAutoScroll,
     setLogsAutoScroll,
     fetchNodeLogs,
+    logSources,
+    fetchLogSources,
+    logHistogram,
+    loadingHistogram,
+    fetchLogHistogram,
+    selectedBucketHour,
+    setSelectedBucketHour,
     restartingService,
     setRestartingService,
     restartingContainer,
@@ -110,10 +124,14 @@ export const NodeDetail: React.FC = () => {
     [setSearchParams],
   );
 
-  useEffect(() => {
-    if (effectiveTab === 'services' && activePlugins?.includes('systemd') && !loadingServices) fetchServicesList();
-    if (effectiveTab === 'containers' && activePlugins?.includes('docker') && !loadingContainers) fetchContainersList();
-  }, [effectiveTab, activePlugins, id, fetchServicesList, fetchContainersList, loadingServices, loadingContainers]);
+    if (effectiveTab === 'services' && activePlugins?.includes('systemd')) fetchServicesList();
+    if (effectiveTab === 'containers' && activePlugins?.includes('docker')) fetchContainersList();
+    if (effectiveTab === 'logs') {
+      fetchNodeLogs(true);
+      fetchLogSources();
+      fetchLogHistogram();
+    }
+  }, [effectiveTab, activePlugins, id, fetchServicesList, fetchContainersList, fetchNodeLogs, fetchLogSources, fetchLogHistogram]);
 
   usePolling('detail_metrics_poll', () => refreshStatsForRange(), 20000, effectiveTab === 'metrics');
   usePolling('detail_logs_poll', () => fetchNodeLogs(true), 15000, effectiveTab === 'logs');
@@ -240,15 +258,30 @@ export const NodeDetail: React.FC = () => {
         {effectiveTab === 'logs' && (
           <NodeDetailLogsTab
             logs={logs}
+            logEntries={logEntries}
             loading={loadingLogs}
             logsService={logsService}
+            logsPath={logsPath}
             logsLimit={logsLimit}
+            logsSince={logsSince}
+            logsUntil={logsUntil}
             logsAutoScroll={logsAutoScroll}
-            services={services}
+            logSources={logSources}
+            logHistogram={logHistogram}
+            loadingHistogram={loadingHistogram}
+            selectedBucketHour={selectedBucketHour}
+            onSelectHour={(hour, since, until) => {
+              setSelectedBucketHour(hour);
+              setLogsSince(since || '');
+              setLogsUntil(until || '');
+            }}
             onServiceChange={setLogsService}
+            onPathChange={setLogsPath}
             onLimitChange={setLogsLimit}
             onAutoScrollChange={setLogsAutoScroll}
             onRefresh={fetchNodeLogs}
+            onRefreshSources={fetchLogSources}
+            onRefreshHistogram={fetchLogHistogram}
           />
         )}
 

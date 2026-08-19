@@ -74,7 +74,7 @@ jobs:
         run: |
           cd worker
           go build -trimpath \
-            -ldflags="-s -w -buildid= -X main.version=${{ github.ref_name }}" \
+            -ldflags="-s -w -buildid= -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" \
             -o ../dist/worker-${{ matrix.os }}-${{ matrix.arch }} .
       - name: Checksum
         run: |

@@ -60,6 +60,8 @@ class WorkerAction(StrEnum):
     READ_LOGS_SERVICE = "READ_LOGS_SERVICE"
     UPDATE_WORKER = "UPDATE_WORKER"
     DISK_SCAN = "DISK_SCAN"
+    LIST_LOG_SOURCES = "LIST_LOG_SOURCES"
+    LOG_HISTOGRAM = "LOG_HISTOGRAM"
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,9 @@
 Vigile — WorkerQueryPort (Read-Only Worker Query Port)
 
 Provides a safe, read-only interface to query connected Workers
-via whitelisted intents. Only exposes LIST_STATS, LIST_SERVICES,
-LIST_CONTAINERS, and READ_LOGS actions — no mutation intents allowed.
+via whitelisted intents. Only exposes read-only query actions
+(GET_STATS, LIST_SERVICES, LIST_CONTAINERS, READ_LOGS, LIST_LOG_SOURCES,
+LOG_HISTOGRAM, DISK_SCAN, etc.) — no mutation intents allowed.
 
 Strict DI: receives NodeManager in constructor, never reads settings
 or os.getenv.
@@ -30,6 +31,9 @@ ALLOWED_ACTIONS: frozenset[str] = frozenset({
     "READ_LOGS_SERVICE",
     "STATUS_SERVICE",
     "DISK_SCAN",
+    "LIST_LOG_FILES",
+    "LIST_LOG_SOURCES",
+    "LOG_HISTOGRAM",
 })
 
 
@@ -45,34 +49,10 @@ class WorkerQueryPort:
       - Wraps the intent in the standard format with a uuid4 intent_id
       - Calls the private ``_send_intent`` on NodeManager (no mutation pathway)
       - Returns the result from the Worker (typed per method)
-
-    Usage::
-
-        port = WorkerQueryPort(node_manager)
-        services = await port.list_services("node-uuid-1234")
-        containers = await port.list_containers("node-uuid-5678")
     """
 
-    # Class-level constant for action allowlist (also accessible via is_allowed)
-    ALLOWED_ACTIONS: frozenset[str] = ALLOWED_ACTIONS
-
     def __init__(self, node_manager: Any) -> None:
-        """Initialize with NodeManager.
-
-        Args:
-            node_manager: The NodeManager instance used to dispatch intents.
-                Strict DI — no settings/env/filesystem access.
-        """
         self._node_manager = node_manager
-
-    # ------------------------------------------------------------------
-    # Allowlist check
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def is_allowed(cls, action: str) -> bool:
-        """Check whether *action* is in the read-only whitelist."""
-        return action in cls.ALLOWED_ACTIONS
 
     async def query(
         self,
@@ -82,11 +62,27 @@ class WorkerQueryPort:
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Send a whitelisted read-only intent to a connected Worker."""
-        if action not in self.ALLOWED_ACTIONS:
+        """Send a read-only query intent to a connected Worker.
+
+        Args:
+            node_id: UUID of the target Worker.
+            action: Intent action name — must be in ``ALLOWED_ACTIONS``.
+            params: Optional parameters for the query.
+            timeout: Optional per-query timeout in seconds.
+
+        Returns:
+            The raw result dict returned by the Worker.
+
+        Raises:
+            ValueError: If the action is not in the read-only whitelist.
+            RuntimeError: If the node is not currently connected.
+            TimeoutError: If the Worker does not respond within the timeout.
+        """
+        action_str = str(action)
+        if action_str not in ALLOWED_ACTIONS:
             raise ValueError(
-                f"Action {action!r} is not in the read-only whitelist. "
-                f"Use ApprovedProposalDispatcher for mutations."
+                f"Action {action!r} is not allowed via WorkerQueryPort. "
+                f"Allowed actions: {sorted(ALLOWED_ACTIONS)}"
             )
 
         if not await self._node_manager.is_connected(node_id):
@@ -94,81 +90,26 @@ class WorkerQueryPort:
 
         intent: dict[str, Any] = {
             "intent_id": str(uuid.uuid4()),
-            "action": action,
+            "action": action_str,
             "params": params or {},
         }
-        return await self._node_manager._send_intent(node_id, intent, timeout=timeout)
-
-    # ------------------------------------------------------------------
-    # Read-only query methods
-    # ------------------------------------------------------------------
+        kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return await self._node_manager._send_intent(node_id, intent, **kwargs)
 
     async def get_stats(self, node_id: str) -> dict[str, Any]:
-        """Send LIST_STATS intent to a connected Worker.
-
-        Args:
-            node_id: UUID of the target Worker.
-
-        Returns:
-            Dict with CPU / memory / disk metrics from the Worker.
-
-        Raises:
-            RuntimeError: If the node is not connected.
-        """
-        if not await self._node_manager.is_connected(node_id):
-            raise RuntimeError(f"Node {node_id} is not connected")
-
-        intent: dict[str, Any] = {
-            "intent_id": str(uuid.uuid4()),
-            "action": "LIST_STATS",
-            "params": {},
-        }
-        return await self._node_manager._send_intent(node_id, intent)
+        """Send GET_STATS intent to a connected Worker."""
+        return await self.query(node_id, "GET_STATS")
 
     async def list_services(self, node_id: str) -> list[dict[str, Any]]:
-        """Send LIST_SERVICES intent to a connected Worker.
-
-        Args:
-            node_id: UUID of the target Worker.
-
-        Returns:
-            List of service dicts (each with name, state, status, etc.).
-
-        Raises:
-            RuntimeError: If the node is not connected.
-        """
-        if not await self._node_manager.is_connected(node_id):
-            raise RuntimeError(f"Node {node_id} is not connected")
-
-        intent: dict[str, Any] = {
-            "intent_id": str(uuid.uuid4()),
-            "action": "LIST_SERVICES",
-            "params": {},
-        }
-        result = await self._node_manager._send_intent(node_id, intent)
+        """Send LIST_SERVICES intent to a connected Worker."""
+        result = await self.query(node_id, "LIST_SERVICES")
         return result.get("output", [])
 
     async def list_containers(self, node_id: str) -> list[dict[str, Any]]:
-        """Send LIST_CONTAINERS intent to a connected Worker.
-
-        Args:
-            node_id: UUID of the target Worker.
-
-        Returns:
-            List of container dicts (each with id, name, image, state, ports, etc.).
-
-        Raises:
-            RuntimeError: If the node is not connected.
-        """
-        if not await self._node_manager.is_connected(node_id):
-            raise RuntimeError(f"Node {node_id} is not connected")
-
-        intent: dict[str, Any] = {
-            "intent_id": str(uuid.uuid4()),
-            "action": "LIST_CONTAINERS",
-            "params": {},
-        }
-        result = await self._node_manager._send_intent(node_id, intent)
+        """Send LIST_CONTAINERS intent to a connected Worker."""
+        result = await self.query(node_id, "LIST_CONTAINERS")
         return result.get("output", [])
 
     async def read_logs(
@@ -176,25 +117,13 @@ class WorkerQueryPort:
         node_id: str,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Send READ_LOGS intent to a connected Worker.
+        """Send READ_LOGS intent to a connected Worker."""
+        return await self.query(node_id, "READ_LOGS", params)
 
-        Args:
-            node_id: UUID of the target Worker.
-            params: Optional dict with log query parameters
-                (e.g. ``{"service": "nginx", "lines": 50}``).
-
-        Returns:
-            Dict with log output from the Worker.
-
-        Raises:
-            RuntimeError: If the node is not connected.
-        """
-        if not await self._node_manager.is_connected(node_id):
-            raise RuntimeError(f"Node {node_id} is not connected")
-
-        intent: dict[str, Any] = {
-            "intent_id": str(uuid.uuid4()),
-            "action": "READ_LOGS",
-            "params": params or {},
-        }
-        return await self._node_manager._send_intent(node_id, intent)
+    async def list_log_files(
+        self,
+        node_id: str,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Send LIST_LOG_FILES intent to a connected Worker."""
+        return await self.query(node_id, "LIST_LOG_FILES", timeout=timeout)

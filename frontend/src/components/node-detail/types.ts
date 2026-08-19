@@ -164,3 +164,41 @@ export interface NodeRecord {
   worker_version?: string;
   cached_disks_json: string | null;
 }
+
+export interface LogEntryRecord {
+  timestamp: number;
+  time_str: string;
+  level: 'error' | 'warn' | 'info' | 'debug' | string;
+  unit: string;
+  message: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface LogSourceItemRecord {
+  id: string;
+  name: string;
+  category: 'files' | 'services' | 'docker' | string;
+  path?: string;
+  unit?: string;
+  size_bytes?: number;
+  mtime?: number;
+  error_count: number;
+  status?: string;
+}
+
+export interface HistogramBucketRecord {
+  hour: string;
+  timestamp: number;
+  info: number;
+  warn: number;
+  error: number;
+  total: number;
+}
+
+export interface LogHistogramRecord {
+  node_id: string;
+  buckets: HistogramBucketRecord[];
+  total_errors: number;
+  total_warnings: number;
+  total_lines: number;
+}

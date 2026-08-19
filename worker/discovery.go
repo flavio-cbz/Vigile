@@ -10,7 +10,7 @@ import (
 // Version is the current compiled release version of the Worker.
 // Declared as var (not const) so it can be overridden at build time via
 // -ldflags "-X main.Version=x.y.z".
-var Version = "1.0.0"
+var Version = "1.1.0"
 
 // Fingerprint contains immutable node identity information.
 type Fingerprint struct {

@@ -11,6 +11,9 @@ import type {
   ServiceRecord,
   StatsPoint,
   DiskMount,
+  LogEntryRecord,
+  LogSourceItemRecord,
+  LogHistogramRecord,
 } from '../components/node-detail/types';
 
 const METRICS_RANGE_KEY = 'vigile_metrics_range';
@@ -68,14 +71,29 @@ export interface NodeDetailData {
   loadingContainers: boolean;
   fetchContainersList: () => Promise<void>;
   logs: string;
+  logEntries: LogEntryRecord[];
   loadingLogs: boolean;
   logsService: string;
   setLogsService: (v: string) => void;
+  logsPath: string;
+  setLogsPath: (v: string) => void;
   logsLimit: number;
   setLogsLimit: (v: number) => void;
+  logsSince: string;
+  setLogsSince: (v: string) => void;
+  logsUntil: string;
+  setLogsUntil: (v: string) => void;
   logsAutoScroll: boolean;
   setLogsAutoScroll: (v: boolean) => void;
   fetchNodeLogs: (skipToast?: boolean) => Promise<void>;
+  logSources: LogSourceItemRecord[];
+  loadingLogSources: boolean;
+  fetchLogSources: () => Promise<void>;
+  logHistogram: LogHistogramRecord | null;
+  loadingHistogram: boolean;
+  fetchLogHistogram: () => Promise<void>;
+  selectedBucketHour: string | null;
+  setSelectedBucketHour: (v: string | null) => void;
   restartingService: string | null;
   setRestartingService: (v: string | null) => void;
   restartingContainer: string | null;
@@ -105,10 +123,21 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
   const [loadingContainers, setLoadingContainers] = useState(false);
 
   const [logs, setLogs] = useState<string>('');
+  const [logEntries, setLogEntries] = useState<LogEntryRecord[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logsService, setLogsService] = useState<string>('');
+  const [logsPath, setLogsPath] = useState<string>('');
   const [logsLimit, setLogsLimit] = useState<number>(100);
+  const [logsSince, setLogsSince] = useState<string>('');
+  const [logsUntil, setLogsUntil] = useState<string>('');
   const [logsAutoScroll, setLogsAutoScroll] = useState(true);
+
+  const [logSources, setLogSources] = useState<LogSourceItemRecord[]>([]);
+  const [loadingLogSources, setLoadingLogSources] = useState(false);
+
+  const [logHistogram, setLogHistogram] = useState<LogHistogramRecord | null>(null);
+  const [loadingHistogram, setLoadingHistogram] = useState(false);
+  const [selectedBucketHour, setSelectedBucketHour] = useState<string | null>(null);
 
   const [restartingService, setRestartingService] = useState<string | null>(null);
   const [restartingContainer, setRestartingContainer] = useState<string | null>(null);
@@ -240,13 +269,24 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     if (!nodeId) return;
     setLoadingLogs(true);
     try {
-      const query = `?lines=${logsLimit}${logsService ? `&service=${logsService}` : ''}`;
-      const data = await api<{ output: string; error?: string }>(`/api/nodes/${nodeId}/logs${query}`, { skipToast });
+      const params = new URLSearchParams();
+      params.set('lines', String(logsLimit));
+      if (logsService) params.set('service', logsService);
+      if (logsPath) params.set('path', logsPath);
+      if (logsSince) params.set('since', logsSince);
+      if (logsUntil) params.set('until', logsUntil);
+
+      const data = await api<{ output: string; entries?: LogEntryRecord[]; error?: string }>(
+        `/api/nodes/${nodeId}/logs?${params.toString()}`,
+        { skipToast }
+      );
       if (data) {
         if (data.error) {
           setLogs(`Error: ${data.error}`);
+          setLogEntries([]);
         } else {
           setLogs(data.output || t('node_detail.logs_selection_empty'));
+          setLogEntries(data.entries || []);
         }
       }
     } catch (err) {
@@ -257,7 +297,37 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     } finally {
       setLoadingLogs(false);
     }
-  }, [nodeId, logsLimit, logsService]);
+  }, [nodeId, logsLimit, logsService, logsPath, logsSince, logsUntil]);
+
+  const fetchLogSources = useCallback(async () => {
+    if (!nodeId) return;
+    setLoadingLogSources(true);
+    try {
+      const data = await api<{ sources: LogSourceItemRecord[] }>(`/api/nodes/${nodeId}/log-sources`, { timeoutMs: 20000 });
+      if (data && data.sources) {
+        setLogSources(data.sources);
+      }
+    } catch (err) {
+      console.error('Failed to fetch log sources:', err);
+    } finally {
+      setLoadingLogSources(false);
+    }
+  }, [nodeId]);
+
+  const fetchLogHistogram = useCallback(async () => {
+    if (!nodeId) return;
+    setLoadingHistogram(true);
+    try {
+      const data = await api<LogHistogramRecord>(`/api/nodes/${nodeId}/logs/histogram`, { timeoutMs: 20000 });
+      if (data) {
+        setLogHistogram(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch log histogram:', err);
+    } finally {
+      setLoadingHistogram(false);
+    }
+  }, [nodeId]);
 
   const servicesEnabled = activePlugins !== null && activePlugins.includes('systemd');
   const containersEnabled = activePlugins !== null && activePlugins.includes('docker');
@@ -269,9 +339,11 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
       setLoadingNode(false);
       if (servicesEnabled) fetchServicesList();
       if (containersEnabled) fetchContainersList();
+      fetchLogSources();
+      fetchLogHistogram();
     };
     init();
-  }, [fetchNodeDetails, fetchServicesList, fetchContainersList, servicesEnabled, containersEnabled]);
+  }, [fetchNodeDetails, fetchServicesList, fetchContainersList, fetchLogSources, fetchLogHistogram, servicesEnabled, containersEnabled]);
 
   const displayInsights: InsightRecord[] = [...insights];
   if (node && !node.online) {
@@ -310,14 +382,29 @@ export function useNodeDetailData(nodeId: string | undefined, activePlugins: str
     loadingContainers,
     fetchContainersList,
     logs,
+    logEntries,
     loadingLogs,
     logsService,
     setLogsService,
+    logsPath,
+    setLogsPath,
     logsLimit,
     setLogsLimit,
+    logsSince,
+    setLogsSince,
+    logsUntil,
+    setLogsUntil,
     logsAutoScroll,
     setLogsAutoScroll,
     fetchNodeLogs,
+    logSources,
+    loadingLogSources,
+    fetchLogSources,
+    logHistogram,
+    loadingHistogram,
+    fetchLogHistogram,
+    selectedBucketHour,
+    setSelectedBucketHour,
     restartingService,
     setRestartingService,
     restartingContainer,
