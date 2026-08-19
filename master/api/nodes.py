@@ -16,6 +16,7 @@ Endpoints:
 import json
 import logging
 import os
+import posixpath
 import time
 import uuid
 try:
@@ -49,11 +50,8 @@ from master.core.node_manager import NodeManager, NodeState
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityManager
-<<<<<<< HEAD
 from master.core.plugin_ids import is_plugin_active
-=======
 from master.core.worker_query_port import WorkerQueryPort
->>>>>>> 1e78427 (feat(logs,worker) : refonte onglet logs (timeline, console, modal sources) et release worker v1.1.0)
 from master.db.disk_scan_cache import get_cached_disk_scan, set_cached_disk_scan
 from master.schemas.disk_scan import DiskScanResult
 
@@ -1496,7 +1494,7 @@ async def get_node_logs(
         action = WorkerAction.READ_LOGS_SERVICE
         params["service"] = service
     elif effective_path:
-        clean_path = os.path.normpath(effective_path)
+        clean_path = posixpath.normpath(effective_path.replace("\\", "/"))
         if not clean_path.startswith("/var/log/") and clean_path != "/var/log":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
