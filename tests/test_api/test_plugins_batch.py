@@ -821,3 +821,23 @@ async def test_batch_full_response_carries_revision(client, auth_headers, batch_
     body = res.json()
     assert body["results"][0]["status"] == 200
     assert body["revision"] == {"boot_id": "boot-test", "counter": 3}
+
+
+@pytest.mark.asyncio
+async def test_batch_nullable_and_omitted_params(client, auth_headers, batch_env):
+    """Batch accepts null params, omitted params, and dict with None values without 422."""
+    res = await client.post(
+        "/api/plugins/batch",
+        headers=auth_headers("operator"),
+        json={
+            "requests": [
+                {"command": "readplug.get_data", "params": None},
+                {"command": "readplug.get_data"},
+                {"command": "readplug.get_data", "params": {"node_id": None}},
+            ]
+        },
+    )
+    assert res.status_code == status.HTTP_200_OK
+    results = res.json()["results"]
+    assert len(results) == 3
+    assert all(r["status"] == 200 for r in results)
