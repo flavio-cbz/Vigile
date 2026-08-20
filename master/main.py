@@ -39,6 +39,7 @@ from master.api.chat import router as chat_router
 from master.api.demo import router as demo_router
 from master.api.investigations import router as investigations_router
 from master.api.plugins import router as plugins_router
+from master.api.plugins_events import router as plugins_events_router
 from master.api.metrics import render_prometheus
 from master.api.nodes import router as nodes_router
 from master.api.nodes_events import router as nodes_events_router
@@ -61,6 +62,7 @@ from master.core.security_manager import init_security, load_or_generate_master_
 from master.db.database import close_db, init_db, transaction
 from master.db.migrations import run_migrations
 from master.ws.worker_handler import worker_join_handler
+from master.version import __version__
 from master.lifespan import lifespan
 from master.auto_update import auto_update_workers_task
 from master.proposal_expiry import proposal_expiry_task
@@ -70,6 +72,7 @@ from master.middleware import (
     setup_session_middleware,
     setup_https_enforcement_middleware,
     setup_rate_limiter,
+    setup_csp_middleware,
 )
 from master.endpoints import health_check, metrics, spa_fallback_exception_handler
 
@@ -88,7 +91,7 @@ app = FastAPI(
     description=(
         "Fleet Manager for servers and homelabs. " "Zero-Trust. Zero SSH. Human-in-the-Loop AI."
     ),
-    version="0.7.0",
+    version=__version__,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -115,6 +118,7 @@ setup_cors_echo_origin_middleware(app)
 setup_session_middleware(app)
 setup_https_enforcement_middleware(app)
 setup_rate_limiter(app)
+setup_csp_middleware(app)
 
 # ---------------------------------------------------------------------------
 # REST Routers
@@ -131,6 +135,7 @@ app.include_router(demo_router)
 app.include_router(worker_binary_router)
 app.include_router(investigations_router)
 app.include_router(plugins_router)
+app.include_router(plugins_events_router)
 
 # ---------------------------------------------------------------------------
 # WebSocket Routes

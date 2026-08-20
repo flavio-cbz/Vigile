@@ -1,0 +1,1 @@
+import{o as e,r as t}from"./createLucideIcon-DFVoPbvG.js";var n=e(t(),1),r=`Vigile`;function i(e){(0,n.useEffect)(()=>{document.title=e?`${e} — ${r}`:r},[e])}export{i as t};
