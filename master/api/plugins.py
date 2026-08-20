@@ -88,7 +88,7 @@ class BatchSubRequest(BaseModel):
     """One command invocation inside a /batch payload."""
 
     command: str = Field(description="Namespaced command name, e.g. 'docker.list_containers_route'")
-    params: dict[str, Any] = Field(default_factory=dict, description="Handler kwargs")
+    params: dict[str, Any] | None = Field(default_factory=dict, description="Handler kwargs")
 
 
 class BatchRequest(BaseModel):
@@ -101,6 +101,7 @@ class BatchRequest(BaseModel):
     """
 
     requests: list[BatchSubRequest] = Field(
+        default_factory=list,
         max_length=_BATCH_MAX_SUBREQUESTS,
         description="Read-only command invocations, executed sequentially",
     )
@@ -160,17 +161,19 @@ def _check_s7_intersection(engine: Any, claims: dict[str, Any], entry: CommandEn
     return allowed, reason
 
 
-async def _check_node_scope(db: Any, nm: NodeManager, params: dict[str, Any]) -> bool:
+async def _check_node_scope(db: Any, nm: NodeManager, params: dict[str, Any] | None) -> bool:
     """Re-verify node access per sub-request (faille 4).
 
     Uses the SAME shared helper as /api/nodes — ``NodeManager.get_node`` —
     never a whole-batch check. Sub-requests without ``node_id`` stay on the
     flat model.
     """
-    node_id = params.get("node_id")
-    if node_id is None:
+    if not params:
         return True
-    node = await nm.get_node(db, node_id)
+    node_id = params.get("node_id")
+    if not node_id:
+        return True
+    node = await nm.get_node(db, str(node_id))
     return node is not None
 
 
@@ -187,7 +190,7 @@ async def _charge_batch_rates(request: Request, entry: CommandEntry) -> None:
     await dep(request)
 
 
-async def _invoke_plugin_handler(request: Request, handler: Any, params: dict[str, Any]) -> Any:
+async def _invoke_plugin_handler(request: Request, handler: Any, params: dict[str, Any] | None) -> Any:
     """Invoke an existing @route handler with its FastAPI dependencies resolved.
 
     The handler is called directly (not through the router) with the same
@@ -196,8 +199,9 @@ async def _invoke_plugin_handler(request: Request, handler: Any, params: dict[st
     coercion, and ``Depends`` markers (e.g. ``get_db_conn``,
     ``get_worker_query_port``) are solved by FastAPI's own solver.
     """
+    clean_params = {k: v for k, v in (params or {}).items() if v is not None}
     scope = dict(request.scope)
-    scope["query_string"] = urlencode(params, doseq=True).encode("utf-8")
+    scope["query_string"] = urlencode(clean_params, doseq=True).encode("utf-8")
     sub_request = Request(scope)
     dependant = get_dependant(path="/batch", call=handler)
     stack = AsyncExitStack()
