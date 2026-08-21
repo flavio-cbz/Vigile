@@ -162,7 +162,7 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
       : null,
   );
 
-  const { data: filesData } = useBlockData<{
+  const { data: filesData, mutate: mutateFiles } = useBlockData<{
     libraries: Array<{
       key: string;
       title: string;
@@ -184,9 +184,10 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
     }>;
     total_storage_bytes: number;
   }>(
-    isConfigured && activeNodeId && plexActiveTab === 'files'
+    isConfigured && activeNodeId
       ? { command: 'plex.files', params: { node_id: activeNodeId } }
       : null,
+    { revalidateInterval: 60_000 },
   );
 
   const [historyOffset, setHistoryOffset] = useState(0);
@@ -240,7 +241,8 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
     void mutateDetect();
     void mutateSessions();
     void mutateTranscodes();
-  }, [mutateDetect, mutateSessions, mutateTranscodes]);
+    void mutateFiles();
+  }, [mutateDetect, mutateSessions, mutateTranscodes, mutateFiles]);
 
   const handleKillSession = useCallback(async (sessionKey: string) => {
     if (!activeNodeId) return;
@@ -258,10 +260,11 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
     try {
       await api.fetch(`/${activeNodeId}/library/${sectionId}/scan`, { method: 'POST' });
       api.toast('Scan de la bibliothèque Plex démarré !', 'success');
+      void mutateFiles();
     } catch {
       api.toast('Erreur lors du déclenchement du scan.', 'error');
     }
-  }, [api, activeNodeId]);
+  }, [api, activeNodeId, mutateFiles]);
 
   const handleHistorySearch = useCallback((query: string, mediaType?: string) => {
     setHistoryQuery(query);
