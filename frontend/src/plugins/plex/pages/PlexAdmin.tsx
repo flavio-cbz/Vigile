@@ -55,7 +55,7 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
 
   const activeNodeId = selectedNodeId || undefined;
 
-  const { data: detectData } = useBlockData<{
+  const { data: detectData, isLoading: detectLoading, error: detectError, mutate: mutateDetect } = useBlockData<{
     detected: boolean;
     configured: boolean;
     port: number;
@@ -237,9 +237,10 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
   const busy = sessionsLoading && !sessionsData;
 
   const handleRefresh = useCallback(() => {
+    void mutateDetect();
     void mutateSessions();
     void mutateTranscodes();
-  }, [mutateSessions, mutateTranscodes]);
+  }, [mutateDetect, mutateSessions, mutateTranscodes]);
 
   const handleKillSession = useCallback(async (sessionKey: string) => {
     if (!activeNodeId) return;
@@ -371,7 +372,23 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
         <Banner variant="info" title="Aucun nœud disponible" message="Aucun serveur ou agent (Worker) n'est actuellement connecté à votre instance Vigile." />
       )}
 
-      {selectedNodeId && !isConfigured && isDetected && (
+      {selectedNodeId && detectLoading && !detectData && (
+        <div className="flex flex-col items-center justify-center h-48 gap-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent border-border-strong"></div>
+          <span className="text-text-3 font-mono text-xs">Détection du service Plex en cours...</span>
+        </div>
+      )}
+
+      {selectedNodeId && detectError && !detectData && (
+        <Banner
+          variant="error"
+          title="Erreur lors de la détection de Plex"
+          message={`Impossible de récupérer l'état de Plex : ${detectError.message}`}
+          action={{ label: 'Réessayer', onClick: () => void mutateDetect() }}
+        />
+      )}
+
+      {selectedNodeId && !detectLoading && !isConfigured && isDetected && (
         <Banner
           variant="warning"
           title="Plex est détecté mais non authentifié"
@@ -380,7 +397,7 @@ export const PlexAdmin: React.FC<PlexAdminProps> = ({ api }) => {
         />
       )}
 
-      {selectedNodeId && !isDetected && detectData && (
+      {selectedNodeId && !detectLoading && !detectError && !isDetected && detectData && (
         <Banner
           variant="warning"
           title="Plex Non Détecté sur ce nœud"
