@@ -103,7 +103,15 @@ export async function api<T = unknown>(
     'Accept-Language': locale,
   };
 
-  if (!headers['Content-Type'] && !(fetchOptions.body instanceof FormData)) {
+  const contentTypeKey = Object.keys(headers).find(
+    (k) => k.toLowerCase() === 'content-type'
+  );
+  if (contentTypeKey) {
+    if (contentTypeKey !== 'Content-Type') {
+      headers['Content-Type'] = headers[contentTypeKey];
+      delete headers[contentTypeKey];
+    }
+  } else if (!(fetchOptions.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
 

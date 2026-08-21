@@ -262,7 +262,7 @@ export function useBlockData<T = unknown>(
 
       const response = await api<BatchResponse<T>>('/api/plugins/batch', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
