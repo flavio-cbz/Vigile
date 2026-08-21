@@ -288,7 +288,10 @@ export function useBlockData<T = unknown>(
         throw new Error(`commande inconnue dans la réponse /batch : ${cmd.command}`);
       }
       if (result.status !== 200) {
-        throw new Error(result.error ?? `commande ${cmd.command} : statut ${result.status}`);
+        const errDetail = typeof result.error === 'object' && result.error !== null
+          ? JSON.stringify(result.error)
+          : (result.error ?? `commande ${cmd.command} : statut ${result.status}`);
+        throw new Error(errDetail);
       }
 
       setCacheEntry(stableCacheKey(cmd), { data: result.data, fetchedAt: Date.now() });

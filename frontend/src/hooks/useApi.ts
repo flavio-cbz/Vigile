@@ -5,6 +5,15 @@ import { t } from '../i18n';
 
 const toastedErrors = new WeakSet<object>();
 
+export class HttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}
+
 /** Cooldown to prevent toast floods when the rate-limiter rejects many requests in a row. */
 let lastRateLimitToastTime = 0;
 const RATE_LIMIT_TOAST_COOLDOWN_MS = 6000;
@@ -145,7 +154,7 @@ export async function api<T = unknown>(
               useToastStore.getState().addToast('warning', t('api.toast.rate_limit_title'), displayMessage);
             }
           }
-          const error = new Error(displayMessage);
+          const error = new HttpError(displayMessage, 429);
           toastedErrors.add(error);
           throw error;
         }
@@ -157,12 +166,20 @@ export async function api<T = unknown>(
         try {
           const parsed = JSON.parse(errorText);
           if (parsed && typeof parsed === 'object') {
-            displayMessage = parsed.detail || parsed.message || parsed.error || errorText;
+            if (Array.isArray(parsed.detail)) {
+              displayMessage = parsed.detail
+                .map((d: any) => (typeof d === 'object' && d ? d.msg || JSON.stringify(d) : String(d)))
+                .join(', ');
+            } else if (typeof parsed.detail === 'object' && parsed.detail !== null) {
+              displayMessage = JSON.stringify(parsed.detail);
+            } else {
+              displayMessage = parsed.detail || parsed.message || parsed.error || errorText;
+            }
           }
         } catch {
           // ignore parse error, use plain text
         }
-        const error = new Error(displayMessage || `HTTP ${response.status}`);
+        const error = new HttpError(typeof displayMessage === 'string' ? displayMessage : JSON.stringify(displayMessage) || `HTTP ${response.status}`, response.status);
         if (response.status >= 500 && !skipToast) {
           useToastStore.getState().addToast('error', t('api.toast.server_error'), displayMessage || `HTTP ${response.status}`);
           toastedErrors.add(error);
@@ -174,6 +191,10 @@ export async function api<T = unknown>(
 
       return (await response.json()) as T;
     } catch (err) {
+      if (err instanceof HttpError && err.status < 500) {
+        throw err;
+      }
+
       const normalizedError =
         err instanceof DOMException && err.name === 'AbortError'
           ? new Error('Request timed out')
