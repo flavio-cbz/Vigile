@@ -10,6 +10,7 @@ exposes secure artwork proxying, and injects context into the AI Copilot.
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 import posixpath
@@ -936,35 +937,99 @@ class PlexPlugin(PluginBase):
             if items_data:
                 meta = items_data.get("MediaContainer", {}).get("Metadata", [])
                 sec_files_count = items_data.get("MediaContainer", {}).get("totalSize", len(meta))
-                for m in meta:
-                    title = m.get("title")
-                    gp = m.get("grandparentTitle")
-                    if gp:
-                        title = f"{gp} - {title}"
+                
+                if sec_type == "show":
+                    series_map: dict[str, dict] = {}
+                    for m in meta:
+                        show_title = m.get("grandparentTitle") or m.get("title") or "Série Inconnue"
+                        if show_title not in series_map:
+                            series_map[show_title] = {
+                                "section": sec_title,
+                                "section_type": sec_type,
+                                "title": show_title,
+                                "file_path": "",
+                                "size_bytes": 0,
+                                "items_count": 0,
+                                "container": None,
+                                "resolution": None,
+                                "codec": None,
+                                "added_at": 0,
+                                "is_series": True,
+                                "_paths": [],
+                                "_resolutions": set(),
+                            }
+                        entry = series_map[show_title]
+                        entry["items_count"] += 1
+                        entry["added_at"] = max(entry["added_at"], m.get("addedAt") or 0)
+                        
+                        for media in m.get("Media", []):
+                            if media.get("videoResolution"):
+                                entry["_resolutions"].add(media.get("videoResolution"))
+                            if not entry["container"] and media.get("container"):
+                                entry["container"] = media.get("container")
+                            if not entry["codec"] and media.get("videoCodec"):
+                                entry["codec"] = media.get("videoCodec")
+                            for part in media.get("Part", []):
+                                f_size = int(part.get("size", 0))
+                                sec_size_bytes += f_size
+                                total_storage_bytes += f_size
+                                entry["size_bytes"] += f_size
+                                if part.get("file"):
+                                    entry["_paths"].append(part.get("file"))
+                    
+                    for show_title, entry in series_map.items():
+                        paths = entry.pop("_paths")
+                        res_set = entry.pop("_resolutions")
+                        if paths:
+                            common_dir = os.path.dirname(os.path.dirname(paths[0])) if len(paths) > 0 else os.path.dirname(paths[0])
+                            entry["file_path"] = f"{entry['items_count']} épisodes · {common_dir}"
+                        else:
+                            entry["file_path"] = f"{entry['items_count']} épisodes"
+                        
+                        if "4k" in res_set or "2160" in res_set:
+                            entry["resolution"] = "4k"
+                        elif "1080" in res_set:
+                            entry["resolution"] = "1080p"
+                        elif "720" in res_set:
+                            entry["resolution"] = "720p"
+                        elif "sd" in res_set or "480" in res_set or "576" in res_set:
+                            entry["resolution"] = "SD"
+                        elif res_set:
+                            entry["resolution"] = next(iter(res_set))
+                        
+                        all_files.append(entry)
+                else:
+                    for m in meta:
+                        title = m.get("title")
+                        gp = m.get("grandparentTitle")
+                        if gp:
+                            title = f"{gp} - {title}"
 
-                    media_list = m.get("Media", [])
-                    for media in media_list:
-                        v_res = media.get("videoResolution")
-                        v_codec = media.get("videoCodec")
-                        container = media.get("container")
-                        parts = media.get("Part", [])
-                        for part in parts:
-                            f_path = part.get("file")
-                            f_size = int(part.get("size", 0))
-                            sec_size_bytes += f_size
-                            total_storage_bytes += f_size
-                            if f_path:
-                                all_files.append({
-                                    "section": sec_title,
-                                    "section_type": sec_type,
-                                    "title": title,
-                                    "file_path": f_path,
-                                    "size_bytes": f_size,
-                                    "container": container,
-                                    "resolution": v_res,
-                                    "codec": v_codec,
-                                    "added_at": m.get("addedAt"),
-                                })
+                        media_list = m.get("Media", [])
+                        for media in media_list:
+                            v_res = media.get("videoResolution")
+                            v_codec = media.get("videoCodec")
+                            container = media.get("container")
+                            parts = media.get("Part", [])
+                            for part in parts:
+                                f_path = part.get("file")
+                                f_size = int(part.get("size", 0))
+                                sec_size_bytes += f_size
+                                total_storage_bytes += f_size
+                                if f_path:
+                                    all_files.append({
+                                        "section": sec_title,
+                                        "section_type": sec_type,
+                                        "title": title,
+                                        "file_path": f_path,
+                                        "size_bytes": f_size,
+                                        "container": container,
+                                        "resolution": v_res,
+                                        "codec": v_codec,
+                                        "added_at": m.get("addedAt"),
+                                        "is_series": False,
+                                        "items_count": 1,
+                                    })
 
             libraries_files.append({
                 "key": sec_key,

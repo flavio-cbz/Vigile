@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Folder, HardDrive, RefreshCw, Film, FileText, Search } from 'lucide-react';
+import { Folder, HardDrive, RefreshCw, Film, FileText, Search, Tv } from 'lucide-react';
 
 export interface PlexLibraryFileSummary {
   key: string;
@@ -20,6 +20,8 @@ export interface PlexMediaFile {
   resolution?: string;
   codec?: string;
   added_at?: number;
+  is_series?: boolean;
+  items_count?: number;
 }
 
 interface PlexFilesTabProps {
@@ -138,13 +140,13 @@ export const PlexFilesTab: React.FC<PlexFilesTabProps> = ({
         ))}
       </div>
 
-      {/* Media Files Table (Largest Files) */}
+      {/* Media Files Table (Largest Files & Series) */}
       <div className="p-4 bg-surface-2/30 border border-border-strong/15 rounded-xl flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <FileText className="w-4 h-4 text-orange-500" />
             <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-text-1">
-              Fichiers Volumineux Récents ({filteredFiles.length})
+              Fichiers & Séries Volumineux ({filteredFiles.length})
             </h4>
           </div>
 
@@ -162,7 +164,7 @@ export const PlexFilesTab: React.FC<PlexFilesTabProps> = ({
 
         {filteredFiles.length === 0 ? (
           <div className="text-center py-8 text-text-3 text-xs uppercase font-mono">
-            Aucun fichier trouvé
+            Aucun média trouvé
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -179,7 +181,18 @@ export const PlexFilesTab: React.FC<PlexFilesTabProps> = ({
                 {filteredFiles.map((file, idx) => (
                   <tr key={idx} className="hover:bg-surface-2/60 transition-colors">
                     <td className="py-2.5 px-3">
-                      <div className="font-bold text-text-1 text-sm">{file.title}</div>
+                      <div className="flex items-center gap-2">
+                        {file.is_series ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-bold uppercase shrink-0">
+                            <Tv className="w-3 h-3" /> Série
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold uppercase shrink-0">
+                            <Film className="w-3 h-3" /> {file.section_type === 'artist' ? 'Audio' : file.section_type === 'photo' ? 'Média' : 'Film'}
+                          </span>
+                        )}
+                        <span className="font-bold text-text-1 text-sm">{file.title}</span>
+                      </div>
                       <div className="text-[11px] text-text-3 truncate max-w-md mt-0.5">
                         {file.file_path}
                       </div>
