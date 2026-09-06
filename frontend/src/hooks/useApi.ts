@@ -176,7 +176,7 @@ export async function api<T = unknown>(
           if (parsed && typeof parsed === 'object') {
             if (Array.isArray(parsed.detail)) {
               displayMessage = parsed.detail
-                .map((d: any) => (typeof d === 'object' && d ? d.msg || JSON.stringify(d) : String(d)))
+                .map((d: unknown) => (typeof d === 'object' && d !== null ? (d as Record<string, unknown>).msg || JSON.stringify(d) : String(d)))
                 .join(', ');
             } else if (typeof parsed.detail === 'object' && parsed.detail !== null) {
               displayMessage = JSON.stringify(parsed.detail);

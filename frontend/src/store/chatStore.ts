@@ -288,7 +288,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let rafPending = false;
     let rafId: number | null = null;
     let flushUpdate: () => void = () => {};
-    let scheduleUpdate: () => void = () => {};
+    let scheduleUpdate: (() => void) | undefined;
     let updateAssistantMessage: () => void = () => {};
 
     try {
@@ -415,7 +415,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 assistantMessage.latencyMs = Math.round(firstTokenTs - sendStartTs);
               }
               assistantMessage.content += data.content;
-              scheduleUpdate();
+              scheduleUpdate?.();
             } else if (data.type === 'proposal' || data.type === 'proposal_needed') {
               assistantMessage.proposal = {
                 id: data.proposal_id,

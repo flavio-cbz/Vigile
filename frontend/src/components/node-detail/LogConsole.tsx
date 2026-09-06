@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import type { LogEntryRecord } from './types';
 import { useLocale } from '../../i18n';
@@ -26,17 +26,17 @@ export const LogConsole: React.FC<LogConsoleProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Parse raw text into lines if entries array is empty (fallback)
-  const displayEntries: LogEntryRecord[] = entries.length > 0
-    ? entries
-    : rawText
-        ? rawText.split('\n').filter(Boolean).map((line, idx) => ({
-            timestamp: Date.now() / 1000,
-            time_str: line.substring(0, 15),
-            level: /error|fail|crit/i.test(line) ? 'error' : (/warn/i.test(line) ? 'warn' : 'info'),
-            unit: 'system',
-            message: line,
-          }))
-        : [];
+  const displayEntries: LogEntryRecord[] = useMemo(() => {
+    if (entries.length > 0) return entries;
+    if (!rawText) return [];
+    return rawText.split('\n').filter(Boolean).map((line) => ({
+      timestamp: 0,
+      time_str: line.substring(0, 15),
+      level: /error|fail|crit/i.test(line) ? 'error' : (/warn/i.test(line) ? 'warn' : 'info'),
+      unit: 'system',
+      message: line,
+    }));
+  }, [entries, rawText]);
 
   const filteredEntries = displayEntries.filter((item) => {
     // Severity filter

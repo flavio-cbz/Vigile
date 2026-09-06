@@ -50,9 +50,14 @@ from master.core.node_manager import NodeManager, NodeState
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
 from master.core.rate_limiter import rate_limiter
 from master.core.security_manager import SecurityManager
-from master.core.plugin_ids import is_plugin_active
 from master.core.worker_query_port import WorkerQueryPort
-from master.db.disk_scan_cache import get_cached_disk_scan, set_cached_disk_scan
+from master.db.disk_scan_cache import (
+    get_cached_disk_scan,
+    get_node_disk_mounts,
+    invalidate_cached_disk_scan,
+    set_cached_disk_scan,
+    set_node_disk_mounts,
+)
 from master.schemas.disk_scan import DiskScanResult
 
 logger = logging.getLogger(__name__)
@@ -1164,6 +1169,8 @@ class NodeStatsResponse(BaseModel):
 
     node_id: str
     snapshots: list[MetricsSnapshotResponse]
+    is_truncated: bool = False
+    total_count: int | None = None
 
 
 @router.get(
@@ -1218,17 +1225,17 @@ async def get_node_stats(
                 AVG(cpu_load_1m) AS cpu_load_1m,
                 AVG(cpu_load_5m) AS cpu_load_5m,
                 AVG(cpu_load_15m) AS cpu_load_15m,
-                AVG(cpu_cores) AS cpu_cores,
-                AVG(mem_total_bytes) AS mem_total_bytes,
-                AVG(mem_used_bytes) AS mem_used_bytes,
+                MAX(cpu_cores) AS cpu_cores,
+                CAST(AVG(mem_total_bytes) AS INTEGER) AS mem_total_bytes,
+                CAST(AVG(mem_used_bytes) AS INTEGER) AS mem_used_bytes,
                 AVG(mem_percent) AS mem_percent,
-                AVG(swap_total_bytes) AS swap_total_bytes,
-                AVG(swap_used_bytes) AS swap_used_bytes,
-                AVG(disk_total_bytes) AS disk_total_bytes,
-                AVG(disk_used_bytes) AS disk_used_bytes,
+                CAST(AVG(swap_total_bytes) AS INTEGER) AS swap_total_bytes,
+                CAST(AVG(swap_used_bytes) AS INTEGER) AS swap_used_bytes,
+                CAST(AVG(disk_total_bytes) AS INTEGER) AS disk_total_bytes,
+                CAST(AVG(disk_used_bytes) AS INTEGER) AS disk_used_bytes,
                 AVG(disk_percent) AS disk_percent,
                 MAX(uptime_seconds) AS uptime_seconds,
-                AVG(processes) AS processes,
+                MAX(processes) AS processes,
                 MAX(disks_json) AS disks_json,
                 MAX(top_processes_json) AS top_processes_json
             FROM metrics_snapshots
@@ -1237,7 +1244,7 @@ async def get_node_stats(
             ORDER BY collected_at DESC
             LIMIT ?
             """
-            params = (node_id, effective_start, effective_end, limit)
+            params = (node_id, effective_start, effective_end, limit + 1)
         else:
             sql = """
             SELECT
@@ -1252,7 +1259,7 @@ async def get_node_stats(
             ORDER BY collected_at DESC
             LIMIT ?
             """
-            params = (node_id, effective_start, effective_end, limit)
+            params = (node_id, effective_start, effective_end, limit + 1)
     else:
         sql = """
         SELECT
@@ -1267,7 +1274,7 @@ async def get_node_stats(
         ORDER BY collected_at DESC
         LIMIT ?
         """
-        params = (node_id, limit)
+        params = (node_id, limit + 1)
 
     async with db.execute(sql, params) as cursor:
         for row in await cursor.fetchall():
@@ -1286,10 +1293,16 @@ async def get_node_stats(
             d.pop("top_processes_json", None)
             rows.append(d)
 
+    is_truncated = len(rows) > limit
+    if is_truncated:
+        rows = rows[:limit]
+
     return NodeStatsResponse(
         node_id=node_id,
         snapshots=[MetricsSnapshotResponse(**r) for r in rows],
+        is_truncated=is_truncated,
     )
+
 
 
 @router.get(
@@ -2142,13 +2155,19 @@ async def get_disk_scan(
     """
     Scan disk usage tree for a node's filesystem.
 
-    Results are cached for 5 minutes per node. Pass ``force=true``
+    Results are cached for 5 minutes per node and path. Pass ``force=true``
     (admin only) to bypass the cache and trigger a fresh scan.
     """
-    if not is_plugin_active("disk_analysis"):
+    if "\x00" in path or "\r" in path or "\n" in path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Plugin 'disk_analysis' est désactivé.",
+            detail="invalid scan path",
+        )
+    clean_path = os.path.normpath(path.strip())
+    if not clean_path.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid scan path",
         )
 
     if force:
@@ -2158,9 +2177,42 @@ async def get_disk_scan(
                 detail="force=true requires admin role",
             )
 
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    mounts = await get_node_disk_mounts(db, node_id)
+    if not mounts:
+        try:
+            stats_result = await port.query(
+                node_id, "GET_STATS", timeout=10.0
+            )
+            if stats_result.get("success"):
+                disks = stats_result.get("disks", [])
+                extracted = [d["mount_point"] for d in disks if d.get("mount_point")]
+                if extracted:
+                    mounts = extracted
+                    try:
+                        await set_node_disk_mounts(db, node_id, mounts)
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.warning("Node %s: GET_STATS failed for disk-scan mounts: %s", node_id, exc)
+        if not mounts:
+            mounts = ["/"]
+
+    normalized_mounts = {
+        os.path.normpath(m.strip()) for m in mounts if isinstance(m, str) and m.strip()
+    }
+    if clean_path not in normalized_mounts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is not an allowed mount point",
+        )
+
     if not force:
         try:
-            cached_json, cached_at = await get_cached_disk_scan(db, node_id)
+            cached_json, cached_at = await get_cached_disk_scan(db, node_id, clean_path)
         except Exception:
             cached_json, cached_at = None, None
         if (
@@ -2170,36 +2222,18 @@ async def get_disk_scan(
         ):
             try:
                 return json.loads(cached_json)
-            except Exception:
-                pass
-
-    node = await nm.get_node(db, node_id)
-    if node is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
-
-    port = WorkerQueryPort(nm)
-    mounts = ["/"]
-    try:
-        stats_result = await port.query(
-            node_id, "GET_STATS", timeout=10.0
-        )
-        if stats_result.get("success"):
-            disks = stats_result.get("disks", [])
-            extracted = [d["mount_point"] for d in disks if d.get("mount_point")]
-            if extracted:
-                mounts = extracted
-    except Exception as exc:
-        logger.warning("Node %s: GET_STATS failed for disk-scan mounts: %s", node_id, exc)
+            except Exception as exc:
+                logger.warning("Node %s: failed to parse cached disk-scan JSON: %s", node_id, exc)
 
     try:
         result = await port.query(
             node_id,
             WorkerAction.DISK_SCAN,
             {
-                "path": path,
+                "path": clean_path,
                 "max_depth": max_depth,
                 "min_size_bytes": min_size_bytes,
-                "mounts": mounts,
+                "mounts": list(normalized_mounts),
             },
             timeout=45.0,
         )
@@ -2229,7 +2263,7 @@ async def get_disk_scan(
         )
 
     try:
-        await set_cached_disk_scan(db, node_id, result["output"], time.time())
+        await set_cached_disk_scan(db, node_id, clean_path, result["output"], time.time())
     except Exception as exc:
         logger.warning("Node %s: failed to write disk-scan cache: %s", node_id, exc)
 
@@ -2238,7 +2272,8 @@ async def get_disk_scan(
         user_id=claims.get("sub", "system"),
         action=AuditAction.DISK_SCAN,
         node_id=node_id,
-        details={"path": path, "max_depth": max_depth, "min_size_bytes": min_size_bytes},
+        details={"path": clean_path, "max_depth": max_depth, "min_size_bytes": min_size_bytes},
     )
 
     return parsed.model_dump(mode="json")
+

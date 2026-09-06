@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, Server, Box, Cpu } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, Server } from 'lucide-react';
 import { ToolCall } from '../../types/chat.types';
 
 interface ToolCallCardProps {
@@ -72,7 +72,7 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-3/30">
-              {data.map((srv: any, idx: number) => {
+              {data.map((srv: { name: string; state: string; status: string }, idx: number) => {
                 const isActive = srv.state === 'active';
                 const isRunning = srv.status === 'running';
                 return (
@@ -114,7 +114,7 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-3/30">
-              {data.map((c: any, idx: number) => {
+              {data.map((c: { name: string; image: string; state: string }, idx: number) => {
                 const isRunning = c.state === 'running' || c.state === 'up';
                 return (
                   <tr key={idx} className="hover:bg-surface-2/40">
@@ -209,7 +209,7 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({ toolCall }) => {
     if (name === 'get_fleet_overview' && Array.isArray(data)) {
       return (
         <div className="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
-          {data.map((n: any, idx: number) => (
+          {data.map((n: { name: string; hostname: string; online: boolean }, idx: number) => (
             <div key={idx} className="p-2 bg-surface-2/40 border border-surface-3/30 rounded flex justify-between items-center text-xs">
               <div className="flex items-center gap-1.5 truncate">
                 <Server className="w-3.5 h-3.5 text-text-muted" />

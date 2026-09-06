@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { Mock } from 'vitest';
 import type { PluginAPI } from '../../../types/plugins';
-import { useAuthStore } from '../../../store/authStore';
 
 // Réseau mocké : le hook useBlockData réel POSTe sur /api/plugins/batch.
 vi.mock('../../../hooks/useApi', () => ({

@@ -1,6 +1,6 @@
 import React from 'react';
 import { MetricChart } from './MetricChart';
-import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
+import type { StatsPoint, NodeBaseline, AlertRecord } from './types';
 
 interface MetricChartsProps {
   mappedHistory: Array<StatsPoint & { chartIndex: number }>;

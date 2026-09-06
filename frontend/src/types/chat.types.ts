@@ -1,13 +1,13 @@
 export interface ToolResult {
   success: boolean;
-  data: any;
+  data: unknown;
   error?: string | null;
 }
 
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
   status: 'pending' | 'executing' | 'completed' | 'failed';
   result?: ToolResult;
 }
@@ -19,8 +19,8 @@ export interface ProposalData {
   reasoning?: string;
   target?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';
-  params?: Record<string, any>;
-  result?: Record<string, any>;
+  params?: Record<string, unknown>;
+  result?: Record<string, unknown>;
 }
 
 export interface Message {
@@ -46,7 +46,7 @@ export interface Proposal {
   id: string;
   node_id: string;
   action: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
   reasoning: string;
   risk_level: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED';

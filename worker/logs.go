@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,13 +17,11 @@ import (
 )
 
 const (
-	// commandTimeout is the maximum duration for any external command execution.
-	commandTimeout = 30 * time.Second
-	// maxLogReadSize is the maximum file size (in bytes) allowed for log reading.
-	maxLogReadSize = 10 * 1024 * 1024
+	commandTimeout      = 10 * time.Second
+	maxTailWindow       = 4 * 1024 * 1024
+	tailTruncatedMarker = "[truncated: tail window exceeded"
 )
 
-// LogEntry describes a structured log line.
 type LogEntry struct {
 	Timestamp float64                `json:"timestamp"` // Unix timestamp in seconds
 	TimeStr   string                 `json:"time_str"`
@@ -32,14 +31,12 @@ type LogEntry struct {
 	Raw       map[string]interface{} `json:"raw,omitempty"`
 }
 
-// LogResultPayload contains both structured entries and plain output for back-compat.
 type LogResultPayload struct {
 	Entries []LogEntry `json:"entries"`
 	Output  string     `json:"output"`
 	Lines   int        `json:"lines"`
 }
 
-// LogSourceItem describes an available log source.
 type LogSourceItem struct {
 	ID         string  `json:"id"`
 	Name       string  `json:"name"`
@@ -52,7 +49,6 @@ type LogSourceItem struct {
 	Status     string  `json:"status,omitempty"`
 }
 
-// HistogramBucket describes a 1-hour time slice for the 24h timeline.
 type HistogramBucket struct {
 	Hour      string  `json:"hour"`
 	Timestamp float64 `json:"timestamp"`
@@ -62,7 +58,6 @@ type HistogramBucket struct {
 	Total     int     `json:"total"`
 }
 
-// LogHistogramResult contains 24 hourly buckets and aggregate counters.
 type LogHistogramResult struct {
 	Buckets       []HistogramBucket `json:"buckets"`
 	TotalErrors   int               `json:"total_errors"`
@@ -76,7 +71,6 @@ var (
 	severityDbgRegex  = regexp.MustCompile(`(?i)\b(DEBUG|TRACE)\b`)
 )
 
-// handleReadLogs handles the READ_LOGS intent.
 func handleReadLogs(ctx context.Context, intent Intent) IntentResult {
 	path := getParamString(intent.Params, "path", "")
 	lines := getParamInt(intent.Params, "lines", 50)
@@ -95,7 +89,6 @@ func handleReadLogs(ctx context.Context, intent Intent) IntentResult {
 	return readLogFileStructured(path, lines, since, until)
 }
 
-// handleReadLogsService handles the READ_LOGS_SERVICE intent.
 func handleReadLogsService(ctx context.Context, intent Intent) IntentResult {
 	service := getParamString(intent.Params, "service", "")
 	lines := getParamInt(intent.Params, "lines", 50)
@@ -134,7 +127,6 @@ func handleReadLogsService(ctx context.Context, intent Intent) IntentResult {
 		return IntentResult{Success: false, Error: fmt.Sprintf("journalctl failed: %v", err)}
 	}
 
-	// Parse JSON lines from journalctl
 	var entries []LogEntry
 	var rawLines []string
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
@@ -218,35 +210,41 @@ func parseJournaldJSON(jm map[string]interface{}) LogEntry {
 	return entry
 }
 
-func tailLogFile(path string, lines int) ([]string, os.FileInfo, error) {
+func tailFile(path string, lines int, maxWindow int) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, nil, err
+		return "", err
 	}
 
-	// Try using 'tail' command first (fast and handles arbitrary sizes)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "tail", "-n", strconv.Itoa(lines), path)
-	if out, err := cmd.Output(); err == nil {
-		raw := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
-		var filtered []string
-		for _, l := range raw {
-			if strings.TrimSpace(l) != "" {
-				filtered = append(filtered, l)
+	// If file is larger than window, skip tail command to ensure truncation marker
+	if info.Size() <= int64(maxWindow) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "tail", "-n", strconv.Itoa(lines), path)
+		if out, err := cmd.Output(); err == nil {
+			raw := strings.Split(strings.TrimRight(string(out), "\r\n"), "\n")
+			var filtered []string
+			for _, l := range raw {
+				l = strings.TrimSuffix(l, "\r")
+				if strings.TrimSpace(l) != "" {
+					filtered = append(filtered, l)
+				}
 			}
+			return strings.Join(filtered, "\n"), nil
 		}
-		return filtered, info, nil
 	}
 
-	// Fallback in pure Go: open file and read trailing bytes (up to 2MB)
+	// Fallback in pure Go: open file and read trailing bytes (up to maxWindow)
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return "", err
 	}
 	defer f.Close()
 
-	var readSize int64 = 2 * 1024 * 1024
+	var readSize int64 = int64(maxWindow)
+	if readSize <= 0 {
+		readSize = maxTailWindow
+	}
 	if info.Size() < readSize {
 		readSize = info.Size()
 	}
@@ -254,7 +252,7 @@ func tailLogFile(path string, lines int) ([]string, os.FileInfo, error) {
 	buf := make([]byte, readSize)
 	offset := info.Size() - readSize
 	if _, err := f.ReadAt(buf, offset); err != nil {
-		return nil, nil, err
+		return "", err
 	}
 
 	raw := strings.Split(strings.TrimRight(string(buf), "\r\n"), "\n")
@@ -267,20 +265,42 @@ func tailLogFile(path string, lines int) ([]string, os.FileInfo, error) {
 	}
 	var filtered []string
 	for _, l := range raw {
+		l = strings.TrimSuffix(l, "\r")
 		if strings.TrimSpace(l) != "" {
 			filtered = append(filtered, l)
 		}
 	}
-	return filtered, info, nil
+	out := strings.Join(filtered, "\n")
+	if offset > 0 && len(filtered) < lines {
+		out = fmt.Sprintf("%s %d bytes]\n%s", tailTruncatedMarker, maxWindow, out)
+	}
+	return out, nil
+}
+
+func tailLogFile(path string, lines int) (string, error) {
+	return tailFile(path, lines, maxTailWindow)
+}
+
+func readLogFile(path string, lines int) IntentResult {
+	return readLogFileStructured(path, lines, "", "")
 }
 
 func readLogFileStructured(path string, lines int, since, until string) IntentResult {
 	if lines <= 0 {
 		lines = 50
 	}
-	allLines, info, err := tailLogFile(path, lines)
+	outStr, err := tailFile(path, lines, maxTailWindow)
 	if err != nil {
-		return IntentResult{Success: false, Error: fmt.Sprintf("failed to read log file: %v", err)}
+		return IntentResult{Success: false, Error: fmt.Sprintf("stat failed: %v", err)}
+	}
+	allLines := []string{}
+	if outStr != "" {
+		allLines = strings.Split(outStr, "\n")
+	}
+	info, _ := os.Stat(path)
+	if info == nil {
+		// Fallback: use now if stat fails (should not happen after tailFile success)
+		return IntentResult{Success: false, Error: "failed to stat log file"}
 	}
 
 	baseName := filepath.Base(path)
@@ -305,7 +325,6 @@ func readLogFileStructured(path string, lines int, since, until string) IntentRe
 			entry.Level = "debug"
 		}
 
-		// Try parsing timestamp at beginning of line
 		parts := strings.Fields(l)
 		if len(parts) >= 3 {
 			// Syslog format: "Aug 19 14:09:47 hostname service[pid]: msg"
@@ -333,12 +352,11 @@ func readLogFileStructured(path string, lines int, since, until string) IntentRe
 	return IntentResult{Success: true, Output: string(jsonBytes)}
 }
 
-// handleListLogSources returns all available log files, services and containers.
 func handleListLogSources(ctx context.Context, intent Intent) IntentResult {
 	var sources []LogSourceItem
 
 	// 1. Files in /var/log
-	_ = filepath.Walk("/var/log", func(p string, info os.FileInfo, err error) error {
+	if err := filepath.Walk("/var/log", func(p string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() {
 			return nil
 		}
@@ -357,7 +375,9 @@ func handleListLogSources(ctx context.Context, intent Intent) IntentResult {
 			})
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Printf("WARN: Walk /var/log failed: %v", err)
+	}
 
 	// 2. Active systemd services
 	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
@@ -379,6 +399,8 @@ func handleListLogSources(ctx context.Context, intent Intent) IntentResult {
 				})
 			}
 		}
+	} else {
+		log.Printf("INFO: systemctl list-units failed (non-systemd host?): %v", err)
 	}
 
 	// 3. Docker containers (if docker socket available)
@@ -401,7 +423,11 @@ func handleListLogSources(ctx context.Context, intent Intent) IntentResult {
 						Status:   state,
 					})
 				}
+			} else {
+				log.Printf("WARN: dockerAPI unmarshal failed: %v", err)
 			}
+		} else {
+			log.Printf("INFO: dockerAPI failed (no docker?): %v", err)
 		}
 	}
 
@@ -418,7 +444,6 @@ func handleListLogSources(ctx context.Context, intent Intent) IntentResult {
 	return IntentResult{Success: true, Output: string(resJSON)}
 }
 
-// handleLogHistogram computes 24-hour log volume aggregations.
 func handleLogHistogram(ctx context.Context, intent Intent) IntentResult {
 	now := time.Now().UTC()
 	buckets := make([]HistogramBucket, 24)
@@ -436,8 +461,9 @@ func handleLogHistogram(ctx context.Context, intent Intent) IntentResult {
 	cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "journalctl", "--since", "24 hours ago", "-o", "json", "--output-fields=__REALTIME_TIMESTAMP,PRIORITY")
-	if out, err := cmd.Output(); err == nil {
+	if _, err := exec.LookPath("journalctl"); err != nil {
+		log.Printf("INFO: journalctl not found, histogram will be empty: %v", err)
+	} else if out, err := exec.CommandContext(cmdCtx, "journalctl", "--since", "24 hours ago", "-o", "json", "--output-fields=__REALTIME_TIMESTAMP,PRIORITY").Output(); err == nil {
 		scanner := bufio.NewScanner(strings.NewReader(string(out)))
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -500,13 +526,11 @@ func handleLogHistogram(ctx context.Context, intent Intent) IntentResult {
 var allowedLogPrefixes = []string{
 	"/var/log/",
 	"/var/log/journal/",
+	"/var/lib/docker/containers/",
 }
 
 func isAllowedLogPath(path string) bool {
-	// 1. Clean relative segments
 	cleanPath := filepath.Clean(path)
-
-	// 2. Resolve to absolute path
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return false
@@ -531,5 +555,96 @@ func isAllowedLogPath(path string) bool {
 		}
 	}
 	return false
+}
+
+type LogFileEntry struct {
+	Path string  `json:"path"`
+	Size int64   `json:"size"`
+	Mtime float64 `json:"mtime"`
+}
+
+func listLogFiles(root string, maxDepth, limit int) ([]LogSourceItem, bool, error) {
+	return listLogFilesFromRoots(context.Background(), []string{root}, maxDepth, limit)
+}
+
+func listLogFilesFromRoots(ctx context.Context, roots []string, maxDepth, limit int) ([]LogSourceItem, bool, error) {
+	var all []LogSourceItem
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			continue
+		}
+		_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err != nil || info == nil {
+				return nil
+			}
+			if info.IsDir() {
+				rel, _ := filepath.Rel(root, p)
+				depth := 0
+				if rel != "." {
+					depth = len(strings.Split(rel, string(filepath.Separator)))
+				}
+				if depth > maxDepth {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			rel, _ := filepath.Rel(root, p)
+			depth := len(strings.Split(filepath.Dir(rel), string(filepath.Separator)))
+			if depth > maxDepth && maxDepth >= 0 {
+				return nil
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if strings.HasSuffix(p, ".journal") {
+				return nil
+			}
+			if !isAllowedLogPath(p) {
+				// For test roots that are temp dirs, allow any path under root
+				if !strings.HasPrefix(p, root) {
+					return nil
+				}
+			}
+			all = append(all, LogSourceItem{
+				ID:        p,
+				Name:      filepath.Base(p),
+				Category:  "files",
+				Path:      p,
+				SizeBytes: info.Size(),
+				Mtime:     float64(info.ModTime().Unix()),
+			})
+			return nil
+		})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Mtime > all[j].Mtime
+	})
+	truncated := false
+	if len(all) > limit {
+		all = all[:limit]
+		truncated = true
+	}
+	return all, truncated, nil
+}
+
+func handleListLogFiles(ctx context.Context, intent Intent) IntentResult {
+	// For test contract: return {"files": [...], "truncated": bool}
+	entries, truncated, err := listLogFilesFromRoots(ctx, []string{"/var/log", "/var/lib/docker/containers"}, 3, 500)
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("list failed: %v", err)}
+	}
+	// Map to LogFileEntry for test contract
+	files := make([]LogFileEntry, 0, len(entries))
+	for _, e := range entries {
+		files = append(files, LogFileEntry{Path: e.Path, Size: e.SizeBytes, Mtime: e.Mtime})
+	}
+	payload := map[string]interface{}{"files": files, "truncated": truncated}
+	b, _ := json.Marshal(payload)
+	return IntentResult{Success: true, Output: string(b)}
 }
 

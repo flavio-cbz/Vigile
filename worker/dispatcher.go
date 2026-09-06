@@ -22,19 +22,25 @@ var nodeID string
 // ALLOWED_ACTIONS is the hardcoded whitelist of actions this Worker can execute.
 // Every incoming INTENT is checked against this map before execution.
 var ALLOWED_ACTIONS = map[string]bool{
-		"GET_STATS":           true,
-		"READ_LOGS":           true,
-		"RESTART_CONTAINER":   true,
-		"LIST_CONTAINERS":     true,
-		"LIST_SERVICES":       true,
-		"STATUS_SERVICE":      true,
-		"RESTART_SERVICE":     true,
-		"READ_LOGS_SERVICE":   true,
-		"UPDATE_WORKER":       true,
-		"TOKEN_ROTATION":      true,
-		"DISK_SCAN":           true,
+		"GET_STATS":         true,
+		"READ_LOGS":         true,
+		"RESTART_CONTAINER": true,
+		"STOP_CONTAINER":    true,
+		"START_CONTAINER":   true,
+		"DELETE_CONTAINER":  true,
+		"LIST_CONTAINERS":   true,
+		"LIST_SERVICES":     true,
+		"STATUS_SERVICE":    true,
+		"RESTART_SERVICE":   true,
+		"STOP_SERVICE":      true,
+		"START_SERVICE":     true,
+		"READ_LOGS_SERVICE": true,
+		"UPDATE_WORKER":     true,
+		"TOKEN_ROTATION":    true,
+		"DISK_SCAN":         true,
 		"LIST_LOG_SOURCES":   true,
 		"LOG_HISTOGRAM":      true,
+		"LIST_LOG_FILES":     true,
 	}
 
 // Intent describes a command sent by the Master.
@@ -82,12 +88,22 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 		result = handleListContainers(wc.ctx, msg)
 	case "RESTART_CONTAINER":
 		result = handleRestartContainer(wc.ctx, msg)
+	case "STOP_CONTAINER":
+		result = handleStopContainer(wc.ctx, msg)
+	case "START_CONTAINER":
+		result = handleStartContainer(wc.ctx, msg)
+	case "DELETE_CONTAINER":
+		result = handleDeleteContainer(wc.ctx, msg)
 	case "LIST_SERVICES":
 		result = handleListServices(wc.ctx, msg)
 	case "STATUS_SERVICE":
 		result = handleStatusService(wc.ctx, msg)
 	case "RESTART_SERVICE":
 		result = handleRestartService(wc.ctx, msg)
+	case "STOP_SERVICE":
+		result = handleStopService(wc.ctx, msg)
+	case "START_SERVICE":
+		result = handleStartService(wc.ctx, msg)
 	case "READ_LOGS_SERVICE":
 		result = handleReadLogsService(wc.ctx, msg)
 	case "UPDATE_WORKER":
@@ -100,6 +116,8 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 		result = handleListLogSources(wc.ctx, msg)
 	case "LOG_HISTOGRAM":
 		result = handleLogHistogram(wc.ctx, msg)
+	case "LIST_LOG_FILES":
+		result = handleListLogFiles(wc.ctx, msg)
 	default:
 		result = IntentResult{
 			IntentID: msg.IntentID,

@@ -6,6 +6,8 @@ systemd services, Docker containers, and logs. Includes ToolExecutor for running
 actions via NodeManager or raising ActionProposals for validation.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time
@@ -15,8 +17,8 @@ import aiosqlite
 from master.core.node_manager import NodeManager
 from master.core.enums import WorkerAction, RiskLevel
 from master.core.action_proposal import ActionProposal
-from master.plugins.systemd_plugin import parse_service_list, parse_service_status
-from master.plugins.docker_plugin import parse_container_list
+from master.plugins.systemd import parse_service_list, parse_service_status
+from master.plugins.docker import parse_container_list
 
 logger = logging.getLogger(__name__)
 

@@ -3,6 +3,7 @@ import { Check, X, ShieldAlert, ChevronDown } from 'lucide-react';
 import { useLocale } from '../../i18n';
 import { usePermission } from '../../hooks/usePermission';
 import { CopyableId } from '../ui/CopyableId';
+import { Badge } from '../primitives/Badge';
 
 interface ProposalInlineProps {
   proposalId: string;
@@ -54,24 +55,34 @@ export const ProposalInline: React.FC<ProposalInlineProps> = ({
     }
   };
 
+  const getRiskBadgeSeverity = () => {
+    switch (risk) {
+      case 'critical': return 'critical' as const;
+      case 'high':
+      case 'medium': return 'warning' as const;
+      case 'low':
+      default: return 'ok' as const;
+    }
+  };
+
   const renderStatusFooter = () => {
     switch (status) {
       case 'APPROVED':
       case 'EXECUTED':
         return (
-          <div className="w-full text-center py-2 bg-severity-ok/10 text-severity-ok border border-severity-ok/25 rounded-md font-bold text-[11px] uppercase tracking-wider">
+          <div className="w-full text-center py-2 bg-severity-ok/10 text-severity-ok border border-severity-ok/25 rounded-md font-bold text-xs uppercase tracking-wider">
             {t('prop.status_executed')}
           </div>
         );
       case 'REJECTED':
         return (
-          <div className="w-full text-center py-2 bg-text-3/10 text-text-2 border border-border rounded-md font-bold text-[11px] uppercase tracking-wider">
+          <div className="w-full text-center py-2 bg-text-3/10 text-text-2 border border-border rounded-md font-bold text-xs uppercase tracking-wider">
             {t('prop.status_rejected')}
           </div>
         );
       case 'FAILED':
         return (
-          <div className="w-full text-center py-2 bg-severity-critical/15 text-severity-critical border border-severity-critical/25 rounded-md font-bold text-[11px] uppercase tracking-wider animate-pulse">
+          <div className="w-full text-center py-2 bg-severity-critical/15 text-severity-critical border border-severity-critical/25 rounded-md font-bold text-xs uppercase tracking-wider animate-pulse">
             {t('prop.status_failed')}
           </div>
         );
@@ -79,7 +90,7 @@ export const ProposalInline: React.FC<ProposalInlineProps> = ({
       default:
         if (!isOperator) {
           return (
-            <div className="w-full text-center py-2 text-text-3 italic font-sans text-[11px]">
+            <div className="w-full text-center py-2 text-text-3 italic font-sans text-xs">
               {t('prop.readonly')}
             </div>
           );
@@ -89,17 +100,17 @@ export const ProposalInline: React.FC<ProposalInlineProps> = ({
             <button
               onClick={() => onReject(proposalId)}
               disabled={loading}
-              className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] font-bold border border-border hover:border-severity-critical/30 hover:bg-severity-critical/5 text-text-2 hover:text-severity-critical rounded-md cursor-pointer transition-all duration-150 disabled:opacity-50"
+              className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-bold border border-border hover:border-severity-critical/30 hover:bg-severity-critical/5 text-text-2 hover:text-severity-critical rounded-md cursor-pointer transition-all duration-150 disabled:opacity-50"
             >
-              <X className="w-3 h-3" />
+              <X className="w-3.5 h-3.5" />
               <span>{t('prop.btn.reject')}</span>
             </button>
             <button
               onClick={() => onApprove(proposalId)}
               disabled={loading}
-              className="cp-smart-action-approve-btn flex-1 flex items-center justify-center gap-1 py-2 text-[11px] rounded-md cursor-pointer transition-all duration-150 disabled:opacity-50"
+              className="cp-smart-action-approve-btn flex-1 flex items-center justify-center gap-1 py-2 text-xs rounded-md cursor-pointer transition-all duration-150 disabled:opacity-50"
             >
-              <Check className="w-3 h-3" />
+              <Check className="w-3.5 h-3.5" />
               <span>{t('prop.btn.approve')}</span>
             </button>
           </div>
@@ -120,28 +131,29 @@ export const ProposalInline: React.FC<ProposalInlineProps> = ({
           <ShieldAlert className="w-3.5 h-3.5" />
           {t('prop.title')}
         </span>
-        <span className="text-[10px] font-extrabold tracking-widest uppercase px-2 py-0.5 border rounded-full bg-surface/40">
-          {t('prop.risk')} {getRiskLabel()}
-        </span>
+        <Badge
+          severity={getRiskBadgeSeverity()}
+          label={`${t('prop.risk')} ${getRiskLabel()}`}
+        />
       </div>
 
       <div className="space-y-1.5 pt-2">
-        <p className="font-mono text-base text-text-1 font-bold tracking-tight">
-          {t('prop.action')} : <span className="text-accent">{action}</span>
+        <p className="font-mono text-sm text-text-1 font-bold tracking-tight break-words [overflow-wrap:anywhere]">
+          {t('prop.action')} : <span className="text-accent break-all">{action}</span>
         </p>
         {target && (
-          <p className="font-mono text-[11px] text-text-2 flex items-center gap-2 flex-wrap">
-            {t('prop.target')} :
+          <div className="font-mono text-xs text-text-2 flex items-center gap-2 flex-wrap [overflow-wrap:anywhere]">
+            <span>{t('prop.target')} :</span>
             <CopyableId value={target} />
-          </p>
+          </div>
         )}
         {reasoning && (
           <details className="pt-2 group" open={!reasoningLong}>
-            <summary className="cursor-pointer text-text-3 text-[10px] uppercase tracking-wider flex items-center gap-1 select-none hover:text-text-2 transition-colors">
+            <summary className="cursor-pointer text-text-3 text-[10px] uppercase tracking-wider flex items-center gap-1 select-none hover:text-text-2 transition-colors font-interface">
               <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-0 rotate-[-90deg]" />
               {t('copilot.proposal_reasoning')}
             </summary>
-            <p className="text-text-2 text-[11.5px] leading-relaxed pt-1.5 font-normal">
+            <p className="text-text-2 text-xs leading-relaxed pt-1.5 font-normal break-words [overflow-wrap:anywhere]">
               {reasoning}
             </p>
           </details>

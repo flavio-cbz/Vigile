@@ -21,7 +21,7 @@ export const LogTimeline: React.FC<LogTimelineProps> = ({
     ? histogram.buckets
     : Array.from({ length: 24 }, (_, i) => ({
         hour: `${String(i).padStart(2, '0')}h`,
-        timestamp: Date.now() / 1000 - (23 - i) * 3600,
+        timestamp: i * 3600,
         info: 0,
         warn: 0,
         error: 0,

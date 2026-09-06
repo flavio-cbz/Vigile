@@ -12,7 +12,7 @@ import {
   ReferenceArea,
 } from 'recharts';
 import { MetricsTooltip } from './MetricsTooltip';
-import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
+import type { StatsPoint, NodeBaseline, AlertRecord } from './types';
 
 const METRIC_THEMES = {
   cpu: { stroke: '#06B6D4' },

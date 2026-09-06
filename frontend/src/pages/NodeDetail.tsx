@@ -124,6 +124,7 @@ export const NodeDetail: React.FC = () => {
     [setSearchParams],
   );
 
+  useEffect(() => {
     if (effectiveTab === 'services' && activePlugins?.includes('systemd')) fetchServicesList();
     if (effectiveTab === 'containers' && activePlugins?.includes('docker')) fetchContainersList();
     if (effectiveTab === 'logs') {

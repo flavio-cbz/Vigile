@@ -5,6 +5,8 @@ Orchestrates the conversational loop between the user, the LLM, the tool executo
 and the worker nodes. Produces a unified SSE stream.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time

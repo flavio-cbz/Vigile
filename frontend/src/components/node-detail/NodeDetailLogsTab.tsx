@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, RefreshCw, Radio } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search } from 'lucide-react';
 import { Spinner } from '../primitives/Spinner';
 import { useLocale } from '../../i18n';
 import type {
@@ -29,10 +29,13 @@ export interface NodeDetailLogsTabProps {
   onSelectHour: (hour: string | null, since?: string, until?: string) => void;
   onServiceChange: (value: string) => void;
   onPathChange: (value: string) => void;
+  onLogsPathChange?: (value: string) => void;
   onLimitChange: (value: number) => void;
   onAutoScrollChange: (value: boolean) => void;
-  onRefresh: () => void;
+  /** @deprecated B5 — polling 15s actif, bouton supprimé. Conservée pour compatibilité parent/tests. */
+  onRefresh?: () => void;
   onRefreshSources?: () => void;
+  logsError?: string | null;
   onRefreshHistogram?: () => void;
 }
 
@@ -53,36 +56,12 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
   onPathChange,
   onLimitChange,
   onAutoScrollChange,
-  onRefresh,
+  logsError = null,
 }) => {
   const { t } = useLocale();
   const [filterQuery, setFilterQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<'all' | 'error' | 'warn' | 'info'>('all');
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
-
-  // Keyboard shortcut '/' to focus filter search input
-  useEffect(() => {
-<<<<<<< HEAD
-    if (logsAutoScroll && consoleRef.current) {
-      const el = consoleRef.current;
-      const rafId = requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-      });
-      return () => cancelAnimationFrame(rafId);
-=======
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        document.getElementById('logs-filter-input')?.focus();
-      }
-      if ((e.key === 's' || e.key === 'S') && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        setIsSourceModalOpen(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   const handleSelectSourceFromModal = (source: LogSourceItemRecord | null) => {
     if (!source) {
@@ -97,7 +76,6 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
     } else if (source.path) {
       onServiceChange('');
       onPathChange(source.path);
->>>>>>> 1e78427 (feat(logs,worker) : refonte onglet logs (timeline, console, modal sources) et release worker v1.1.0)
     }
   };
 
@@ -105,6 +83,12 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
 
   return (
     <div className="space-y-3 font-interface">
+      {logsError && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+          <div className="font-semibold">Erreur de lecture du log</div>
+          <div className="mt-1 font-mono break-all text-red-200/80">{logsError}</div>
+        </div>
+      )}
       {/* 1. 24h Interactive Density Histogram */}
       <LogTimeline
         histogram={logHistogram}
@@ -125,7 +109,6 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
 
       {/* 3. Search & Control Hub Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-surface border border-border rounded-lg text-xs select-none">
-        {/* Search bar with / keyboard shortcut */}
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-3.5 h-3.5 text-text-3 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
@@ -133,12 +116,9 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
             type="text"
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
-            placeholder={t('node_detail.logs_filter_placeholder') || 'Filtrer les messages (ex: OOM, 403, fail2ban)...'}
-            className="w-full bg-surface-2 border border-border rounded-md pl-8 pr-7 py-1.5 text-xs text-text-1 placeholder:text-text-3 font-mono outline-none focus:border-accent"
+            placeholder={t('node_detail.logs_filter_placeholder')}
+            className="w-full bg-surface-2 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-text-1 placeholder:text-text-3 font-mono outline-none focus:border-accent"
           />
-          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-[9.5px] text-text-3 bg-surface border border-border px-1 py-0.2 rounded pointer-events-none">
-            /
-          </span>
         </div>
 
         {/* Severity filter buttons */}
@@ -151,7 +131,7 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
                 : 'text-text-3 hover:text-text-2 border border-transparent'
             }`}
           >
-            {t('common.all') || 'TOUS'}
+            {t('common.all')}
           </button>
           <button
             onClick={() => setSeverityFilter('error')}
@@ -205,7 +185,7 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
               onChange={(e) => onAutoScrollChange(e.target.checked)}
               className="rounded bg-surface-2 border-border accent-accent"
             />
-            <span className="hidden sm:inline">{t('node_detail.logs_auto_scroll') || 'Auto-scroll'}</span>
+            <span className="hidden sm:inline">{t('node_detail.logs_auto_scroll')}</span>
           </label>
 
           {/* Live stream badge */}
@@ -213,15 +193,6 @@ export const NodeDetailLogsTab: React.FC<NodeDetailLogsTabProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span>LIVE</span>
           </div>
-
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="p-1.5 rounded hover:bg-surface-2 text-text-2 hover:text-text-1 cursor-pointer transition-colors"
-            title={t('common.refresh') || 'Actualiser'}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
         </div>
       </div>
 

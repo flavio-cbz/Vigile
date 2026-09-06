@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../hooks/useApi';
 import type { ActionProposal } from '../store/uiStore';
 import { useNodeStore } from '../store/nodeStore';
@@ -10,6 +10,9 @@ import { Spinner } from '../components/primitives/Spinner';
 import { RefreshCw, ChevronDown, Layers } from 'lucide-react';
 import { useLocale } from '../i18n';
 import { ProposalRow } from '../components/proposals/ProposalRow';
+import { sortProposalsByRiskAndDate } from '../utils/proposalSort';
+
+export const PROPOSALS_PAGE_LIMIT = 6;
 
 export const ProposalsPage: React.FC = () => {
   const { t } = useLocale();
@@ -26,6 +29,21 @@ export const ProposalsPage: React.FC = () => {
   const [rejectReason, setRejectReason] = useState('');
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [pendingVisible, setPendingVisible] = useState(PROPOSALS_PAGE_LIMIT);
+  const [inProgressVisible, setInProgressVisible] = useState(PROPOSALS_PAGE_LIMIT);
+  const [historyVisible, setHistoryVisible] = useState(PROPOSALS_PAGE_LIMIT);
+
+  useEffect(() => {
+    setPendingVisible(PROPOSALS_PAGE_LIMIT);
+    setInProgressVisible(PROPOSALS_PAGE_LIMIT);
+    setHistoryVisible(PROPOSALS_PAGE_LIMIT);
+  }, [filterStatus]);
+
+  const pendingList = useMemo(() => sortProposalsByRiskAndDate(proposals.filter((p) => p.status === 'PENDING')), [proposals]);
+  const inProgressList = useMemo(() => sortProposalsByRiskAndDate(proposals.filter((p) => p.status === 'APPROVED')), [proposals]);
+  const historyRaw = useMemo(() => proposals.filter((p) => p.status !== 'PENDING' && p.status !== 'APPROVED'), [proposals]);
+  const displayListRaw = useMemo(() => (filterStatus === 'ALL' ? historyRaw : proposals), [historyRaw, proposals, filterStatus]);
+  const displayList = useMemo(() => sortProposalsByRiskAndDate(displayListRaw), [displayListRaw]);
 
   const statusOptions = [
     { value: 'ALL', label: 'Tous les statuts' },
@@ -173,8 +191,9 @@ export const ProposalsPage: React.FC = () => {
         <div className="space-y-8">
           {/* Zone 1: À valider (PENDING mutantes) */}
           {(() => {
-            const pendingList = proposals.filter((p) => p.status === 'PENDING');
             if (pendingList.length === 0) return null;
+            const visibleList = pendingList.slice(0, pendingVisible);
+            const remaining = pendingList.length - visibleList.length;
             return (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -184,7 +203,7 @@ export const ProposalsPage: React.FC = () => {
                   </h3>
                 </div>
                 <div className="space-y-3">
-                  {pendingList.map((prop) => {
+                  {visibleList.map((prop) => {
                     const node = nodes.find((n) => n.id === prop.node_id);
                     const executing = loadingProposalId === prop.id;
                     return (
@@ -201,14 +220,25 @@ export const ProposalsPage: React.FC = () => {
                     );
                   })}
                 </div>
+                {remaining > 0 && (
+                  <div className="flex justify-center pt-1">
+                    <button
+                      onClick={() => setPendingVisible((c) => Math.min(c + PROPOSALS_PAGE_LIMIT, pendingList.length))}
+                      className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg border border-border bg-surface-2 hover:bg-surface-hover text-text-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 cursor-pointer"
+                    >
+                      {t('proposals.see_more_remaining', { count: remaining })}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })()}
 
           {/* Zone 2: En cours (APPROVED / En cours d'exécution) */}
           {(() => {
-            const inProgressList = proposals.filter((p) => p.status === 'APPROVED');
             if (inProgressList.length === 0) return null;
+            const visibleList = inProgressList.slice(0, inProgressVisible);
+            const remaining = inProgressList.length - visibleList.length;
             return (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -218,7 +248,7 @@ export const ProposalsPage: React.FC = () => {
                   </h3>
                 </div>
                 <div className="space-y-3">
-                  {inProgressList.map((prop) => {
+                  {visibleList.map((prop) => {
                     const node = nodes.find((n) => n.id === prop.node_id);
                     const executing = loadingProposalId === prop.id;
                     return (
@@ -235,15 +265,25 @@ export const ProposalsPage: React.FC = () => {
                     );
                   })}
                 </div>
+                {remaining > 0 && (
+                  <div className="flex justify-center pt-1">
+                    <button
+                      onClick={() => setInProgressVisible((c) => Math.min(c + PROPOSALS_PAGE_LIMIT, inProgressList.length))}
+                      className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg border border-border bg-surface-2 hover:bg-surface-hover text-text-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 cursor-pointer"
+                    >
+                      {t('proposals.see_more_remaining', { count: remaining })}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })()}
 
           {/* Zone 3: Historique & Diagnostics */}
           {(() => {
-            const historyList = proposals.filter((p) => p.status !== 'PENDING' && p.status !== 'APPROVED');
-            if (historyList.length === 0 && filterStatus !== 'ALL') return null;
-            const displayList = filterStatus === 'ALL' ? historyList : proposals;
+            if (displayList.length === 0 && filterStatus !== 'ALL') return null;
+            const visibleList = displayList.slice(0, historyVisible);
+            const remaining = displayList.length - visibleList.length;
             return (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -252,7 +292,7 @@ export const ProposalsPage: React.FC = () => {
                   </h3>
                 </div>
                 <div className="space-y-3">
-                  {displayList.map((prop) => {
+                  {visibleList.map((prop) => {
                     const node = nodes.find((n) => n.id === prop.node_id);
                     const executing = loadingProposalId === prop.id;
                     return (
@@ -269,6 +309,16 @@ export const ProposalsPage: React.FC = () => {
                     );
                   })}
                 </div>
+                {remaining > 0 && (
+                  <div className="flex justify-center pt-1">
+                    <button
+                      onClick={() => setHistoryVisible((c) => Math.min(c + PROPOSALS_PAGE_LIMIT, displayList.length))}
+                      className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg border border-border bg-surface-2 hover:bg-surface-hover text-text-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 cursor-pointer"
+                    >
+                      {t('proposals.see_more_remaining', { count: remaining })}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })()}
