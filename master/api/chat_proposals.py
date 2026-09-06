@@ -27,8 +27,15 @@ from master.core.action_proposal import ActionProposal
 from master.core.audit import AuditAction, log_action
 from master.core.node_manager import NodeManager
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
+from master.plugins.systemd import is_protected_service
 
 logger = logging.getLogger(__name__)
+
+_DESTRUCTIVE_ACTIONS = frozenset({
+    "DELETE_CONTAINER",
+    "STOP_CONTAINER",
+    "STOP_SERVICE",
+})
 
 
 @router.get(
@@ -110,6 +117,24 @@ async def approve_proposal(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Proposal is {prop['status']}, not PENDING",
             )
+        action = prop.get("action", "")
+        if action in _DESTRUCTIVE_ACTIONS and claims.get("role") != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"L'approbation de l'action '{action}' est strictement réservée aux administrateurs.",
+            )
+        params = prop.get("params") or {}
+        target_service = (
+            params.get("service")
+            or params.get("service_name")
+            or (params.get("target") if "SERVICE" in action else "")
+            or ""
+        )
+        if is_protected_service(target_service):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Le service '{target_service}' est protégé et ne peut pas être modifié.",
+            )
         updates = {
             "status": "EXECUTED",
             "approved_by": claims["sub"],
@@ -136,6 +161,54 @@ async def approve_proposal(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Proposal is {proposal.status}, not PENDING",
+        )
+
+    # Verrouillage RBAC sur actions destructrices
+    user_role = claims.get("role")
+    if proposal.action in _DESTRUCTIVE_ACTIONS and user_role != "admin":
+        if db is not None:
+            await log_action(
+                db,
+                user_id=claims.get("sub", "unknown"),
+                action=AuditAction.SECURITY_INCIDENT,
+                node_id=proposal.node_id,
+                details={
+                    "reason": "unauthorized_role_attempt",
+                    "required_role": "admin",
+                    "user_role": user_role,
+                    "action": proposal.action,
+                    "proposal_id": proposal.id,
+                },
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"L'approbation de l'action '{proposal.action}' est strictement réservée aux administrateurs.",
+        )
+
+    # Blocage si la cible est un service protégé
+    target_service = (
+        proposal.params.get("service")
+        or proposal.params.get("service_name")
+        or (proposal.params.get("target") if "SERVICE" in proposal.action else "")
+        or ""
+    )
+    if is_protected_service(target_service):
+        if db is not None:
+            await log_action(
+                db,
+                user_id=claims.get("sub", "unknown"),
+                action=AuditAction.SECURITY_INCIDENT,
+                node_id=proposal.node_id,
+                details={
+                    "reason": "attempt_to_target_protected_service",
+                    "action": proposal.action,
+                    "service": target_service,
+                    "proposal_id": proposal.id,
+                },
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Le service '{target_service}' est protégé et ne peut pas être modifié.",
         )
 
     proposal.approve(claims["sub"])

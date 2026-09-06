@@ -4,8 +4,25 @@
     "version": "1.0.0",
     "author": "Vigile",
     "trusted": true,
-    "description": "Declare, inspect and restart systemd services across worker nodes. Category: system. Copilot actions: LIST_SERVICES, STATUS_SERVICE, RESTART_SERVICE (all LOW risk).",
+    "description": "Declare, inspect, start, stop and restart systemd services across worker nodes.",
     "hooks": ["get_supported_actions"],
+    "copilot_actions": {
+        "LIST_SERVICES": {
+            "risk_level": "LOW"
+        },
+        "STATUS_SERVICE": {
+            "risk_level": "LOW"
+        },
+        "START_SERVICE": {
+            "risk_level": "LOW"
+        },
+        "RESTART_SERVICE": {
+            "risk_level": "LOW"
+        },
+        "STOP_SERVICE": {
+            "risk_level": "HIGH"
+        }
+    },
     "pages": [
         {
             "id": "services",
@@ -21,6 +38,12 @@
             "path": "/services",
             "method": "GET",
             "handler": "list_services_route",
+            "roles": ["admin", "operator"]
+        },
+        {
+            "path": "/services/{service_name}/{action}",
+            "method": "POST",
+            "handler": "service_action_route",
             "roles": ["admin", "operator"]
         }
     ]

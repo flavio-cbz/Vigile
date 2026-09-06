@@ -35,7 +35,7 @@ export const ConfirmDeleteModal = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const matches = value === confirmWord;
+  const matches = confirmWord.trim().length > 0 && value.trim() === confirmWord.trim();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

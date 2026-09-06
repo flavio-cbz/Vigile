@@ -11,8 +11,16 @@
     "LIST_CONTAINERS": {
       "risk_level": "LOW"
     },
+    "START_CONTAINER": {
+      "risk_level": "LOW",
+      "target_resolver": "container_target"
+    },
     "RESTART_CONTAINER": {
       "risk_level": "MEDIUM",
+      "target_resolver": "container_target"
+    },
+    "STOP_CONTAINER": {
+      "risk_level": "HIGH",
       "target_resolver": "container_target"
     }
   },
@@ -45,6 +53,12 @@
       "path": "/containers",
       "method": "GET",
       "handler": "list_containers_route",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/containers/{container_id}/{action}",
+      "method": "POST",
+      "handler": "container_action_route",
       "roles": ["admin", "operator"]
     }
   ]

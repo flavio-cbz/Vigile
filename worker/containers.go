@@ -9,9 +9,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var containerIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
 const dockerSocket = "/var/run/docker.sock"
 
@@ -162,10 +165,147 @@ func handleRestartContainer(ctx context.Context, intent Intent) IntentResult {
 	if containerID == "" {
 		return IntentResult{Success: false, Error: "container_id parameter required"}
 	}
+	if !containerIDRegex.MatchString(containerID) {
+		return IntentResult{Success: false, Error: fmt.Sprintf("invalid container_id format: %q", containerID)}
+	}
 
 	_, err := dockerAPI(ctx, "POST", fmt.Sprintf("/v1.45/containers/%s/restart", containerID), nil)
 	if err != nil {
 		return IntentResult{Success: false, Error: err.Error()}
 	}
 	return IntentResult{Success: true, Output: fmt.Sprintf("Container %s restarted", containerID)}
+}
+
+func handleStopContainer(ctx context.Context, intent Intent) IntentResult {
+	containerID := getParamString(intent.Params, "container_id", "")
+	approvalID := getParamString(intent.Params, "approval_id", "")
+	slog.Info("executing action",
+		"action", "STOP_CONTAINER",
+		"container_id", containerID,
+		"node_id", nodeID,
+		"requested_by", intent.RequestedBy,
+		"approval_id", approvalID,
+		"intent_id", intent.IntentID)
+
+	if containerID == "" {
+		return IntentResult{Success: false, Error: "container_id parameter required"}
+	}
+	if !containerIDRegex.MatchString(containerID) {
+		return IntentResult{Success: false, Error: fmt.Sprintf("invalid container_id format: %q", containerID)}
+	}
+
+	_, err := dockerAPI(ctx, "POST", fmt.Sprintf("/v1.45/containers/%s/stop?t=30", containerID), nil)
+	if err != nil {
+		return IntentResult{Success: false, Error: err.Error()}
+	}
+	return IntentResult{Success: true, Output: fmt.Sprintf("Container %s stopped", containerID)}
+}
+
+func handleStartContainer(ctx context.Context, intent Intent) IntentResult {
+	containerID := getParamString(intent.Params, "container_id", "")
+	approvalID := getParamString(intent.Params, "approval_id", "")
+	slog.Info("executing action",
+		"action", "START_CONTAINER",
+		"container_id", containerID,
+		"node_id", nodeID,
+		"requested_by", intent.RequestedBy,
+		"approval_id", approvalID,
+		"intent_id", intent.IntentID)
+
+	if containerID == "" {
+		return IntentResult{Success: false, Error: "container_id parameter required"}
+	}
+	if !containerIDRegex.MatchString(containerID) {
+		return IntentResult{Success: false, Error: fmt.Sprintf("invalid container_id format: %q", containerID)}
+	}
+
+	_, err := dockerAPI(ctx, "POST", fmt.Sprintf("/v1.45/containers/%s/start", containerID), nil)
+	if err != nil {
+		return IntentResult{Success: false, Error: err.Error()}
+	}
+	return IntentResult{Success: true, Output: fmt.Sprintf("Container %s started", containerID)}
+}
+
+type containerInspectState struct {
+	Status  string `json:"Status"`
+	Running bool   `json:"Running"`
+}
+
+type containerInspectResponse struct {
+	ID    string                `json:"Id"`
+	Name  string                `json:"Name"`
+	State containerInspectState `json:"State"`
+}
+
+func handleDeleteContainer(ctx context.Context, intent Intent) IntentResult {
+	containerID := getParamString(intent.Params, "container_id", "")
+	containerName := getParamString(intent.Params, "container_name", "")
+	approvalID := getParamString(intent.Params, "approval_id", "")
+	slog.Info("executing action",
+		"action", "DELETE_CONTAINER",
+		"container_id", containerID,
+		"container_name", containerName,
+		"node_id", nodeID,
+		"requested_by", intent.RequestedBy,
+		"approval_id", approvalID,
+		"intent_id", intent.IntentID)
+
+	if containerID == "" {
+		return IntentResult{Success: false, Error: "container_id parameter required"}
+	}
+	if !containerIDRegex.MatchString(containerID) {
+		return IntentResult{Success: false, Error: fmt.Sprintf("invalid container_id format: %q", containerID)}
+	}
+
+	cleanParamName := strings.TrimPrefix(strings.TrimSpace(containerName), "/")
+	if cleanParamName == "" {
+		return IntentResult{Success: false, Error: "container_name parameter required for delete"}
+	}
+
+	// Step 1: Inspect container to verify identity and non-running state
+	data, err := dockerAPI(ctx, "GET", fmt.Sprintf("/v1.45/containers/%s/json", containerID), nil)
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("inspect container failed: %v", err)}
+	}
+
+	var inspect containerInspectResponse
+	if err := json.Unmarshal(data, &inspect); err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("parse inspect response failed: %v", err)}
+	}
+
+	// Check container_id prefix (inspect.ID is 64 chars, containerID may be short prefix or full ID)
+	if !strings.HasPrefix(inspect.ID, containerID) {
+		return IntentResult{Success: false, Error: fmt.Sprintf("container id mismatch: inspect ID %q does not match %q", inspect.ID, containerID)}
+	}
+
+	// Check container_name concordance (both sides stripped of leading slash)
+	cleanInspectName := strings.TrimPrefix(inspect.Name, "/")
+	if cleanInspectName != cleanParamName {
+		return IntentResult{
+			Success: false,
+			Error:   fmt.Sprintf("container name mismatch: expected %q, got %q", cleanParamName, cleanInspectName),
+		}
+	}
+
+	// Check state: positive whitelist (only exited, dead, created allowed)
+	allowedStates := map[string]bool{
+		"exited":  true,
+		"dead":    true,
+		"created": true,
+	}
+	statusLower := strings.ToLower(inspect.State.Status)
+	if inspect.State.Running || !allowedStates[statusLower] {
+		return IntentResult{
+			Success: false,
+			Error:   fmt.Sprintf("cannot delete container %s in non-terminal state (status: %s, running: %v)", containerID, inspect.State.Status, inspect.State.Running),
+		}
+	}
+
+	// Step 2: Delete container with hardcoded v=false&force=false (fail-closed against running containers)
+	_, err = dockerAPI(ctx, "DELETE", fmt.Sprintf("/v1.45/containers/%s?v=false&force=false", containerID), nil)
+	if err != nil {
+		return IntentResult{Success: false, Error: fmt.Sprintf("delete container failed: %v", err)}
+	}
+
+	return IntentResult{Success: true, Output: fmt.Sprintf("Container %s (%s) deleted", containerID, cleanInspectName)}
 }
