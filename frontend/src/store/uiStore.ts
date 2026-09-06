@@ -7,6 +7,7 @@ export interface InsightItem {
   icon: string;
   headline: string;
   detail: string;
+  confidence?: 'none' | 'low' | 'medium' | 'high';
   raw?: Record<string, unknown>;
 }
 
@@ -30,10 +31,13 @@ export interface ActionProposal {
 }
 
 export type CopilotContext = {
-  trigger: 'proposal' | 'insight' | 'diagnostic' | 'manual';
+  trigger: 'proposal' | 'insight' | 'diagnostic' | 'error' | 'action' | 'manual';
   node_id?: string;
+  /** alias camelCase for callers that already use nodeId — normalized in CopilotPanel */
+  nodeId?: string;
   insight?: InsightItem;
   proposal?: ActionProposal;
+  errorContext?: { service: string; logExcerpt: string };
 };
 
 interface UIState {

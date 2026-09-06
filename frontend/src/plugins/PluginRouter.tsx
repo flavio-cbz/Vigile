@@ -53,9 +53,9 @@ const PluginWrapper: React.FC<PluginWrapperProps> = ({ page }) => {
 
   if (!Component) {
     return (
-      <div className="flex flex-col items-center justify-center h-[50vh] text-center p-6 bg-zinc-900/40 rounded-xl border border-zinc-800">
-        <h3 className="text-xl font-bold text-zinc-300 mb-2">Composant non compilé</h3>
-        <p className="text-zinc-500 max-w-md">
+      <div className="flex flex-col items-center justify-center h-[50vh] text-center p-6 bg-surface/40 rounded-xl border border-border-strong/40">
+        <h3 className="text-xl font-bold text-text-1 mb-2">Composant non compilé</h3>
+        <p className="text-text-3 max-w-md">
           Le composant <code>{page.component}</code> du plugin <code>{page.plugin_id}</code> n'est pas disponible dans cette version du frontend.
         </p>
       </div>
@@ -65,7 +65,7 @@ const PluginWrapper: React.FC<PluginWrapperProps> = ({ page }) => {
   if (!apiInstance) {
     return (
       <div className="flex items-center justify-center h-[50vh]">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-orange-500 border-zinc-800"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent border-border-strong"></div>
       </div>
     );
   }
@@ -74,7 +74,7 @@ const PluginWrapper: React.FC<PluginWrapperProps> = ({ page }) => {
     <Suspense
       fallback={
         <div className="flex items-center justify-center h-[50vh]">
-          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-orange-500 border-zinc-800"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent border-border-strong"></div>
         </div>
       }
     >
@@ -84,29 +84,35 @@ const PluginWrapper: React.FC<PluginWrapperProps> = ({ page }) => {
 };
 
 export const PluginRouter: React.FC = () => {
-  const { pages, fetchPluginPages, loading } = usePluginStore();
+  const { pages, fetchPluginPages, loading, activePluginIds, fetchActivePlugins } = usePluginStore();
   const { user } = useAuthStore();
   const userRole = user?.role || 'viewer';
 
-  // Load active plugin pages on mount
+  // Charge les pages ET l'état actif des plugins (flag de routage) au montage
   useEffect(() => {
     fetchPluginPages();
-  }, [fetchPluginPages]);
+    fetchActivePlugins();
+  }, [fetchPluginPages, fetchActivePlugins]);
 
   const allowedPages = React.useMemo(() => {
     const roleIndex = { viewer: 0, operator: 1, admin: 2 } as Record<string, number>;
     const userLevel = roleIndex[userRole] ?? 0;
     return pages.filter((page) => {
+      // Flag de routage : la page n'est routable que si son plugin est actif
+      // (enabled && loaded côté backend). Gate ROUTING uniquement — l'état du
+      // registre backend n'est jamais muté ici. Fallback = DEFAULT_ACTIVE_PLUGINS
+      // tant que /api/admin/plugins n'a pas répondu (routes toujours présentes).
+      if (!activePluginIds.includes(page.plugin_id)) return false;
       const pageRoles = page.roles || ['viewer'];
       const pageLevel = Math.min(...pageRoles.map((r) => roleIndex[r] ?? 0));
       return userLevel >= pageLevel;
     });
-  }, [pages, userRole]);
+  }, [pages, userRole, activePluginIds]);
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-orange-500 border-zinc-800"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-accent border-border-strong"></div>
       </div>
     );
   }

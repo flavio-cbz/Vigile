@@ -26,7 +26,7 @@ export function ExternalAuthPopup({ context, config, title }: ExternalAuthPopupP
       cleanup();
       if (popupRef.current && !popupRef.current.closed) {
         popupRef.current.close();
-        void context.api.fetch(config.cancel_command, { method: 'POST' }).catch(() => {});
+        void Promise.resolve(context.api.fetch(config.cancel_command, { method: 'POST' } as never)).catch(() => {});
       }
       popupRef.current = null;
     };
@@ -39,7 +39,7 @@ export function ExternalAuthPopup({ context, config, title }: ExternalAuthPopupP
     }
     popupRef.current = null;
     setState('cancelled');
-    void context.api.fetch(config.cancel_command, { method: 'POST' }).catch(() => {});
+    void Promise.resolve(context.api.fetch(config.cancel_command, { method: 'POST' } as never)).catch(() => {});
   }, [cleanup, context.api, config.cancel_command]);
 
   const startWindowCheck = useCallback(() => {

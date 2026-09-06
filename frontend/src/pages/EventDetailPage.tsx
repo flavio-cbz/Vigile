@@ -5,6 +5,7 @@ import { api } from '../hooks/useApi';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { useLocale } from '../i18n';
 import { Spinner } from '../components/primitives/Spinner';
+import { PageHeader } from '../components/blocks/PageHeader';
 import type { AlertRecord } from '../components/node-detail/types';
 
 const ALERT_NAME_LABELS: Record<string, { fr: string; en: string }> = {
@@ -102,7 +103,7 @@ export const EventDetailPage: React.FC = () => {
           <ArrowLeft className="w-4 h-4" />
           {localT('RETOUR', 'BACK')}
         </button>
-        <div className="p-6 border border-red-500/30 bg-red-500/10 rounded-2xl text-severity-critical">
+        <div className="p-6 border border-severity-critical/30 bg-severity-critical/10 rounded-2xl text-severity-critical">
           <p className="font-mono text-sm">{error || localT('Événement non trouvé', 'Event not found')}</p>
         </div>
       </div>
@@ -114,11 +115,11 @@ export const EventDetailPage: React.FC = () => {
   const severityBadge = (sev: string) => {
     switch (sev) {
       case 'critical':
-        return 'bg-red-500/10 text-severity-critical border-red-500/30';
+        return 'bg-severity-critical/10 text-severity-critical border-severity-critical/30';
       case 'warning':
-        return 'bg-amber-500/10 text-severity-warning border-amber-500/30';
+        return 'bg-severity-warning/10 text-severity-warning border-severity-warning/30';
       default:
-        return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
+        return 'bg-severity-info/10 text-severity-info border-severity-info/30';
     }
   };
 
@@ -140,35 +141,26 @@ export const EventDetailPage: React.FC = () => {
   const durationText = durationSec < 60 ? `${Math.round(durationSec)}s` : `${Math.round(durationSec / 60)} min`;
 
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6 animate-fade-in">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
       {/* Header with Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
-        <div>
-          <button
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-2 text-text-3 hover:text-text-1 text-xs font-mono transition-colors mb-2 cursor-pointer"
+      <PageHeader
+        back={{ label: localT('RETOUR', 'BACK'), onClick: () => navigate(-1) }}
+        title={formatAlertName(alert.alert_name)}
+        badge={
+          <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded border ${severityBadge(alert.severity)}`}>
+            {alert.severity}
+          </span>
+        }
+        actions={
+          <Link
+            to={`/nodes/${alert.node_id}`}
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-border-strong/50 bg-surface-2 hover:bg-surface-hover/80 text-text-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4" />
-            {localT('RETOUR', 'BACK')}
-          </button>
-          <div className="flex items-center gap-3">
-            <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded border ${severityBadge(alert.severity)}`}>
-              {alert.severity}
-            </span>
-            <h1 className="font-interface font-black text-xl uppercase tracking-wider text-text-1">
-              {formatAlertName(alert.alert_name)}
-            </h1>
-          </div>
-        </div>
-
-        <Link
-          to={`/nodes/${alert.node_id}`}
-          className="flex items-center gap-2 px-3 py-1.5 border border-border hover:border-accent rounded-lg text-xs font-mono text-text-2 hover:text-accent transition-all self-start sm:self-auto"
-        >
-          <Server className="w-3.5 h-3.5" />
-          {localT('VOIR LE NŒUD', 'VIEW NODE')} ({alert.node_id.slice(0, 8)})
-        </Link>
-      </div>
+            <Server className="w-3.5 h-3.5" />
+            {localT('VOIR LE NŒUD', 'VIEW NODE')} ({alert.node_id.slice(0, 8)})
+          </Link>
+        }
+      />
 
       {/* Main Details Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -240,14 +232,14 @@ export const EventDetailPage: React.FC = () => {
 
       {/* Processus suspect identifié */}
       {alert.details?.top_process && (
-        <div className="p-5 border border-amber-500/30 rounded-2xl bg-amber-500/10 space-y-3">
-          <div className="text-[10px] font-interface font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-amber-400" />
+        <div className="p-5 border border-severity-warning/30 rounded-2xl bg-severity-warning/10 space-y-3">
+          <div className="text-[10px] font-interface font-bold uppercase tracking-wider text-severity-warning flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-severity-warning" />
             {localT('PROCESSUS SUSPECT ET CONSOMMATEUR IDENTIFIÉ', 'SUSPECT RESOURCE-HEAVY PROCESS IDENTIFIED')}
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-surface/60 border border-amber-500/20 rounded-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-surface/60 border border-severity-warning/20 rounded-xl">
             <div className="space-y-0.5">
-              <span className="font-mono text-base font-black text-amber-200">
+              <span className="font-mono text-base font-black text-severity-warning">
                 {alert.details.top_process.name}
               </span>
               <div className="text-xs font-mono text-text-3">
@@ -256,7 +248,7 @@ export const EventDetailPage: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-4 font-mono text-xs">
-              <div className="px-2.5 py-1 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold">
+              <div className="px-2.5 py-1 rounded bg-severity-warning/20 border border-severity-warning/30 text-severity-warning font-bold">
                 {typeof alert.details.top_process.cpu_percent === 'number'
                   ? `${alert.details.top_process.cpu_percent.toFixed(1)}% CPU`
                   : '—'}
@@ -271,14 +263,14 @@ export const EventDetailPage: React.FC = () => {
 
           {alert.details.top_processes && alert.details.top_processes.length > 1 && (
             <div className="space-y-1.5 pt-1">
-              <div className="text-[9px] font-interface font-bold uppercase tracking-wider text-amber-400/80">
+              <div className="text-[9px] font-interface font-bold uppercase tracking-wider text-severity-warning/80">
                 {localT('AUTRES PROCESSUS CONSOMMATEURS AU MOMENT DE L\'ÉVÉNEMENT :', 'OTHER HEAVY PROCESSES AT EVENT TIME:')}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {alert.details.top_processes.slice(1, 5).map((p, idx) => (
                   <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-surface/40 border border-border/50 font-mono text-xs">
                     <span className="truncate max-w-[140px] text-text-2">{p.name} (PID {p.pid})</span>
-                    <span className="font-bold text-amber-300">
+                    <span className="font-bold text-severity-warning">
                       {typeof p.cpu_percent === 'number' ? `${p.cpu_percent.toFixed(1)}%` : '—'}
                     </span>
                   </div>

@@ -2,17 +2,26 @@ import React from 'react';
 import { FileCode, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { PluginConfigForm } from '../../plugins/PluginConfigForm';
-import type { PluginInfo } from '../../pages/PluginsPage';
+import { KillSwitchBadge } from './KillSwitchBadge';
+import { PluginDetailKillSwitch } from './PluginDetailKillSwitch';
+import type { PluginInfo } from '../../hooks/usePluginsData';
 
 interface PluginDetailModalProps {
   plugin: PluginInfo;
   onClose: () => void;
   onSaveConfig: (pluginId: string, configData: Record<string, unknown>) => Promise<void>;
+  isAdmin: boolean;
+  disabling: boolean;
+  enabling: boolean;
+  onDisable: (pluginId: string, hard: boolean, reason: string) => Promise<void>;
+  onEnable: (pluginId: string) => Promise<void>;
+  onFetchPlugins: () => Promise<void>;
   t: (key: string, params?: Record<string, string>) => string;
 }
 
 export const PluginDetailModal: React.FC<PluginDetailModalProps> = ({
-  plugin, onClose, onSaveConfig, t,
+  plugin, onClose, onSaveConfig, isAdmin, disabling, enabling,
+  onDisable, onEnable, onFetchPlugins, t,
 }) => {
   return (
     <div
@@ -49,12 +58,15 @@ export const PluginDetailModal: React.FC<PluginDetailModalProps> = ({
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-surface-3 text-text-3 hover:text-text-1 transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <KillSwitchBadge killSwitch={plugin.kill_switch} t={t} />
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-surface-3 text-text-3 hover:text-text-1 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-6 space-y-5 max-h-[60vh] overflow-y-auto">
@@ -99,6 +111,19 @@ export const PluginDetailModal: React.FC<PluginDetailModalProps> = ({
                 {plugin.module || plugin.path}
               </code>
             </div>
+          )}
+
+          {isAdmin && (
+            <PluginDetailKillSwitch
+              plugin={plugin}
+              isAdmin={isAdmin}
+              disabling={disabling}
+              enabling={enabling}
+              onDisable={onDisable}
+              onEnable={onEnable}
+              onFetchPlugins={onFetchPlugins}
+              t={t}
+            />
           )}
         </div>
 

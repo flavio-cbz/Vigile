@@ -73,7 +73,7 @@ const ObservationCard: React.FC<{ meta: InsightsMeta }> = ({ meta }) => {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-interface font-bold text-xs uppercase tracking-wider text-text-1">
-                {t('insights.observation_window', { defaultValue: "Période d'observation" })}
+                {t('insights.observation_window')}
               </span>
               <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25">
                 Maturité {readyCount}/4
@@ -163,7 +163,7 @@ const OfflineInsightCard: React.FC<{ insight: InsightRecord; nodeId: string | un
       </div>
 
       <div className="my-2.5 flex-1 flex flex-col justify-center min-w-0">
-        <InsightText size="sm" className="block text-text-1 leading-snug font-serif !text-[16px] md:!text-[17px] line-clamp-2 group-hover:text-text-2 transition-colors" title={headline}>
+        <InsightText size="sm" className="block text-text-1 leading-snug line-clamp-2 group-hover:text-text-2 transition-colors" title={headline}>
           {headline}
         </InsightText>
         <p className={`text-text-3 text-[10px] font-sans mt-1 leading-relaxed ${isExpanded ? '' : 'line-clamp-2'}`} title={detail}>
@@ -221,7 +221,7 @@ const StandardInsightCard: React.FC<{ insight: InsightRecord; nodeId: string | u
       </div>
 
       <div className="my-2.5 flex-1 flex flex-col justify-center min-w-0">
-        <InsightText size="sm" className="block text-text-1 leading-snug font-serif !text-[16px] md:!text-[17px] line-clamp-2" title={insight.headline}>
+        <InsightText size="sm" className="block text-text-1 leading-snug line-clamp-2" title={insight.headline}>
           {insight.headline}
         </InsightText>
         <p className="text-text-3 text-[10px] font-sans mt-1 line-clamp-2 leading-relaxed" title={insight.detail}>
@@ -269,16 +269,16 @@ export const NodeDetailInsightsTab: React.FC<{
       await api(`/api/nodes/${nodeId}/profile/regenerate`, { method: 'POST', timeoutMs: 60000 });
       useToastStore.getState().addToast(
         'success',
-        t('common.success', { defaultValue: 'Succès' }),
-        'Analyse et profil LLM recalculés avec succès',
+        t('common.success'),
+        t('insights.toast.recalculate_success_detail'),
       );
       onRefresh();
     } catch (err) {
       console.error('Failed to recalculate profile:', err);
       useToastStore.getState().addToast(
         'error',
-        t('common.error', { defaultValue: 'Erreur' }),
-        'Échec du recalcul de l\'analyse',
+        t('common.error'),
+        t('insights.toast.recalculate_error_detail'),
       );
     } finally {
       setIsRecalculating(false);

@@ -34,19 +34,19 @@ export const CopilotPanel: React.FC = () => {
   const abortStreaming = useChatStore(s => s.abortStreaming);
   const pendingProposalsCount = useChatStore(s => s.pendingProposalsCount);
 
+  // P0-1: robust nodeId with fallback for both snake/camel + activeMeta/activeSession (A1)
+  const nodeId = activeMeta?.nodeId ?? (activeSession as unknown as { node_id?: string; nodeId?: string })?.node_id ?? (activeSession as unknown as { nodeId?: string })?.nodeId ?? copilotContext?.node_id ?? (copilotContext as unknown as { nodeId?: string })?.nodeId ?? null;
+  const targetNode = nodes.find((n) => n.id === nodeId);
+
   const [loadingSession, setLoadingSession] = useState(false);
   const [loadingProposalId, setLoadingProposalId] = useState<string | null>(null);
   const proposalRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
-  const nodeId = copilotContext?.node_id || null;
-  const targetNode = nodes.find((n) => n.id === nodeId);
-
-  // Click-outside & Escape-to-close behave as before.
+  // Click-outside & Escape-to-close (restored from HEAD — P0-4)
   useEffect(() => {
     if (!copilotOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      // Ignore clicks within the panel itself or any element labeled data-copilot-anchor.
       if (target.closest('[data-copilot-root]') || target.closest('[data-copilot-anchor]')) return;
       closeCopilot();
     };
@@ -68,7 +68,8 @@ export const CopilotPanel: React.FC = () => {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [copilotOpen, closeCopilot]);
 
-  // Abort streaming & reset trigger state on panel close.
+  // Abort streaming & reset trigger state on panel close (P0-4)
+  const triggerProcessedRef = useRef(false);
   useEffect(() => {
     if (!copilotOpen) {
       triggerProcessedRef.current = false;
@@ -76,7 +77,7 @@ export const CopilotPanel: React.FC = () => {
     }
   }, [copilotOpen]);
 
-  // Session bootstrap on open.
+  // Session bootstrap on open (restored HEAD — P0-4)
   useEffect(() => {
     if (!copilotOpen) return;
 
@@ -103,24 +104,24 @@ export const CopilotPanel: React.FC = () => {
     setupSession();
   }, [copilotOpen, nodeId, fetchSessions, selectSession, createSession, targetNode?.name, fetchSuggestions, t]);
 
-  // Track whether the diagnostic/proposal trigger has already been processed
-  // for the current panel open, to avoid infinite re-triggering when
-  // fetchSessions (called by sendMessage's finally block) updates activeSession.
-  const triggerProcessedRef = useRef(false);
-
-  // Diagnostic / proposal trigger fan-out (same as original behaviour).
-  // Runs once per copilotContext set, and is immune to re-triggering when
-  // activeSession or isStreaming changes (e.g., after fetchSessions in sendMessage's finally).
+  // Diagnostic / error / proposal trigger fan-out — covers HEAD + working tree (P0-3)
+  // Runs once per copilotContext set, immune to re-triggering when fetchSessions updates activeSession.
   useEffect(() => {
     if (!copilotOpen || !copilotContext || triggerProcessedRef.current) return;
 
-    // Mark as processed before conditional logic to prevent re-triggering
-    // in React StrictMode's double-invocation.
     triggerProcessedRef.current = true; // eslint-disable-line react-hooks/immutability
 
     if (copilotContext.trigger === 'diagnostic' && copilotContext.insight) {
       const insight = copilotContext.insight;
       const prompt = `Fais un diagnostic détaillé de cette anomalie : "${insight.headline}". Détails : "${insight.detail}"`;
+      sendMessage(prompt, nodeId);
+    } else if ((copilotContext.trigger === 'insight' || copilotContext.trigger === 'action') && copilotContext.insight) {
+      const insight = copilotContext.insight;
+      const prompt = `Fais un diagnostic détaillé de cette anomalie : "${insight.headline}". Détails : "${insight.detail}"`;
+      sendMessage(prompt, nodeId);
+    } else if (copilotContext.trigger === 'error' && copilotContext.errorContext) {
+      const { service, logExcerpt } = copilotContext.errorContext;
+      const prompt = `Erreur détectée sur ${service || 'le serveur'}. Extrait : "${logExcerpt}". Peux-tu analyser et suggérer un correctif ?`;
       sendMessage(prompt, nodeId);
     } else if (copilotContext.trigger === 'proposal' && copilotContext.proposal) {
       const proposal = copilotContext.proposal;
@@ -132,7 +133,7 @@ export const CopilotPanel: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (messagesEndRef.current?.scrollIntoView) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [activeSession?.history, isStreaming, activeSteps, activeTools]);
@@ -189,7 +190,7 @@ export const CopilotPanel: React.FC = () => {
     const id = pending.proposal.id;
     const el = proposalRefs.current.get(id);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
       // Re-trigger CSS animation by removing+adding the class.
       el.classList.remove('cp-highlight-ring');
       void el.offsetWidth;
@@ -250,23 +251,23 @@ export const CopilotPanel: React.FC = () => {
               <span>{t('copilot.initializing')}</span>
             </div>
           ) : history.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-text-3 gap-3 my-auto select-none">
+            <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 text-center text-text-3 gap-3 my-auto select-none">
               <div className="w-10 h-10 rounded-lg bg-accent-info/15 border border-accent-info/25 flex items-center justify-center">
                 <MessageSquare className="w-5 h-5 text-accent-info-strong animate-pulse-subtle" />
               </div>
-              <span className="font-bold text-[11px] tracking-wider uppercase font-interface text-text-2">
+              <span className="font-bold text-xs tracking-wider uppercase font-interface text-text-2">
                 {t('copilot.empty_title')}
               </span>
-              <span className="text-[11.5px] max-w-[260px] leading-relaxed font-normal opacity-80">
+              <span className="text-xs w-full max-w-sm leading-relaxed font-normal opacity-80 break-words [overflow-wrap:anywhere]">
                 {t('copilot.empty_description')}
               </span>
               {suggestions.length > 0 && (
-                <div className="flex flex-col gap-1.5 mt-2 w-full max-w-[260px]">
-                  {suggestions.slice(0, 3).map((sug, idx) => (
+                <div className="flex flex-col gap-1.5 mt-2 w-full max-w-sm">
+                  {suggestions.slice(0, 4).map((sug, idx) => (
                     <button
-                      key={idx}
+                      key={`${sug}-${idx}`}
                       onClick={() => handleSendMessage(sug)}
-                      className="w-full text-left px-3 py-2 bg-surface-2/40 hover:bg-accent-info-soft border border-border/30 hover:border-accent-info/40 rounded-lg text-[11px] text-text-2 hover:text-text-1 transition-all duration-150"
+                      className="w-full text-left px-3 py-2 bg-surface-2/40 hover:bg-accent-info-soft border border-border/30 hover:border-accent-info/40 rounded-lg text-xs text-text-2 hover:text-text-1 transition-all duration-150 whitespace-normal break-words [overflow-wrap:anywhere] leading-snug cursor-pointer"
                     >
                       {sug}
                     </button>
@@ -308,7 +309,7 @@ export const CopilotPanel: React.FC = () => {
                 </div>
               )}
 
-              <div ref={messagesEndRef} />
+              <div ref={messagesEndRef} className="h-2 shrink-0" />
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router';
-import { Cpu, ArrowLeft, Calendar, Monitor, HardDrive, Tag } from 'lucide-react';
+import { Cpu, ArrowLeft, Calendar, Monitor, HardDrive, Network, Tag } from 'lucide-react';
 import { StatusDot } from '../primitives/StatusDot';
 import { MetricPill } from '../primitives/MetricPill';
 import { TimeAgo } from '../primitives/TimeAgo';
@@ -45,7 +45,7 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord; observationReady?: b
               </h1>
               <Badge severity={node.online ? 'ok' : 'offline'} className="text-[8px] px-1 py-0" />
               {isLearning && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[8px] font-mono border border-amber-500/20 animate-pulse">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-severity-warning/10 text-severity-warning text-[8px] font-mono border border-severity-warning/20 animate-pulse">
                   🔄 Apprentissage {perTypeReadiness ? `${learningPercent}%` : ''}
                 </span>
               )}
@@ -53,14 +53,14 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord; observationReady?: b
 
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2">
               {/* Enrolled Chip */}
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[var(--shadow-glow-accent)] transition-all duration-200">
                 <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent shrink-0" />
-                <span className="text-text-3 font-normal">{t('node_detail.enrolled_chip_prefix', { defaultValue: 'Enregistré' })}</span>
+                <span className="text-text-3 font-normal">{t('node_detail.enrolled_chip_prefix')}</span>
                 <TimeAgo timestamp={node.enrolled_at} className="font-semibold text-text-1" />
               </div>
 
               {/* OS & Arch Chip */}
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[var(--shadow-glow-accent)] transition-all duration-200">
                 <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent shrink-0" />
                 <span className="text-text-1 font-semibold">
                   {node.os || t('node_detail.os_default')}
@@ -69,15 +69,24 @@ export const NodeDetailHeader: React.FC<{ node: NodeRecord; observationReady?: b
               </div>
 
               {/* Hostname Chip */}
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[0_2px_8px_rgba(245,158,11,0.08)] transition-all duration-200">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[var(--shadow-glow-accent)] transition-all duration-200">
                 <HardDrive className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-accent shrink-0" />
-                <span className="text-text-3 font-normal">{t('node_detail.hostname_chip_prefix', { defaultValue: 'Host:' })}</span>
+                <span className="text-text-3 font-normal">{t('node_detail.hostname_chip_prefix')}</span>
                 <span className="font-mono text-text-1 font-semibold">{node.hostname || t('common.unknown')}</span>
               </div>
 
+              {/* IP Chip — 5th chip, between Hostname and Version. Hidden if no IP ever recorded. Visible even offline. */}
+              {node.last_ip && (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-surface-2/90 to-surface-3/50 border border-l-2 border-l-accent/40 border-border/60 text-text-2 text-[11px] font-sans font-medium whitespace-nowrap shadow-2xs hover:bg-surface-3/70 hover:border-border-strong hover:shadow-[var(--shadow-glow-accent)] transition-all duration-200">
+                  <Network className="w-3.5 h-3.5 shrink-0 text-accent" />
+                  <span className="text-text-3 font-normal">{t('node_detail.ip_chip_prefix')}</span>
+                  <span className="font-mono text-text-1 font-semibold">{node.last_ip}</span>
+                </div>
+              )}
+
               {/* Version Chip */}
               {(node.worker_version || node.version) && (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-accent-muted/25 to-accent-muted/10 border border-l-2 border-l-accent/60 border-accent/20 text-accent text-[11px] font-mono font-medium whitespace-nowrap shadow-2xs hover:bg-accent-muted/35 hover:border-accent/40 hover:shadow-[0_2px_8px_rgba(245,158,11,0.10)] transition-all duration-200" title="Version déclarée par le binaire Go du Worker">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-accent-muted/25 to-accent-muted/10 border border-l-2 border-l-accent/60 border-accent/20 text-accent text-[11px] font-mono font-medium whitespace-nowrap shadow-2xs hover:bg-accent-muted/35 hover:border-accent/40 hover:shadow-[var(--shadow-glow-accent)] transition-all duration-200" title="Version déclarée par le binaire Go du Worker">
                   <Tag className="w-3.5 h-3.5 shrink-0" />
                   <span>Worker v{node.worker_version || node.version}</span>
                 </div>

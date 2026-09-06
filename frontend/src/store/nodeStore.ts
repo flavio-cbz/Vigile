@@ -19,6 +19,7 @@ export interface Node {
   enrolled_recently: boolean;
   version?: string;
   worker_version?: string;
+  last_ip?: string | null;
 }
 
 export interface NodeStateChangeEvent {

@@ -289,3 +289,34 @@
   background-color: #dc2626;
   box-shadow: 0 0 6px rgba(220, 38, 38, 0.7);
 }
+
+/* ── Log Console Syntax Colorization & Highlighting ── */
+.log-console .log-line {
+  min-height: 1.4em;
+}
+
+.log-console .log-level-error {
+  color: var(--severity-critical);
+  font-weight: 600;
+}
+
+.log-console .log-level-warn {
+  color: var(--severity-warning);
+}
+
+.log-console .log-level-info {
+  color: var(--severity-info);
+}
+
+.log-console .log-level-debug {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
+.log-console .log-search-match {
+  background-color: rgba(245, 158, 11, 0.35);
+  color: var(--text-1);
+  border-radius: 2px;
+  padding: 0 2px;
+  font-weight: 600;
+}

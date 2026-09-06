@@ -4,7 +4,8 @@ import { usePageTitle } from '../hooks/usePageTitle';
 import { usePermission } from '../hooks/usePermission';
 import { api } from '../hooks/useApi';
 import { Spinner } from '../components/primitives/Spinner';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Settings } from 'lucide-react';
+import { PageHeader } from '../components/blocks/PageHeader';
 import { ProfileSettingsTab } from '../components/settings/ProfileSettingsTab';
 import { LLMSettingsTab } from '../components/settings/LLMSettingsTab';
 import { SecuritySettingsTab } from '../components/settings/SecuritySettingsTab';
@@ -43,15 +44,12 @@ export const SettingsPage: React.FC = () => {
   }, [activeTab, can, t, systemSettings]);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in font-interface">
-      <div>
-        <h1 className="text-xl font-extrabold tracking-wider uppercase text-text-1">
-          {t('settings.system_title')}
-        </h1>
-        <p className="text-text-3 text-[10px] uppercase font-semibold tracking-wider mt-0.5 font-sans">
-          {t('settings.system_subtitle')}
-        </p>
-      </div>
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
+      <PageHeader
+        title={t('settings.system_title')}
+        subtitle={t('settings.system_subtitle')}
+        icon={<Settings className="w-5 h-5" />}
+      />
 
       <div className="border-b border-border flex gap-4 shrink-0 overflow-x-auto no-scrollbar">
         <button

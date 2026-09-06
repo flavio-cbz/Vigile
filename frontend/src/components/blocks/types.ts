@@ -32,6 +32,8 @@ export interface BlockAction {
    * Can be overridden per block instance via `hoverTokens`.
    */
   variant: string;
+  /** Optional icon override: 'play' | 'square' | 'rotate' | 'trash'. */
+  icon?: 'play' | 'square' | 'rotate' | 'trash';
 }
 
 // ── Hover token map (contract §4.3) ──

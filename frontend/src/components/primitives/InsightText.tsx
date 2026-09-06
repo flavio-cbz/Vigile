@@ -11,19 +11,19 @@ export const InsightText: React.FC<InsightTextProps> = ({ children, className = 
   const getSizeClass = () => {
     switch (size) {
       case 'sm':
-        return 'text-lg md:text-xl';
+        return 'text-[15px] md:text-base font-semibold';
       case 'lg':
-        return 'text-2xl md:text-3xl lg:text-4xl';
+        return 'text-xl md:text-2xl lg:text-3xl font-bold';
       case 'xl':
-        return 'text-3xl md:text-4xl lg:text-5xl';
+        return 'text-2xl md:text-3xl lg:text-4xl font-extrabold';
       case 'md':
       default:
-        return 'text-xl md:text-2xl';
+        return 'text-lg md:text-xl font-semibold';
     }
   };
 
   return (
-    <span className={`font-serif tracking-wide text-text-1 leading-snug ${getSizeClass()} ${className}`} title={title}>
+    <span className={`font-sans tracking-tight text-text-1 leading-snug ${getSizeClass()} ${className}`} title={title}>
       {children}
     </span>
   );

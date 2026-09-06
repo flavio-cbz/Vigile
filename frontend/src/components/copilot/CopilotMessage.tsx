@@ -2,6 +2,7 @@ import React from 'react';
 import type { Message } from '../../store/chatStore';
 import { ProposalInline } from './ProposalInline';
 import { CopilotToolLine } from './CopilotToolLine';
+import { MarkdownContent } from './MarkdownContent';
 import { useLocale } from '../../i18n';
 import { Sparkles, User, Copy } from 'lucide-react';
 
@@ -62,7 +63,7 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
           <span className="font-bold text-[9.5px] tracking-wider text-text-3 uppercase font-interface">
             {t('copilot.user_badge')}
           </span>
-          <div className="cp-bubble-user font-sans text-[12.5px] whitespace-pre-wrap break-words">
+          <div className="cp-bubble-user font-sans text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
             {message.content}
           </div>
         </div>
@@ -82,7 +83,7 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 space-y-2.5 font-sans">
+      <div className="flex-1 min-w-0 space-y-2 font-sans">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-bold text-[9.5px] tracking-wider text-accent-info-strong uppercase font-interface">
             {t('copilot.copilot_badge')}
@@ -100,7 +101,7 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
           {message.content && (
             <button
               onClick={handleCopy}
-              className="ml-auto text-text-3 hover:text-text-1 transition-colors p-1 rounded-md hover:bg-surface-3/40"
+              className="ml-auto text-text-3 hover:text-text-1 transition-colors p-1 rounded-md hover:bg-surface-3/40 cursor-pointer"
               title={t('copilot.copy_tooltip')}
               aria-label={t('copilot.copy_tooltip')}
             >
@@ -118,8 +119,8 @@ export const CopilotMessage: React.FC<CopilotMessageProps> = ({
             </span>
           </div>
         ) : (
-          <div className="cp-bubble-assistant text-text-2 text-[12.5px] leading-relaxed">
-            {message.content}
+          <div className="cp-bubble-assistant text-text-2 text-xs leading-relaxed">
+            <MarkdownContent content={message.content} />
           </div>
         )}
 

@@ -52,6 +52,7 @@ export interface ChatSession {
   history: Message[];
   /** Last known LLM model used on this session (most recent meta event). */
   lastModel?: string;
+  is_pinned?: number;
   created_at: number;
   updated_at: number;
 }
@@ -85,6 +86,8 @@ interface ChatState {
   selectSession: (sessionId: string | null) => void;
   createSession: (nodeId?: string | null, title?: string) => Promise<ChatSession | null>;
   deleteSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
+  togglePinSession: (sessionId: string) => Promise<void>;
   sendMessage: (content: string, nodeId?: string | null) => Promise<void>;
   updateSession: (sessionId: string, title: string, nodeId: string | null) => Promise<void>;
   approveProposal: (proposalId: string) => Promise<boolean>;
@@ -200,6 +203,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  renameSession: async (sessionId, title) => {
+    try {
+      const updated = await api<ChatSession>(`/api/chat/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      });
+      if (updated) {
+        set(state => ({
+          sessions: state.sessions.map(s => s.id === sessionId ? { ...s, title: updated.title, updated_at: updated.updated_at } : s),
+          activeSession: state.activeSessionId === sessionId && state.activeSession ? { ...state.activeSession, title: updated.title, updated_at: updated.updated_at } : state.activeSession,
+        }));
+      } else {
+        set(state => ({
+          sessions: state.sessions.map(s => s.id === sessionId ? { ...s, title } : s),
+          activeSession: state.activeSessionId === sessionId && state.activeSession ? { ...state.activeSession, title } : state.activeSession,
+        }));
+      }
+    } catch {
+      useToastStore.getState().addToast('error', t('chat.toast.error'), t('chat.toast.update_error'));
+    }
+  },
+
+  togglePinSession: async (sessionId) => {
+    const session = get().sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    const nextPinned = session.is_pinned ? 0 : 1;
+    try {
+      const updated = await api<ChatSession>(`/api/chat/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_pinned: nextPinned }),
+      });
+      const pinnedValue = (updated as unknown as { is_pinned?: number })?.is_pinned ?? nextPinned;
+      set(state => ({
+        sessions: state.sessions.map(s => s.id === sessionId ? { ...s, is_pinned: pinnedValue } : s),
+        activeSession: state.activeSessionId === sessionId && state.activeSession ? { ...state.activeSession, is_pinned: pinnedValue } : state.activeSession,
+      }));
+    } catch {
+      set(state => ({
+        sessions: state.sessions.map(s => s.id === sessionId ? { ...s, is_pinned: nextPinned } : s),
+        activeSession: state.activeSessionId === sessionId && state.activeSession ? { ...state.activeSession, is_pinned: nextPinned } : state.activeSession,
+      }));
+    }
+  },
+
   sendMessage: async (content, nodeId) => {
     const { activeSession, createSession, isStreaming } = get();
     if (isStreaming || !content.trim()) return;
@@ -238,6 +285,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ _abortController: abortController });
     const fetchTimeout = window.setTimeout(() => abortController.abort(), 30000);
     let wasRateLimited = false;
+    let rafPending = false;
+    let rafId: number | null = null;
+    let flushUpdate: () => void = () => {};
+    let scheduleUpdate: () => void = () => {};
+    let updateAssistantMessage: () => void = () => {};
 
     try {
       const response = await fetch('/api/chat', {
@@ -266,7 +318,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const sendStartTs = performance.now();
       let firstTokenTs: number | null = null;
 
-      const updateAssistantMessage = () => {
+      updateAssistantMessage = () => {
         const state = get();
         if (!state.activeSession || state.activeSession.id !== sessionId) return;
         const currentHistory = state.activeSession.history;
@@ -283,10 +335,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Throttle per-token setState via requestAnimationFrame to avoid
       // re-rendering the CopilotPanel for every SSE token (30-50/s → max 60/s).
-      let rafPending = false;
-      let rafId: number | null = null;
 
-      const scheduleUpdate = () => {
+      scheduleUpdate = () => {
         if (rafPending) return;
         rafPending = true;
         rafId = requestAnimationFrame(() => {
@@ -296,7 +346,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       };
 
-      const flushUpdate = () => {
+      flushUpdate = () => {
         if (rafPending && rafId !== null) {
           cancelAnimationFrame(rafId);
           rafPending = false;
@@ -320,8 +370,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const decoder = new TextDecoder();
       let buffer = '';
+      let streamEnded = false;
 
-      while (true) {
+      while (!streamEnded) {
         const { value, done } = await reader.read();
         if (done) break;
 
@@ -338,7 +389,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (!rawJson) continue;
             const data = JSON.parse(rawJson);
 
-            if (data.type === 'meta') {
+            if (data.type === 'done') {
+              streamEnded = true;
+              break;
+            } else if (data.type === 'meta') {
               set({
                 activeMeta: { model: data.model, nodeId: data.node_id ?? null }
               });
@@ -396,6 +450,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Ignore parse errors on incomplete lines
           }
         }
+      }
+
+      try {
+        await reader.cancel();
+      } catch {
+        // noop
       }
 
       flushUpdate();

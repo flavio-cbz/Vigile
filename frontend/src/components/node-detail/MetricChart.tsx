@@ -74,7 +74,7 @@ interface MetricChartProps {
   onSetFocusedMetric: (metric: 'all' | 'cpu' | 'ram' | 'disk') => void;
   getRelativeTimeLabel: (idx: number) => string;
   filteredHistory: StatsPoint[];
-  diskChartData: Array<Record<string, number | string | DiskMount[]>>;
+  diskChartData: Array<Record<string, unknown>>;
   uniqueMounts: string[];
   DISK_COLORS: string[];
   baseline?: NodeBaseline | null;

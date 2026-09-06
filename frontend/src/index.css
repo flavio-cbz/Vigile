@@ -215,6 +215,9 @@ html, body, #root {
   width: 100vw;
   overflow-x: hidden;
   transition: background-color var(--transition-base), color var(--transition-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 ::-webkit-scrollbar {

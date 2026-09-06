@@ -56,3 +56,4 @@ registerBlock('metric-cards-grid', lazyBlock('MetricCardsGrid', () => import('./
 registerBlock('node-selector', lazyBlock('NodeSelector', () => import('./NodeSelector')));
 registerBlock('filter-panel', lazyBlock('FilterPanel', () => import('./FilterPanel')));
 registerBlock('page-header', lazyBlock('PageHeader', () => import('./PageHeader')));
+registerBlock('help-tooltip', lazyBlock('HelpTooltip', () => import('./HelpTooltip')));

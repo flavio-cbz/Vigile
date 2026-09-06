@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright golden-ui runtime artifacts (demo tokens)
+tests/golden-ui/.auth/

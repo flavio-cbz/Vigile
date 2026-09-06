@@ -205,7 +205,7 @@ export const LoginPage: React.FC = () => {
         <div className="z-10 flex items-center gap-3">
           <VigileLogo className="w-10 h-10" />
           <div>
-            <div className="font-serif text-lg font-bold text-text-1 tracking-wide">Vigile</div>
+            <div className="font-sans text-lg font-bold text-text-1 tracking-wide">Vigile</div>
             <div className="text-[8px] font-extrabold text-accent uppercase tracking-widest mt-0.5 font-interface">
               {t('login.brand_subtitle')}
             </div>
@@ -217,7 +217,7 @@ export const LoginPage: React.FC = () => {
             <span className="text-[9px] font-extrabold text-accent uppercase tracking-widest bg-accent-muted px-2 py-0.5 border border-accent/15 rounded font-interface">
               {t('login.badge_secure_access')}
             </span>
-            <h1 className="font-serif text-3xl font-bold text-text-1 tracking-wide mt-3 leading-snug">
+            <h1 className="font-sans text-3xl font-bold text-text-1 tracking-tight mt-3 leading-snug">
               {t('login.hero_title')}
             </h1>
             <p className="text-xs text-text-2 mt-3 leading-relaxed font-sans">
@@ -262,7 +262,7 @@ export const LoginPage: React.FC = () => {
         <div className="w-full max-w-sm border border-border rounded-xl bg-surface p-8 relative animate-fade-in z-10 shadow-2xl">
           <div className="flex flex-col items-center mb-8 text-center">
             <VigileLogo className="w-12 h-12 mb-3 mx-auto lg:hidden" />
-            <h2 className="font-serif text-xl font-bold text-text-1 tracking-wide">
+            <h2 className="font-sans text-xl font-bold text-text-1 tracking-tight">
               {mustChangePassword ? t('login.form_title_change_password') : t('login.form_title')}
             </h2>
             <p className="text-[9px] font-extrabold text-accent uppercase tracking-widest mt-1.5 font-interface">

@@ -89,7 +89,7 @@ export const InsightCard: React.FC<InsightCardProps> = ({
       </div>
 
       <div className="my-2.5 z-10 flex-1 flex flex-col justify-center min-w-0">
-        <InsightText size="sm" className={`block text-text-1 font-serif !text-[16px] md:!text-[18px] leading-snug line-clamp-2 transition-colors ${hoverText}`} title={headline}>
+        <InsightText size="sm" className={`block text-text-1 leading-snug line-clamp-2 transition-colors ${hoverText}`} title={headline}>
           {headline}
         </InsightText>
         <p className={`text-text-3 text-xs font-sans mt-1 leading-normal ${isExpanded ? '' : 'line-clamp-2'}`} title={detail}>

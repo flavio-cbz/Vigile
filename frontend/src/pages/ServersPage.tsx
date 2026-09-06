@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Server, Search, HardDrive, Cpu, Clock, Plus } from 'lucide-react';
+import { PageHeader } from '../components/blocks/PageHeader';
 import { useNodeStore, type Node } from '../store/nodeStore';
 import { useLayoutStore } from '../store/layoutStore';
 import { StatusDot } from '../components/primitives/StatusDot';
@@ -127,27 +128,23 @@ export const ServersPage: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-bold uppercase tracking-wider text-text-1 flex items-center gap-2">
-            <Server className="w-5 h-5 text-accent" />
-            {t('nav.servers')}
-          </h1>
-          <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-            {activeCount} serveur{activeCount !== 1 ? 's' : ''} actif{activeCount !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('servers.search_placeholder')}
-            className="w-full bg-surface border border-border-strong/20 rounded-lg pl-9 pr-3 py-2 text-xs text-text-1 placeholder:text-text-3 focus:outline-none focus:border-accent transition-colors"
-          />
-        </div>
-      </div>
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
+      <PageHeader
+        title={t('nav.servers')}
+        icon={<Server className="w-5 h-5" />}
+        subtitle={`${activeCount} serveur${activeCount !== 1 ? 's' : ''} actif${activeCount !== 1 ? 's' : ''}`}
+        actions={
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('servers.search_placeholder')}
+              className="w-full bg-surface border border-border-strong/20 rounded-lg pl-9 pr-3 py-2 text-xs text-text-1 placeholder:text-text-3 focus:outline-none focus:border-accent transition-colors"
+            />
+          </div>
+        }
+      />
 
       {isLoading && nodes.length === 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

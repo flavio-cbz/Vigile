@@ -123,7 +123,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({ nodes }) => {
                 uptimePct={uptimePct}
                 nodeIncidents={nodeIncidents}
                 hoveredBar={hoveredBar}
-                onBarHover={setHoveredBar}
+                onBarHover={(nIdx, bIdx) => setHoveredBar({ nodeIdx: nIdx, barIdx: bIdx })}
               />
             );
           })

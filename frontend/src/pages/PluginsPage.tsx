@@ -1,5 +1,6 @@
 import React from 'react';
 import { Upload, RefreshCw, Grid } from 'lucide-react';
+import { PageHeader } from '../components/blocks/PageHeader';
 import { Spinner } from '../components/primitives/Spinner';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { clsx } from 'clsx';
@@ -14,62 +15,60 @@ export type { PluginInfo } from '../hooks/usePluginsData';
 export const PluginsPage: React.FC = () => {
   const {
     plugins, loadedNames, loading, toggling, uploading, deleting,
+    disabling, enabling,
     fileInputRef, activeTab, registryPlugins, loadingRegistry,
     installingPlugin, selectedPlugin, isAdmin, t,
     setActiveTab, setSelectedPlugin, fetchPlugins, handleSaveConfig,
     handleToggle, handleInstall, handleDelete, handleUpload, closeDetailsModal,
+    handleDisable, handleEnable,
   } = usePluginsData();
 
   usePageTitle(t('page_title.plugins'));
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-bold uppercase tracking-wider text-text-1 flex items-center gap-2">
-            <Grid className="w-5 h-5 text-accent" />
-            {t('nav.plugins')}
-          </h1>
-          <p className="text-[10px] text-text-3 font-semibold uppercase tracking-wider mt-0.5">
-            {t('plugins.count', { total: plugins.length, loaded: loadedNames.length })}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchPlugins}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-surface border border-border-strong/20 rounded-lg text-text-2 hover:text-text-1 hover:border-accent/30 transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={clsx('w-3 h-3', loading && 'animate-spin')} />
-            {t('plugins.refresh')}
-          </button>
-          {isAdmin && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".py"
-                onChange={handleUpload}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-accent hover:bg-accent-hover text-text-1 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-              >
-                {uploading ? <Spinner size="sm" /> : <Upload className="w-3 h-3" />}
-                {t("plugins.upload")}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
+      <PageHeader
+        title={t('nav.plugins')}
+        icon={<Grid className="w-5 h-5" />}
+        subtitle={t('plugins.count', { total: plugins.length, loaded: loadedNames.length })}
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchPlugins}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-border-strong/50 bg-surface-2 hover:bg-surface-hover/80 text-text-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={clsx('w-3.5 h-3.5', loading && 'animate-spin')} />
+              {t('plugins.refresh')}
+            </button>
+            {isAdmin && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".py"
+                  onChange={handleUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-border-strong/50 bg-accent hover:bg-accent-hover text-bg font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 disabled:opacity-50 cursor-pointer"
+                >
+                  {uploading ? <Spinner size="sm" /> : <Upload className="w-3.5 h-3.5" />}
+                  {t("plugins.upload")}
+                </button>
+              </>
+            )}
+          </div>
+        }
+      />
 
       <div className="flex border-b border-border-strong/10 gap-4">
         <button
           onClick={() => setActiveTab('installed')}
           className={clsx(
-            'pb-2 text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-b-2',
+            'pb-2 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer border-b-2',
             activeTab === 'installed'
               ? 'text-accent border-accent'
               : 'text-text-3 border-transparent hover:text-text-2'
@@ -80,7 +79,7 @@ export const PluginsPage: React.FC = () => {
         <button
           onClick={() => setActiveTab('registry')}
           className={clsx(
-            'pb-2 text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-b-2',
+            'pb-2 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer border-b-2',
             activeTab === 'registry'
               ? 'text-accent border-accent'
               : 'text-text-3 border-transparent hover:text-text-2'
@@ -122,6 +121,12 @@ export const PluginsPage: React.FC = () => {
           plugin={selectedPlugin}
           onClose={closeDetailsModal}
           onSaveConfig={handleSaveConfig}
+          isAdmin={isAdmin}
+          disabling={disabling}
+          enabling={enabling}
+          onDisable={handleDisable}
+          onEnable={handleEnable}
+          onFetchPlugins={fetchPlugins}
           t={t}
         />
       )}

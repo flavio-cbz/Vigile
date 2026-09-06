@@ -26,6 +26,13 @@ export const Sidebar: React.FC = () => {
 
   const [isMobile, setIsMobile] = useState(false);
   const pendingCount = useLayoutStore((s) => s.pendingCount);
+  // Invariant dual-path (contrat §4.2 / §4.4) : la liste en dur ci-dessous est le
+  // FALLBACK (utilisée tant que /api/admin/plugins n'a pas répondu, ou si le fetch
+  // échoue — jamais vidée). Le fetch dynamique la remplace ensuite par les ids
+  // `enabled && loaded` uniquement. Les entrées de navigation restent dual-path :
+  // docker/systemd → `/nodes/{id}?tab=` (onglets NodeDetail), plex → `/plugins/plex`.
+  // Les flags ne gate que la visibilité des entrées de la sidebar — jamais l'état
+  // du registre backend (miroir exact du fallback de pluginStore.fetchActivePlugins).
   const [activePlugins, setActivePlugins] = useState<string[]>(['systemd', 'docker', 'metrics', 'disk_analysis', 'clean_logs', 'plex']);
   const [isAdminExpanded, setIsAdminExpanded] = useState(() => localStorage.getItem('vigile_admin_expanded') !== 'false');
   const [nonRunningContainerCount, setNonRunningContainerCount] = useState(0);
@@ -40,6 +47,7 @@ export const Sidebar: React.FC = () => {
           .map((p) => p.id);
         setActivePlugins(activeIds);
       } catch (err) {
+        // Échec → on garde la liste par défaut (fallback) : les entrées restent visibles.
         console.error('Failed to check active plugins:', err);
       }
     };
@@ -166,7 +174,7 @@ export const Sidebar: React.FC = () => {
     }
 
     const adminItems: NavItem[] = [
-      { to: '/plugins', label: t('nav.plugins'), icon: Grid },
+      { to: '/plugins', label: t('nav.plugins'), icon: Grid, exact: true },
       { to: '/settings', label: t('nav.settings'), icon: SettingsIcon },
     ];
 

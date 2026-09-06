@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useNodeStore } from '../../store/nodeStore';
+import { usePluginStore } from '../../store/pluginStore';
 import { NodeSelector } from './NodeSelector';
 import { NotifBell } from './NotifBell';
 import { useLocale } from '../../i18n';
@@ -36,6 +37,15 @@ export const TopBar: React.FC = () => {
     const path = location.pathname;
     if (path === '/') return t('page_title.dashboard').toUpperCase();
     if (path.startsWith('/nodes/')) return t('page_title.node_detail').toUpperCase();
+    if (path === '/servers') return t('page_title.servers').toUpperCase();
+    if (path === '/plugins') return t('page_title.plugins').toUpperCase();
+    if (path.startsWith('/plugins/')) {
+      // Plugin pages: use the plugin page title when the plugin store has it
+      const { pages } = usePluginStore.getState();
+      const match = pages.find((p) => path.startsWith(`/plugins/${p.plugin_id}`));
+      if (match) return match.title.toUpperCase();
+      return t('page_title.plugins').toUpperCase();
+    }
     if (path === '/proposals') return t('prop_page.title').toUpperCase();
     if (path === '/audit') return t('page_title.audit').toUpperCase();
     if (path === '/settings') return t('settings.system_title').toUpperCase();

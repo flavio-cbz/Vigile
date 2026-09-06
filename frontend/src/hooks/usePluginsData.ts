@@ -8,6 +8,13 @@ import { usePluginStore } from '../store/pluginStore';
 import { useLocale } from '../i18n';
 import { logger } from '../lib/logger';
 
+export interface PluginKillSwitch {
+  hard: boolean;
+  reason?: string;
+  user_id?: string;
+  disabled_at?: number;
+}
+
 export interface PluginInfo {
   id: string;
   name: string;
@@ -19,6 +26,7 @@ export interface PluginInfo {
   version?: string;
   description?: string;
   config?: Record<string, unknown>;
+  kill_switch?: PluginKillSwitch | null;
   schema?: Record<
     string,
     {
@@ -57,6 +65,8 @@ export const usePluginsData = () => {
   const [toggling, setToggling] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [disabling, setDisabling] = useState<string | null>(null);
+  const [enabling, setEnabling] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<'installed' | 'registry'>('installed');
@@ -112,19 +122,7 @@ export const usePluginsData = () => {
   };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await api<PluginListResponse>('/api/admin/plugins');
-        if (data) {
-          setPlugins(data.plugins || []);
-          setLoadedNames(data.loaded_plugins || []);
-        }
-      } catch (err) {
-        logger.error('Failed to fetch plugins:', err);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchPlugins();
   }, []);
 
   useEffect(() => {
@@ -146,6 +144,13 @@ export const usePluginsData = () => {
     }
   }, [activeTab]);
 
+  const resyncRegistryOrNotify = async () => {
+    const synced = await usePluginStore.getState().refreshRegistry();
+    if (!synced) {
+      addToast('info', t('plugins.title'), t('plugins.registry_resync_failed'));
+    }
+  };
+
   const handleToggle = async (pluginId: string) => {
     if (!isAdmin) return;
     setToggling(pluginId);
@@ -157,14 +162,60 @@ export const usePluginsData = () => {
         setLoadedNames((prev) =>
           res.loaded ? [...prev, pluginId] : prev.filter((n) => n !== pluginId)
         );
-        usePluginStore.getState().fetchPluginPages();
         await fetchPlugins();
+        await resyncRegistryOrNotify();
         addToast('success', t('plugins.title'), res.loaded ? t('plugins.activated') : t('plugins.deactivated'));
       }
     } catch (err: unknown) {
       addToast('error', t('settings.error'), err instanceof Error ? err.message : t('plugins.toggle_error'));
     } finally {
       setToggling(null);
+    }
+  };
+
+  const handleDisable = async (pluginId: string, hard: boolean, reason: string) => {
+    if (!isAdmin) return;
+    setDisabling(pluginId);
+    try {
+      const res = await api<{ status: string; mode: string }>(
+        `/api/plugins/${pluginId}/disable`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ hard, reason }),
+        },
+      );
+      if (res) {
+        await fetchPlugins();
+        await resyncRegistryOrNotify();
+        addToast('success', t('plugins.title'),
+          res.mode === 'hard' ? t('plugins.kill_switch.hard') : t('plugins.kill_switch.maintenance'));
+      }
+    } catch (err: unknown) {
+      addToast('error', t('settings.error'),
+        err instanceof Error ? err.message : 'Failed to disable plugin');
+    } finally {
+      setDisabling(null);
+    }
+  };
+
+  const handleEnable = async (pluginId: string) => {
+    if (!isAdmin) return;
+    setEnabling(pluginId);
+    try {
+      const res = await api<{ status: string }>(
+        `/api/plugins/${pluginId}/enable`,
+        { method: 'POST' },
+      );
+      if (res) {
+        await fetchPlugins();
+        await resyncRegistryOrNotify();
+        addToast('success', t('plugins.title'), t('plugins.kill_switch.enable'));
+      }
+    } catch (err: unknown) {
+      addToast('error', t('settings.error'),
+        err instanceof Error ? err.message : 'Failed to enable plugin');
+    } finally {
+      setEnabling(null);
     }
   };
 
@@ -180,6 +231,7 @@ export const usePluginsData = () => {
       if (res && res.status === 'success') {
         addToast('success', t('plugins.title'), t('plugins.registry.install_success', { name: pluginName }));
         await fetchPlugins();
+        await resyncRegistryOrNotify();
       }
     } catch (err: unknown) {
       addToast('error', t('settings.error'), err instanceof Error ? err.message : t('plugins.registry.install_failed', { name: pluginName }));
@@ -199,6 +251,7 @@ export const usePluginsData = () => {
       if (res && (res.status === 'success' || res.status === 'deleted')) {
         addToast('success', t('plugins.title'), `Plugin "${pluginId}" deleted`);
         await fetchPlugins();
+        await resyncRegistryOrNotify();
       }
     } catch (err: unknown) {
       addToast('error', t('settings.error'), err instanceof Error ? err.message : 'Delete failed');
@@ -230,6 +283,7 @@ export const usePluginsData = () => {
 
       addToast('success', t('plugins.title'), t('plugins.uploaded', { name: file.name }));
       await fetchPlugins();
+      await resyncRegistryOrNotify();
     } catch (err: unknown) {
       addToast('error', t('settings.error'), (err instanceof Error ? err.message : t('plugins.upload_failed')));
     } finally {
@@ -240,9 +294,11 @@ export const usePluginsData = () => {
 
   return {
     plugins, loadedNames, loading, toggling, uploading, deleting,
+    disabling, enabling,
     fileInputRef, activeTab, registryPlugins, loadingRegistry,
     installingPlugin, selectedPlugin, isAdmin, t,
     setActiveTab, setSelectedPlugin, fetchPlugins, handleSaveConfig,
     handleToggle, handleInstall, handleDelete, handleUpload, closeDetailsModal,
+    handleDisable, handleEnable,
   };
 };

@@ -16,7 +16,7 @@ export const LoginHero: React.FC = () => {
           <ShieldAlert className="w-5 h-5 text-accent animate-pulse" />
         </div>
         <div>
-          <div className="font-serif text-lg font-bold text-text-1 tracking-wide">Vigile</div>
+          <div className="font-sans text-lg font-bold text-text-1 tracking-wide">Vigile</div>
           <div className="text-[8px] font-extrabold text-accent uppercase tracking-widest mt-0.5 font-interface">
             {t('login.brand_subtitle')}
           </div>
@@ -28,7 +28,7 @@ export const LoginHero: React.FC = () => {
           <span className="text-[9px] font-extrabold text-accent uppercase tracking-widest bg-accent-muted px-2 py-0.5 border border-accent/15 rounded font-interface">
             {t('login.badge_secure_access')}
           </span>
-          <h1 className="font-serif text-3xl font-bold text-text-1 tracking-wide mt-3 leading-snug">
+          <h1 className="font-sans text-3xl font-bold text-text-1 tracking-tight mt-3 leading-snug">
             {t('login.hero_title')}
           </h1>
           <p className="text-xs text-text-2 mt-3 leading-relaxed font-sans">

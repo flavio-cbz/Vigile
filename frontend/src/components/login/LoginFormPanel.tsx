@@ -48,7 +48,7 @@ export const LoginFormPanel: React.FC<LoginFormPanelProps> = ({
           <div className="w-12 h-12 border border-accent/20 bg-accent-muted rounded-xl flex items-center justify-center mb-3 shadow lg:hidden">
             <ShieldAlert className="w-6 h-6 text-accent animate-pulse" />
           </div>
-          <h2 className="font-serif text-xl font-bold text-text-1 tracking-wide">
+          <h2 className="font-sans text-xl font-bold text-text-1 tracking-tight">
             {mustChangePassword ? t('login.form_title_change_password') : t('login.form_title')}
           </h2>
           <p className="text-[9px] font-extrabold text-accent uppercase tracking-widest mt-1.5 font-interface">
