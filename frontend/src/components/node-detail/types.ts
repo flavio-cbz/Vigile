@@ -30,8 +30,11 @@ export interface DiskMount {
   total_bytes: number;
   used_bytes: number;
   percent: number;
-  days_left?: number;
-  growth_gb_per_day?: number;
+  days_left?: number | null;
+  growth_gb_per_day?: number | null;
+  confidence?: 'none' | 'low' | 'medium' | 'high';
+  hours_collected?: number;
+  is_noisy?: boolean;
 }
 
 export interface TopProcess {
@@ -163,6 +166,45 @@ export interface NodeRecord {
   version?: string;
   worker_version?: string;
   cached_disks_json: string | null;
+  last_ip?: string | null;
+}
+
+export interface LogEntryRecord {
+  timestamp: number;
+  time_str: string;
+  level: 'error' | 'warn' | 'info' | 'debug' | string;
+  unit: string;
+  message: string;
+  raw?: Record<string, unknown>;
+}
+
+export interface LogSourceItemRecord {
+  id: string;
+  name: string;
+  category: 'files' | 'services' | 'docker' | string;
+  path?: string;
+  unit?: string;
+  size_bytes?: number;
+  mtime?: number;
+  error_count: number;
+  status?: string;
+}
+
+export interface HistogramBucketRecord {
+  hour: string;
+  timestamp: number;
+  info: number;
+  warn: number;
+  error: number;
+  total: number;
+}
+
+export interface LogHistogramRecord {
+  node_id: string;
+  buckets: HistogramBucketRecord[];
+  total_errors: number;
+  total_warnings: number;
+  total_lines: number;
 }
 
 export interface LogEntryRecord {

@@ -2,10 +2,12 @@ import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react'
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import type { HierarchyRectangularNode } from 'd3-hierarchy';
 import type { DiskNode } from '../../types/disk';
+import { Banner } from '../blocks/Banner';
 
 interface DiskTreemapProps {
   root: DiskNode;
   onDrill: (path: string) => void;
+  skippedPerm?: number;
 }
 
 const COLORS = [
@@ -35,7 +37,7 @@ function isGhost(d: HierarchyRectangularNode<DiskNode>): boolean {
   return d.data.name.includes('(small)') || d.data.name.includes('(others)');
 }
 
-export const DiskTreemap: React.FC<DiskTreemapProps> = ({ root, onDrill }) => {
+export const DiskTreemap: React.FC<DiskTreemapProps> = ({ root, onDrill, skippedPerm }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 600, height: 400 });
 
@@ -78,6 +80,16 @@ export const DiskTreemap: React.FC<DiskTreemapProps> = ({ root, onDrill }) => {
     },
     [onDrill],
   );
+
+  if (skippedPerm !== undefined && skippedPerm > 0 && (!root || root.size === 0)) {
+    return (
+      <Banner
+        variant="warning"
+        title="Permission refusée : impossible de scanner ce point de montage"
+        message="Permission refusée : impossible de scanner ce point de montage"
+      />
+    );
+  }
 
   if (!root || root.size === 0 || nodes.length === 0) {
     return (

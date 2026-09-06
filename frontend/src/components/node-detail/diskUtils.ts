@@ -1,9 +1,11 @@
 import type { DiskMount } from './types';
 
-interface DiskEstimation {
+export interface DiskEstimation {
   days_left: number | null;
   growth_gb_per_day: number;
   confidence: 'none' | 'low' | 'medium' | 'high';
+  hours_collected?: number;
+  is_noisy?: boolean;
 }
 
 /**
@@ -26,7 +28,10 @@ export function estimateDiskSaturation(
   }
 
   // Group by mount_point using real collected_at timestamps
-  const byMount: Record<string, { timestamps: number[]; used_gb: number[]; total_bytes: number }> = {};
+  const byMount: Record<
+    string,
+    { points: { ts: number; used_bytes: number; total_bytes: number }[] }
+  > = {};
 
   for (const snapshot of history) {
     if (!snapshot.disks || snapshot.disks.length === 0) continue;
@@ -35,27 +40,48 @@ export function estimateDiskSaturation(
     if (tsMs === 0) continue;
 
     for (const disk of snapshot.disks) {
+      if (!disk.mount_point) continue;
       if (!byMount[disk.mount_point]) {
-        byMount[disk.mount_point] = { timestamps: [], used_gb: [], total_bytes: disk.total_bytes };
+        byMount[disk.mount_point] = { points: [] };
       }
-      const entry = byMount[disk.mount_point];
-      entry.timestamps.push(tsMs);
-      entry.used_gb.push(disk.used_bytes / (1024 ** 3));
+      byMount[disk.mount_point].points.push({
+        ts: tsMs,
+        used_bytes: disk.used_bytes,
+        total_bytes: disk.total_bytes,
+      });
     }
   }
 
   for (const [mountPoint, data] of Object.entries(byMount)) {
-    if (data.timestamps.length < 4) continue;
+    if (data.points.length < 4) continue;
 
-    const totalBytes = data.total_bytes;
-    const lastUsedGB = data.used_gb[data.used_gb.length - 1];
-    const freeBytes = totalBytes - lastUsedGB * (1024 ** 3);
+    // Sort chronologically ascending (t0 = oldest, tEnd = newest)
+    const sortedPoints = [...data.points].sort((a, b) => a.ts - b.ts);
+
+    // Deduplicate by timestamp if multiple snapshots share the exact same timestamp
+    const deduped: { ts: number; used_bytes: number; total_bytes: number }[] = [];
+    for (const p of sortedPoints) {
+      if (deduped.length > 0 && deduped[deduped.length - 1].ts === p.ts) {
+        deduped[deduped.length - 1] = p;
+      } else {
+        deduped.push(p);
+      }
+    }
+
+    if (deduped.length < 4) continue;
+
+    const timestamps = deduped.map((p) => p.ts);
+    const yRaw = deduped.map((p) => p.used_bytes / (1024 ** 3));
+    const totalBytes = deduped[deduped.length - 1].total_bytes;
+    const lastUsedGB = yRaw[yRaw.length - 1];
+    const freeBytes = Math.max(0, totalBytes - lastUsedGB * (1024 ** 3));
 
     // Calculate timespan in hours & days
-    const t0 = data.timestamps[0];
-    const tEnd = data.timestamps[data.timestamps.length - 1];
+    const t0 = timestamps[0];
+    const tEnd = timestamps[timestamps.length - 1];
     const timespanMs = tEnd - t0;
     const hoursCollected = timespanMs / 3600000;
+    const roundedHours = Math.round(hoursCollected * 10) / 10;
 
     // If less than 2 hours of data collected for this disk, don't display noisy slope
     if (hoursCollected < 2 || timespanMs <= 0) {
@@ -63,13 +89,21 @@ export function estimateDiskSaturation(
         days_left: null,
         growth_gb_per_day: 0,
         confidence: 'none',
+        hours_collected: roundedHours,
       };
       continue;
     }
 
+    // Determine baseline confidence by observation timespan
+    let confidence: 'none' | 'low' | 'medium' | 'high' = 'low';
+    if (hoursCollected >= 24) {
+      confidence = 'high';
+    } else if (hoursCollected >= 6) {
+      confidence = 'medium';
+    }
+
     // Normalize timestamps to days from first measurement
-    const x = data.timestamps.map((t) => (t - t0) / 86400000);
-    const yRaw = data.used_gb;
+    const x = timestamps.map((t) => (t - t0) / 86400000);
 
     // IQR outlier detection on consecutive deltas. Outlier deltas are treated
     // as PERMANENT LEVEL SHIFTS (mass deletion / bulk import), not noise: the
@@ -79,8 +113,17 @@ export function estimateDiskSaturation(
     const deltas = yRaw.slice(1).map((v, i) => v - yRaw[i]);
     const sortedDeltas = [...deltas].sort((a, b) => a - b);
     const nDeltas = sortedDeltas.length;
-    const q1 = sortedDeltas[Math.floor((nDeltas + 3) / 4) - 1];
-    const q3 = sortedDeltas[Math.floor((3 * nDeltas + 3) / 4) - 1];
+    if (nDeltas < 3) {
+      result[mountPoint] = {
+        days_left: null,
+        growth_gb_per_day: 0,
+        confidence: 'low',
+        hours_collected: roundedHours,
+      };
+      continue;
+    }
+    const q1 = sortedDeltas[Math.floor(nDeltas * 0.25)];
+    const q3 = sortedDeltas[Math.min(nDeltas - 1, Math.floor(nDeltas * 0.75))];
     const iqr = q3 - q1;
     const lower = q1 - 1.5 * iqr;
     const upper = q3 + 1.5 * iqr;
@@ -90,6 +133,8 @@ export function estimateDiskSaturation(
         days_left: null,
         growth_gb_per_day: 0,
         confidence: 'low',
+        hours_collected: roundedHours,
+        is_noisy: true,
       };
       continue;
     }
@@ -117,15 +162,28 @@ export function estimateDiskSaturation(
     if (Math.abs(denominator) < 1e-10) continue;
 
     const slope = (n * sumXY - sumX * sumY) / denominator;
-
     const roundedSlope = Math.round(slope * 1000) / 1000;
+
+    // Calculate R² (coefficient of determination) matching master/core/insights.py
+    const yMean = sumY / n;
+    const ssTot = y.reduce((acc, yi) => acc + (yi - yMean) ** 2, 0);
+    const intercept = (sumY - slope * sumX) / n;
+    const ssRes = y.reduce((acc, yi, i) => acc + (yi - (slope * x[i] + intercept)) ** 2, 0);
+    const rSquared = ssTot > 1e-9 ? 1.0 - ssRes / ssTot : 0.0;
+
+    const isNoisy = rSquared < 0.5 && timespanMs >= 21600000 && Math.abs(roundedSlope) > 0.05;
+    if (isNoisy) {
+      confidence = 'low';
+    }
 
     // Truly flat slope (|slope| <= 0.0001 GB/day)
     if (Math.abs(slope) <= 0.0001) {
       result[mountPoint] = {
         days_left: null,
         growth_gb_per_day: 0,
-        confidence: hoursCollected >= 24 ? 'high' : 'medium',
+        confidence,
+        hours_collected: roundedHours,
+        is_noisy: isNoisy,
       };
       continue;
     }
@@ -135,25 +193,22 @@ export function estimateDiskSaturation(
       result[mountPoint] = {
         days_left: null,
         growth_gb_per_day: roundedSlope,
-        confidence: hoursCollected >= 24 ? 'high' : 'medium',
+        confidence,
+        hours_collected: roundedHours,
+        is_noisy: isNoisy,
       };
       continue;
     }
 
     const freeGB = freeBytes / (1024 ** 3);
-    const daysLeft = freeGB / slope;
-
-    let confidence: 'none' | 'low' | 'medium' | 'high' = 'low';
-    if (hoursCollected >= 24) {
-      confidence = 'high';
-    } else if (hoursCollected >= 6) {
-      confidence = 'medium';
-    }
+    const daysLeft = freeGB > 0 ? freeGB / slope : 0;
 
     result[mountPoint] = {
-      days_left: isFinite(daysLeft) && daysLeft > 0 ? Math.round(daysLeft) : null,
+      days_left: isFinite(daysLeft) && daysLeft >= 0 ? Math.round(daysLeft) : null,
       growth_gb_per_day: roundedSlope,
       confidence,
+      hours_collected: roundedHours,
+      is_noisy: isNoisy,
     };
   }
 
@@ -185,10 +240,10 @@ export function getDiskSeverity(
  * Determine whether a disk mount has enough observation data for estimation.
  */
 export function getDiskObservationStatus(
-  daysLeft: number | null | undefined,
-  observationReady: boolean,
+  confidence?: 'none' | 'low' | 'medium' | 'high',
+  observationReady?: boolean,
 ): 'collecting' | 'estimating' | 'ready' {
-  if (!observationReady) return 'collecting';
-  if (daysLeft === undefined || daysLeft === null) return 'estimating';
+  if (observationReady === false || confidence === 'none' || confidence === undefined) return 'collecting';
+  if (confidence === 'low') return 'estimating';
   return 'ready';
 }

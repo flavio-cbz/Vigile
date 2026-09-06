@@ -3,10 +3,12 @@ import { HardDrive, TrendingUp, TrendingDown, Wifi, ChevronRight } from 'lucide-
 import { useNavigate } from 'react-router';
 import { useLocale } from '../../i18n';
 import type { DiskMount } from './types';
+import { getDiskObservationStatus } from './diskUtils';
 
 interface DiskMountCardsProps {
   disks: DiskMount[];
   onNavigateToTreemap?: () => void;
+  observationReady?: boolean;
 }
 
 const TIER_COLORS = {
@@ -43,17 +45,17 @@ function isNetworkMount(d: DiskMount): boolean {
 
 function formatDaysLeft(
   days: number | null,
-  t: (key: string, vars?: Record<string, unknown>) => string,
+  t: (key: string, vars?: Record<string, string | number>) => string,
 ): string | null {
   if (days === null) return null;
-  if (days < 1) return t('metrics.disk.saturation.today', { defaultValue: 'Rempli aujourd\'hui' });
-  if (days === 1) return t('metrics.disk.saturation.day', { defaultValue: '~1 jour restant' });
-  if (days < 30) return `~${days} jours restants au rythme actuel`;
-  if (days < 365) return `~${Math.round(days / 30)} mois restants`;
-  return `~${Math.round(days / 365)} ans restants`;
+  if (days < 1) return t('metrics.disk.saturation.today');
+  if (days === 1) return t('metrics.disk.saturation.day');
+  if (days < 30) return t('metrics.disk.saturation.days', { count: days });
+  if (days < 365) return t('metrics.disk.saturation.months', { count: Math.round(days / 30) });
+  return t('metrics.disk.saturation.years', { count: Math.round(days / 365) });
 }
 
-export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks, onNavigateToTreemap }) => {
+export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks, onNavigateToTreemap, observationReady }) => {
   const { t } = useLocale();
   const navigate = useNavigate();
   const [selectedMountTrend, setSelectedMountTrend] = useState<string | null>(null);
@@ -76,6 +78,9 @@ export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks, onNavigat
           const tierKey = d.percent >= 95 ? 'critical' : d.percent >= 85 ? 'warning' : d.percent >= 75 ? 'elevated' : 'ok';
           const tier = TIER_COLORS[tierKey];
 
+          const observationStatus = getDiskObservationStatus(d.confidence, observationReady);
+          const isCollecting = observationStatus === 'collecting';
+          const isLowConfidence = observationStatus === 'estimating';
           const daysLabel = formatDaysLeft(d.days_left ?? null, t);
           const growthPositive = d.growth_gb_per_day !== null && d.growth_gb_per_day !== undefined && d.growth_gb_per_day > 0;
           const usedGb = (d.used_bytes / (1024 * 1024 * 1024)).toFixed(1);
@@ -125,13 +130,21 @@ export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks, onNavigat
                   />
                 </div>
 
-                {daysLabel && (
+                {isCollecting ? (
+                  <div className="font-mono text-[10px] text-text-3 flex items-center justify-between pt-1">
+                    <span className="font-medium text-text-3 flex items-center gap-1">
+                      {observationReady === false
+                        ? '⏳ Collecte en cours (initialisation)'
+                        : `⏳ Collecte en cours (${d.hours_collected ? `${d.hours_collected}h` : '<1h'} / 2h min)`}
+                    </span>
+                  </div>
+                ) : (
                   <div className="font-mono text-[10px] text-text-2 flex items-center justify-between pt-1">
-                    <span className="font-semibold text-text-1">
-                      ⏱ {daysLabel}
+                    <span className="font-semibold text-text-1 truncate">
+                      {daysLabel ? `⏱ ${daysLabel}` : d.growth_gb_per_day === 0 ? t('metrics.disk.stable') : d.growth_gb_per_day !== null && d.growth_gb_per_day !== undefined && d.growth_gb_per_day < 0 ? t('metrics.disk.freeing') : `📊 ${t('metrics.disk.trend')}`}
                     </span>
                     {d.growth_gb_per_day != null && (
-                      <span className="text-text-3 flex items-center gap-1 text-[9px]">
+                      <span className="text-text-3 flex items-center gap-1 text-[9px] shrink-0">
                         {growthPositive ? <TrendingUp className="w-3 h-3 text-amber-400" /> : <TrendingDown className="w-3 h-3 text-emerald-400" />}
                         {Math.abs(d.growth_gb_per_day) < 0.1 && d.growth_gb_per_day !== 0
                           ? `${d.growth_gb_per_day > 0 ? '+' : ''}${Math.round(d.growth_gb_per_day * 1024)} Mo/j`
@@ -161,28 +174,55 @@ export const DiskMountCards: React.FC<DiskMountCardsProps> = ({ disks, onNavigat
                 {/* Expansion Vue Tendance */}
                 {selectedMountTrend === d.mount_point && (
                   <div className="p-3 bg-surface-2/60 border border-border rounded-xl space-y-2 animate-fade-in mt-2 font-mono text-[10px]">
-                    <div className="flex justify-between items-center text-text-3 uppercase text-[8px] font-bold">
-                      <span>Projection d'extrapolation (Go)</span>
-                      <span className="text-accent">{d.growth_gb_per_day?.toFixed(2) || '0'} Go / jour</span>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between">
-                        <span className="text-text-3">Actuel :</span>
-                        <span className="font-bold text-text-1">{usedGb} Go</span>
+                    {isCollecting ? (
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center text-text-3 uppercase text-[8px] font-bold">
+                          <span>Projection d'extrapolation</span>
+                          <span className="text-zone-elevated">⏳ Collecte en cours</span>
+                        </div>
+                        <p className="text-text-3 text-[9px] leading-relaxed">
+                          {observationReady === false
+                            ? "Période d'observation du nœud en cours d'initialisation."
+                            : `Données insuffisantes (< 2h d'historique). Historique collecté : ${d.hours_collected ? `${d.hours_collected}h` : '<1h'} sur 2h minimum.`}
+                        </p>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-text-3">+7 jours :</span>
-                        <span className="font-bold text-text-2">
-                          {(parseFloat(usedGb) + (d.growth_gb_per_day || 0) * 7).toFixed(1)} Go
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-text-3">+30 jours :</span>
-                        <span className="font-bold text-amber-400">
-                          {(parseFloat(usedGb) + (d.growth_gb_per_day || 0) * 30).toFixed(1)} Go
-                        </span>
-                      </div>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-center text-text-3 uppercase text-[8px] font-bold">
+                          <span>Projection d'extrapolation (Go)</span>
+                          <span className="text-accent">
+                            {d.growth_gb_per_day !== null && d.growth_gb_per_day !== undefined
+                              ? `${d.growth_gb_per_day > 0 ? '+' : ''}${d.growth_gb_per_day.toFixed(2)} Go / jour`
+                              : '0.00 Go / jour'}
+                          </span>
+                        </div>
+                        {isLowConfidence && (
+                          <div className="text-[9px] text-zone-elevated flex items-center gap-1">
+                            {d.is_noisy
+                              ? '📊 Estimation préliminaire (données fluctuantes / sauts détectés)'
+                              : '📊 Estimation préliminaire (< 6h d\'observation)'}
+                          </div>
+                        )}
+                        <div className="space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-text-3">Actuel :</span>
+                            <span className="font-bold text-text-1">{usedGb} Go</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-3">+7 jours :</span>
+                            <span className="font-bold text-text-2">
+                              {(parseFloat(usedGb) + (d.growth_gb_per_day || 0) * 7).toFixed(1)} Go
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-text-3">+30 jours :</span>
+                            <span className="font-bold text-amber-400">
+                              {(parseFloat(usedGb) + (d.growth_gb_per_day || 0) * 30).toFixed(1)} Go
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
