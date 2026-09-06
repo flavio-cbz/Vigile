@@ -148,10 +148,14 @@ BUILTIN_THRESHOLDS: list[AlertThreshold] = [
     AlertThreshold("swap_usage_percent_high", "swap_percent",
                     warning_at=50.0, critical_at=80.0, resolve_at=40.0,
                     message_template="Swap {value:.1f}% utilisé (seuil > {threshold}%)"),
-    # Descripteurs de fichiers
+    # Descripteurs de fichiers (système)
     AlertThreshold("file_handle_usage_high", "file_handle_percent",
                     warning_at=80.0, critical_at=95.0, resolve_at=70.0,
                     message_template="Descripteurs fichiers {value:.1f}% (seuil > {threshold}%)"),
+    # Descripteurs sshd par groupe applicatif (Netdata apps_group_file_descriptors)
+    AlertThreshold("app_sshd_fd_usage_high", "app_sshd_fds_percent",
+                    warning_at=80.0, critical_at=95.0, resolve_at=70.0,
+                    message_template="SSHD FD {value:.1f}% (seuil > {threshold}%) — {value:.0f}% du groupe sshd"),
     # Taux de pertes réseau (deltas entre snapshots)
     AlertThreshold("network_drops_high", "net_drops_rate",
                     warning_at=5.0, critical_at=20.0, resolve_at=3.0,
@@ -369,6 +373,15 @@ class AlertEngine:
         fh_max = snapshot.get("file_handles_max")
         if fh_used is not None and fh_max and fh_max > 0:
             snapshot["file_handle_percent"] = fh_used / fh_max * 100.0
+
+        # -- Pourcentage FD sshd par groupe applicatif (fallback si worker ne l'a pas calculé) --
+        # Le worker calcule déjà app_sshd_fds_percent, mais on le recalcule ici
+        # par sécurité si seuls used/max sont présents (compat vieux workers).
+        if snapshot.get("app_sshd_fds_percent") is None:
+            sshd_used = snapshot.get("app_sshd_fds_used")
+            sshd_max = snapshot.get("app_sshd_fds_max")
+            if isinstance(sshd_used, (int, float)) and isinstance(sshd_max, (int, float)) and sshd_max > 0:
+                snapshot["app_sshd_fds_percent"] = sshd_used / sshd_max * 100.0
 
         # -- Taux de pertes réseau (delta) --
         if previous:

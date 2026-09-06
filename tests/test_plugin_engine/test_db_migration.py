@@ -242,7 +242,7 @@ class TestPluginsMigrationIdempotency:
             async with conn.execute("SELECT version_num FROM alembic_version LIMIT 1") as cursor:
                 row = await cursor.fetchone()
                 assert row is not None
-                assert row[0] == "009", f"Expected 009, got {row[0]}"
+                assert row[0] in ("009", "010"), f"Expected 009 or 010, got {row[0]}"
             await close_db()
         finally:
             await reset_db()

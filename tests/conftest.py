@@ -87,7 +87,48 @@ def _plugin_gates_for_builtins(monkeypatch):
         return _real_is_plugin_active(plugin_id)
 
     monkeypatch.setattr("master.api.services.is_plugin_active", _fake)
-    monkeypatch.setattr("master.api.nodes.is_plugin_active", _fake)
+    # master.api.nodes may not expose is_plugin_active in current tree (moved to services)
+    try:
+        import master.api.nodes as _nodes_mod
+
+        if hasattr(_nodes_mod, "is_plugin_active"):
+            monkeypatch.setattr(_nodes_mod, "is_plugin_active", _fake)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_plugin_base_registry():
+    """Isole le registre de classes PluginBase pour éviter les fuites entre tests."""
+    from master.core.plugin_base import PluginBase
+
+    orig = dict(PluginBase._decorated_registry)
+    yield
+    PluginBase._decorated_registry.clear()
+    PluginBase._decorated_registry.update(orig)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_global_node_manager():
+    """Isole le singleton global node_manager : vide les connexions/intents
+    avant et après chaque test pour éviter que test_main_lifespan (lifespan)
+    voie des _connections résiduelles d'un test précédent."""
+    from master.core.node_manager import node_manager as _global_nm
+
+    # pre-test cleanup
+    _global_nm._connections.clear()
+    _global_nm._pending_intents.clear()
+    _global_nm._intent_nodes.clear()
+    _global_nm._intent_created_at.clear()
+    _global_nm._intent_max_age.clear()
+    yield
+    # post-test cleanup — garantit que même un test qui enregistre une connexion
+    # ne pollue pas le suivant (test_main_lifespan exige connected_nodes == [])
+    _global_nm._connections.clear()
+    _global_nm._pending_intents.clear()
+    _global_nm._intent_nodes.clear()
+    _global_nm._intent_created_at.clear()
+    _global_nm._intent_max_age.clear()
 
 
 @pytest.fixture

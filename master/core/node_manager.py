@@ -50,19 +50,11 @@ from master.db.disk_scan_cache import (
     set_cached_disk_scan,
     set_node_disk_mounts,
 )
-from master.schemas.disk_scan import DiskNode, DiskScanResult
+from master.schemas.disk_scan import DiskScanResult
 
 DEFAULT_TIMEOUT: float = 30.0
 
 logger = logging.getLogger(__name__)
-
-
-def _flatten_disk_nodes(node: DiskNode) -> Generator[DiskNode, None, None]:
-    """Yield all descendant DiskNodes recursively."""
-    if node.children:
-        for child in node.children:
-            yield child
-            yield from _flatten_disk_nodes(child)
 
 
 # NodeState is imported from master.core.enums for canonical definition
@@ -133,6 +125,7 @@ _VALID_NODE_FIELDS: set[str] = {
     "name",
     "node_group",
     "disabled",
+    "last_ip",
 }
 
 # patch_metadata allow-list — deliberately narrower than _VALID_NODE_FIELDS (never state/public_key)
@@ -600,20 +593,21 @@ class NodeManager:
         previous_hostname = row["hostname"]
         now = time.time()
 
-        await log_action(
-            db,
-            user_id=deleted_by,
-            action=AuditAction.NODE_DELETED,
-            node_id=node_id,
-            details={
-                "previous_state": previous_state,
-                "previous_name": previous_name,
-                "previous_hostname": previous_hostname,
-            },
-        )
+        from master.db.database import transaction
 
-        await db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
-        await db.commit()
+        async with transaction(db):
+            await log_action(
+                db,
+                user_id=deleted_by,
+                action=AuditAction.NODE_DELETED,
+                node_id=node_id,
+                details={
+                    "previous_state": previous_state,
+                    "previous_name": previous_name,
+                    "previous_hostname": previous_hostname,
+                },
+            )
+            await db.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
 
         async with self._lock:
             conn = self._connections.pop(node_id, None)
@@ -1153,23 +1147,11 @@ class NodeManager:
                 return
 
             try:
-                await set_cached_disk_scan(db, node_id, result["output"], time.time())
+                await set_cached_disk_scan(db, node_id, "/", result["output"], time.time())
             except Exception as exc:
                 logger.warning(
                     "Node %s: failed to cache background disk-scan result: %s", node_id, exc
                 )
-
-            # Extract mount list from the worker's own disk report and persist it.
-            try:
-                all_nodes = [parsed.root] + list(_flatten_disk_nodes(parsed.root))
-                mounts = list({d.path for d in all_nodes if d.path})
-            except Exception:
-                mounts = []
-            if mounts:
-                try:
-                    await set_node_disk_mounts(db, node_id, mounts)
-                except Exception as exc:
-                    logger.warning("Node %s: failed to persist disk mounts: %s", node_id, exc)
 
             try:
                 await log_action(

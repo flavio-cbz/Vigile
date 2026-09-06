@@ -45,8 +45,8 @@ cleanup() {
 trap cleanup EXIT
 
 # ── Argument parsing ─────────────────────────────────────────────────────────
-JOIN_TOKEN=""
-MASTER_URL=""
+JOIN_TOKEN="${JOIN_TOKEN:-}"
+MASTER_URL="${MASTER_URL:-}"
 UNINSTALL=false
 CA_BUNDLE=""
 CACERT=""

@@ -329,6 +329,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     outbox_cleanup = asyncio.create_task(outbox_cleanup_loop())
 
+    # 14. Service Collector (B4) — précalcul LIST_SERVICES en cache toutes les
+    #     30s ± 10s (jitter anti thundering herd), Semaphore(5) en interne.
+    from master.core.jobs.service_collector import service_collector_loop
+
+    service_collector = asyncio.create_task(
+        service_collector_loop(db, node_manager)
+    )
+
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
@@ -341,6 +349,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_alerts.cancel()
     outbox_dispatch.cancel()
     outbox_cleanup.cancel()
+    service_collector.cancel()
     try:
         await engine.shutdown()
     except Exception:
@@ -353,10 +362,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             cleanup_alerts,
             outbox_dispatch,
             outbox_cleanup,
+            service_collector,
             return_exceptions=True
         )
     except Exception:
-        pass
+        logger.exception("Error during shutdown task cleanup")
     await node_manager.stop()
 
     # Close shared httpx client pool

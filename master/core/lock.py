@@ -35,4 +35,11 @@ class LoopBoundLock:
         return await self._get_lock().__aenter__()
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
-        return await self._get_lock().__aexit__(exc_type, exc_val, exc_tb)
+        try:
+            loop = asyncio.get_running_loop()
+            lock = self._locks.get(loop)
+            if lock is not None and lock.locked():
+                return await lock.__aexit__(exc_type, exc_val, exc_tb)
+        except RuntimeError:
+            pass
+        return None

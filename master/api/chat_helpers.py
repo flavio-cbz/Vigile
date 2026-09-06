@@ -40,9 +40,6 @@ ALLOWED_LOG_PATHS: tuple[str, ...] = (
     "/var/log/postgresql/postgresql.log",
 )
 
-import master.config
-
-
 # ---------------------------------------------------------------------------
 # Security helpers
 # ---------------------------------------------------------------------------
@@ -86,11 +83,10 @@ def _validate_log_path(path: str | None) -> bool:
 
 
 async def _build_chat_context(
-    nm: NodeManager, db: DB, node_id: str | None, locale: str = "fr"
+    nm: NodeManager, db: DB, node_id: str | None, locale: str = "fr", claims: dict | None = None
 ) -> str:
     """
-    Build a system prompt with node context.
-    If no node_id is specified, returns a generic sysadmin prompt.
+    Build a system prompt with node context or fleet overview context.
     """
     from master.core.prompts import load_prompt
 
@@ -100,7 +96,64 @@ async def _build_chat_context(
         else "Tu dois toujours répondre en français."
     )
     if not node_id or node_id == "all":
-        return load_prompt("chat_generic", lang_instruction=lang_instruction)
+        from master.api.demo_data import is_demo, DEMO_NODES, get_demo_metrics, DEMO_INSIGHTS
+
+        fleet_lines: list[str] = []
+        if claims and is_demo(claims):
+            total_nodes = len(DEMO_NODES)
+            online_nodes = [n for n in DEMO_NODES if n.get("state") == "CONNECTED"]
+            offline_nodes = [n for n in DEMO_NODES if n.get("state") != "CONNECTED"]
+            fleet_lines.append(f"Total servers: {total_nodes} ({len(online_nodes)} online, {len(offline_nodes)} offline)")
+
+            fleet_lines.append("\nOnline Servers:")
+            for n in online_nodes:
+                metrics = get_demo_metrics(n["id"], limit=1)
+                m_str = ""
+                if metrics:
+                    m = metrics[0]
+                    m_str = f" | CPU: {m.get('cpu_percent', 0):.1f}% | RAM: {m.get('mem_percent', 0):.1f}% | Disk: {m.get('disk_percent', 0):.1f}%"
+                fleet_lines.append(f"- {n['name']} (ID: {n['id']}){m_str}")
+
+            if offline_nodes:
+                fleet_lines.append("\nOffline / Unreachable Servers:")
+                for n in offline_nodes:
+                    fleet_lines.append(f"- {n['name']} (State: {n.get('state', 'OFFLINE')})")
+
+            actionable_insights = [i for i in DEMO_INSIGHTS if i.get("severity") in ("warning", "critical", "offline")]
+            if actionable_insights:
+                fleet_lines.append("\nActive Insights / Issues:")
+                for ins in actionable_insights[:5]:
+                    target = ins.get("node_id", "fleet")
+                    fleet_lines.append(f"- [{ins.get('severity', 'warning').upper()}] {ins.get('headline')} (Target: {target}): {ins.get('detail')}")
+        else:
+            nodes = await nm.list_nodes(db)
+            total_nodes = len(nodes)
+            online_nodes = [n for n in nodes if n.get("state") == "CONNECTED"]
+            offline_nodes = [n for n in nodes if n.get("state") != "CONNECTED"]
+            fleet_lines.append(f"Total servers: {total_nodes} ({len(online_nodes)} online, {len(offline_nodes)} offline)")
+
+            fleet_lines.append("\nOnline Servers:")
+            for n in online_nodes:
+                try:
+                    async with db.execute(
+                        "SELECT cpu_percent, mem_percent, disk_percent FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
+                        (n["id"],),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    m_str = ""
+                    if row:
+                        m_str = f" | CPU: {row[cpu_percent]:.1f}% | RAM: {row[mem_percent]:.1f}% | Disk: {row[disk_percent]:.1f}%"
+                    fleet_lines.append(f"- {n.get(name, n[id])} (ID: {n[id][:8]}...){m_str}")
+                except Exception:
+                    fleet_lines.append(f"- {n.get(name, n[id])}")
+
+            if offline_nodes:
+                fleet_lines.append("\nOffline / Unreachable Servers:")
+                for n in offline_nodes:
+                    fleet_lines.append(f"- {n.get(name, n[id])} (State: {n.get(state, OFFLINE)})")
+
+        fleet_context = "\n".join(fleet_lines) if fleet_lines else "No servers registered in the fleet."
+        return load_prompt("chat_generic", lang_instruction=lang_instruction, fleet_context=fleet_context)
 
     node = await nm.get_node(db, node_id)
     if node is None:

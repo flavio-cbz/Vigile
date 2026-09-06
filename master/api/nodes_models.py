@@ -5,7 +5,7 @@ Vigile — Nodes API: Pydantic request/response models
 from __future__ import annotations
 
 from typing import Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class GenerateJoinRequest(BaseModel):
@@ -62,6 +62,7 @@ class NodeResponse(BaseModel):
     disk_percent: float | None = None
     uptime_seconds: float | None = None
     cached_disks_json: str | None = None
+    last_ip: str | None = None
 
 
 class BulkNodeStatus(BaseModel):
@@ -85,6 +86,27 @@ class LogsResponse(BaseModel):
     service: str | None = None
     path: str | None = None
     error: str | None = None
+
+
+class LogFileEntry(BaseModel):
+    """Single log file entry returned by the Worker LIST_LOG_FILES intent.
+
+    Fail-closed: unknown fields from a malicious Worker are rejected.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    size: int
+    mtime: int  # unix seconds
+
+
+class LogFilesResponse(BaseModel):
+    """Response model for the log-file browser on a node."""
+
+    node_id: str
+    files: list[LogFileEntry]
+    truncated: bool = False
 
 
 class DiskMountResponse(BaseModel):
@@ -148,4 +170,6 @@ class NodeStatsResponse(BaseModel):
 
     node_id: str
     snapshots: list[MetricsSnapshotResponse]
+    is_truncated: bool = False
+    total_count: int | None = None
 

@@ -304,6 +304,10 @@ def test_plugin_edge_cases():
         # File handles
         "file_handles_used",
         "file_handles_max",
+        # Per-app sshd FD (apps_group_file_descriptors)
+        "app_sshd_fds_used",
+        "app_sshd_fds_max",
+        "app_sshd_fds_percent",
         # Entropy / Context switches
         "entropy_avail",
         "context_switches",

@@ -42,6 +42,7 @@ DEMO_NODES: list[dict[str, Any]] = [
         "enrolled_at": _NOW - 86400 * 30,
         "created_at": _NOW - 86400 * 30,
         "updated_at": _NOW - 100,
+        "last_ip": "10.0.0.10",
     },
     {
         "id": "demo-node-02",
@@ -56,6 +57,7 @@ DEMO_NODES: list[dict[str, Any]] = [
         "enrolled_at": _NOW - 86400 * 60,
         "created_at": _NOW - 86400 * 60,
         "updated_at": _NOW - 50,
+        "last_ip": "10.0.0.11",
     },
     {
         "id": "demo-node-03",
@@ -70,6 +72,7 @@ DEMO_NODES: list[dict[str, Any]] = [
         "enrolled_at": _NOW - 86400 * 14,
         "created_at": _NOW - 86400 * 14,
         "updated_at": _NOW - 120,
+        "last_ip": "10.0.0.12",
     },
     {
         "id": "demo-node-04",
@@ -84,6 +87,7 @@ DEMO_NODES: list[dict[str, Any]] = [
         "enrolled_at": _NOW - 86400 * 7,
         "created_at": _NOW - 86400 * 7,
         "updated_at": _NOW - 200,
+        "last_ip": "192.168.1.42",
     },
     {
         "id": "demo-node-05",
@@ -98,6 +102,7 @@ DEMO_NODES: list[dict[str, Any]] = [
         "enrolled_at": _NOW - 86400 * 90,
         "created_at": _NOW - 86400 * 90,
         "updated_at": _NOW - 10800,
+        "last_ip": "10.0.0.15",
     },
     {
         "id": "demo-node-06",
@@ -112,9 +117,12 @@ DEMO_NODES: list[dict[str, Any]] = [
         "enrolled_at": _NOW - 86400 * 45,
         "created_at": _NOW - 86400 * 45,
         "updated_at": _NOW - 7200,
+        "last_ip": "192.168.1.99",
     },
 ]
 
+
+DEMO_INSIGHTS: list[dict[str, Any]] = []
 
 def get_demo_node(node_id: str) -> dict[str, Any] | None:
     """Return a demo node by ID, or None."""
@@ -825,19 +833,21 @@ DEMO_CHAT_SESSIONS: dict[str, dict[str, Any]] = _initial_chat_sessions()
 
 
 def get_demo_chat_sessions(user_id: str = DEMO_USER_ID) -> list[dict[str, Any]]:
-    """Return all demo chat sessions for a user."""
-    return [
-        {**s, "history": s.get("history", [])}
+    """Return all demo chat sessions for a user, sorted by is_pinned then updated_at."""
+    sessions = [
+        {**s, "history": s.get("history", []), "is_pinned": bool(s.get("is_pinned", False))}
         for s in DEMO_CHAT_SESSIONS.values()
         if s.get("user_id") == user_id
     ]
+    sessions.sort(key=lambda x: (not x.get("is_pinned", False), -x.get("updated_at", 0)))
+    return sessions
 
 
 def get_demo_chat_session(session_id: str) -> dict[str, Any] | None:
     """Return a single demo chat session, or None."""
     s = DEMO_CHAT_SESSIONS.get(session_id)
     if s:
-        return {**s, "history": s.get("history", [])}
+        return {**s, "history": s.get("history", []), "is_pinned": bool(s.get("is_pinned", False))}
     return None
 
 
@@ -847,6 +857,7 @@ def save_demo_chat_session(
     node_id: str | None = None,
     title: str = "Demo Chat Session",
     history: list[dict[str, Any]] | None = None,
+    is_pinned: bool = False,
 ) -> dict[str, Any]:
     """Create or update a demo chat session in-memory."""
     now = time.time()
@@ -856,8 +867,9 @@ def save_demo_chat_session(
         existing["title"] = title
         if history is not None:
             existing["history"] = history
+        existing["is_pinned"] = is_pinned if is_pinned is not None else existing.get("is_pinned", False)
         existing["updated_at"] = now
-        return {**existing, "history": existing.get("history", [])}
+        return {**existing, "history": existing.get("history", []), "is_pinned": bool(existing.get("is_pinned", False))}
     else:
         session = {
             "id": session_id,
@@ -865,11 +877,32 @@ def save_demo_chat_session(
             "node_id": node_id,
             "title": title,
             "history": history or [],
+            "is_pinned": bool(is_pinned),
             "created_at": now,
             "updated_at": now,
         }
         DEMO_CHAT_SESSIONS[session_id] = session
-        return {**session, "history": session.get("history", [])}
+        return {**session, "history": session.get("history", []), "is_pinned": bool(session.get("is_pinned", False))}
+
+
+def patch_demo_chat_session(
+    session_id: str,
+    title: str | None = None,
+    is_pinned: bool | None = None,
+    node_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Patch metadata of an existing demo chat session."""
+    if session_id not in DEMO_CHAT_SESSIONS:
+        return None
+    existing = DEMO_CHAT_SESSIONS[session_id]
+    if title is not None:
+        existing["title"] = title
+    if is_pinned is not None:
+        existing["is_pinned"] = bool(is_pinned)
+    if node_id is not None:
+        existing["node_id"] = node_id
+    existing["updated_at"] = time.time()
+    return {**existing, "history": existing.get("history", []), "is_pinned": bool(existing.get("is_pinned", False))}
 
 
 def delete_demo_chat_session(session_id: str) -> bool:

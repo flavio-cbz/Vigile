@@ -481,3 +481,40 @@ async def test_reject_proposal(db, client, auth_headers):
     assert d["status"] == "REJECTED"
     assert d["rejected_by"] == "test-user"
     assert d["rejection_reason"] == "not needed"
+
+
+@pytest.mark.asyncio
+async def test_approve_destructive_action_operator_forbidden(db, client, auth_headers):
+    """Operators cannot approve DELETE_CONTAINER, STOP_CONTAINER, or STOP_SERVICE proposals."""
+    node_id = await _setup_node(db, "test-destr-op")
+    destructive_actions = ["DELETE_CONTAINER", "STOP_CONTAINER", "STOP_SERVICE"]
+
+    for act in destructive_actions:
+        p = ActionProposal(node_id=node_id, action=act, params={"target": "redis"})
+        await _insert_proposal(db, p)
+
+        resp = await client.post(
+            f"/api/chat/proposals/{p.id}/approve",
+            headers=auth_headers("operator"),
+        )
+        assert resp.status_code == 403
+        assert "strictement réservée aux administrateurs" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_approve_stop_service_protected_forbidden(db, client, auth_headers):
+    """Approving STOP_SERVICE on protected service (ssh, docker.socket, etc.) returns 403 even for admin."""
+    node_id = await _setup_node(db, "test-stop-prot")
+    protected_targets = ["ssh.service", "ssh", "docker.socket", "systemd-resolved"]
+
+    for target in protected_targets:
+        p = ActionProposal(node_id=node_id, action="STOP_SERVICE", params={"service": target})
+        await _insert_proposal(db, p)
+
+        resp = await client.post(
+            f"/api/chat/proposals/{p.id}/approve",
+            headers=auth_headers("admin"),
+        )
+        assert resp.status_code == 403
+        assert "protégé" in resp.json()["detail"]
+

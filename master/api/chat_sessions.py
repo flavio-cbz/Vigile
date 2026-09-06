@@ -22,6 +22,7 @@ from master.api.demo_data import (
     delete_demo_chat_session,
     get_demo_chat_session,
     get_demo_chat_sessions,
+    patch_demo_chat_session,
     is_demo,
     save_demo_chat_session,
 )
@@ -35,6 +36,13 @@ class _SessionSaveRequest(BaseModel):
     node_id: str | None = None
     title: str
     history: list[dict[str, Any]] = []
+    is_pinned: bool | None = None
+
+
+class _SessionPatchRequest(BaseModel):
+    title: str | None = None
+    is_pinned: bool | None = None
+    node_id: str | None = None
 
 
 @router.get(
@@ -54,11 +62,11 @@ async def list_sessions(
     params: tuple[str, ...]
     if node_id and node_id != "all":
         query = (
-            "SELECT * FROM chat_sessions WHERE user_id = ? AND node_id = ? ORDER BY updated_at DESC"
+            "SELECT * FROM chat_sessions WHERE user_id = ? AND node_id = ? ORDER BY is_pinned DESC, updated_at DESC"
         )
         params = (user_id, node_id)
     else:
-        query = "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC"
+        query = "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY is_pinned DESC, updated_at DESC"
         params = (user_id,)
 
     async with db.execute(query, params) as cursor:
@@ -67,6 +75,7 @@ async def list_sessions(
     results = []
     for r in rows:
         d = dict(r)
+        d["is_pinned"] = bool(d.get("is_pinned", 0))
         try:
             d["history"] = json.loads(d.pop("history_json"))
         except Exception:
@@ -102,6 +111,7 @@ async def get_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     d = dict(row)
+    d["is_pinned"] = bool(d.get("is_pinned", 0))
     try:
         d["history"] = json.loads(d.pop("history_json"))
     except Exception:
@@ -131,6 +141,7 @@ async def save_session(
             node_id=db_node_id,
             title=body.title,
             history=body.history,
+            is_pinned=bool(body.is_pinned) if body.is_pinned is not None else False,
         )
 
     user_id = claims["sub"]
@@ -141,29 +152,32 @@ async def save_session(
 
     now = time.time()
     history_str = json.dumps(body.history)
+    is_pinned_val = 1 if body.is_pinned else 0
 
     async with db.execute(
-        "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?",
+        "SELECT id, is_pinned FROM chat_sessions WHERE id = ? AND user_id = ?",
         (sess_id, user_id),
     ) as cursor:
-        exists = await cursor.fetchone() is not None
+        existing = await cursor.fetchone()
 
-    if exists:
+    if existing is not None:
+        if body.is_pinned is None:
+            is_pinned_val = existing["is_pinned"]
         await db.execute(
             """
             UPDATE chat_sessions SET
-                node_id = ?, title = ?, history_json = ?, updated_at = ?
+                node_id = ?, title = ?, history_json = ?, is_pinned = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
             """,
-            (node_id, body.title, history_str, now, sess_id, user_id),
+            (node_id, body.title, history_str, is_pinned_val, now, sess_id, user_id),
         )
     else:
         await db.execute(
             """
-            INSERT INTO chat_sessions (id, user_id, node_id, title, history_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO chat_sessions (id, user_id, node_id, title, history_json, is_pinned, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (sess_id, user_id, node_id, body.title, history_str, now, now),
+            (sess_id, user_id, node_id, body.title, history_str, is_pinned_val, now, now),
         )
     await db.commit()
 
@@ -173,9 +187,70 @@ async def save_session(
         "node_id": node_id,
         "title": body.title,
         "history": body.history,
+        "is_pinned": bool(is_pinned_val),
         "created_at": now,
         "updated_at": now,
     }
+
+
+@router.patch(
+    "/sessions/{session_id}",
+    summary="Patch chat session metadata (Operator+)",
+)
+async def patch_session(
+    session_id: Annotated[str, Path(description="Session UUID")],
+    body: _SessionPatchRequest,
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+) -> dict[str, Any]:
+    """Partially update session title, pin status, or node_id."""
+    if is_demo(claims):
+        patched = patch_demo_chat_session(
+            session_id=session_id,
+            title=body.title,
+            is_pinned=body.is_pinned,
+            node_id=body.node_id,
+        )
+        if patched is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        return patched
+
+    user_id = claims["sub"]
+    async with db.execute(
+        "SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    new_title = body.title if body.title is not None else row["title"]
+    new_pinned = (1 if body.is_pinned else 0) if body.is_pinned is not None else row["is_pinned"]
+    new_node_id = body.node_id if body.node_id is not None else row["node_id"]
+    if new_node_id == "all":
+        new_node_id = None
+    now = time.time()
+
+    await db.execute(
+        """
+        UPDATE chat_sessions SET
+            title = ?, is_pinned = ?, node_id = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+        """,
+        (new_title, new_pinned, new_node_id, now, session_id, user_id),
+    )
+    await db.commit()
+
+    d = dict(row)
+    d["title"] = new_title
+    d["is_pinned"] = bool(new_pinned)
+    d["node_id"] = new_node_id
+    d["updated_at"] = now
+    try:
+        d["history"] = json.loads(d.pop("history_json"))
+    except Exception:
+        d["history"] = []
+    return d
 
 
 @router.delete(

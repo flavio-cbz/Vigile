@@ -161,6 +161,16 @@ class SecurityManager:
         """Return the master public key as base64url-encoded string (for Workers)."""
         return self._master_public_key_b64
 
+    @property
+    def master_private_key(self) -> Ed25519PrivateKey:
+        """Return the master Ed25519 private key object.
+
+        Source de dérivation HKDF pour le chiffrement au repos de la config
+        plugin (``master/core/config_encryption.py``) — la clé dérivée n'est
+        jamais lue depuis l'environnement, uniquement depuis cet objet (DI).
+        """
+        return self._master_private_key
+
     # -----------------------------------------------------------------------
     # JOIN_TOKEN — HMAC-SHA256, single-use, 30-min TTL
     # -----------------------------------------------------------------------
@@ -455,6 +465,9 @@ class SecurityManager:
 
         if claims.get("type") != "access":
             raise InvalidTokenError("Token type mismatch")
+        role = claims.get("role")
+        if not role or role not in ROLES_HIERARCHY:
+            raise InvalidTokenError(f"Invalid role in token: {role!r}")
         return claims
 
     def verify_refresh_token(self, token: str) -> dict[str, Any]:

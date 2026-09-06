@@ -171,7 +171,7 @@ async def chat(
             else:
                 alert_suggestions.append(f"Pourquoi l'alerte {alert_name} est-elle active ?")
 
-    system_prompt = await _build_chat_context(nm, db, node_id, locale)
+    system_prompt = await _build_chat_context(nm, db, node_id, locale, claims=claims)
 
     # Build messages array
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
@@ -179,7 +179,7 @@ async def chat(
     messages.append({"role": "user", "content": message})
 
     # Define tools available to OpenAI-compatible function calling
-    available_tools = [
+    tools_list = [
         {
             "type": "function",
             "function": {
@@ -279,6 +279,7 @@ async def chat(
             },
         },
     ]
+    available_tools = tools_list if (node_id and node_id != "all") else None
 
     async def _event_stream() -> Any:
         token_buffer = ""
@@ -485,6 +486,28 @@ async def chat(
                         # ReAct loop pauses/terminates when write tool is reached
                         yield f"data: {json.dumps({'type': 'done'}, separators=(',', ':'))}\n\n"
                         return
+
+                    else:
+                        error_msg = (
+                            "Veuillez sélectionner un serveur spécifique dans la liste pour exécuter cette inspection."
+                            if locale == "fr"
+                            else "Please select a specific server from the list to perform this inspection."
+                        ) if not (node_id and node_id != "all") else f"Outil '{fn_name}' non reconnu ou non disponible."
+
+                        tool_duration_ms = int((time.monotonic() - tool_start_ts) * 1000)
+                        yield f"data: {json.dumps({'type': 'tool_result', 'tool': fn_name, 'node_id': node_id, 'duration_ms': tool_duration_ms, 'success': False}, separators=(',', ':'))}\n\n"
+
+                        current_messages.append({
+                            "role": "assistant",
+                            "content": token_buffer or None,
+                            "tool_calls": assistant_tool_calls
+                        })
+                        current_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "name": fn_name,
+                            "content": json.dumps({"success": False, "error": error_msg})
+                        })
 
             # Save chat history to DB if session_id is provided
             if session_id:

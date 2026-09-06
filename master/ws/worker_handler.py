@@ -31,6 +31,7 @@ Security guarantees:
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
 import time
@@ -144,7 +145,7 @@ async def worker_join_handler(websocket: WebSocket) -> None:
 async def _run_enrollment(
     websocket: WebSocket,
     db: aiosqlite.Connection,
-    remote: str,
+    remote: str | None,
 ) -> str:
     """
     Run the full enrollment handshake.
@@ -183,7 +184,7 @@ async def _run_enrollment(
 
     # ── Step 3: Check IP prefix restriction ─────────────────────────────────
     ip_prefix = payload.get("ip_prefix", "")
-    if ip_prefix and not remote.startswith(ip_prefix):
+    if ip_prefix and (not remote or not remote.startswith(ip_prefix)):
         logger.warning(
             "Worker %s rejected: IP %s doesn't match prefix %s",
             node_id,
@@ -274,6 +275,7 @@ async def _run_enrollment(
     pending_name = payload.get("name", "") or hostname
     pending_group = payload.get("group", "")
     ip_prefix = payload.get("ip_prefix", "")
+    ip_to_store = remote
 
     async with transaction(db):
         # Atomic consume: only succeeds if consumed=0 (prevents double-enrollment race)
@@ -296,9 +298,9 @@ async def _run_enrollment(
                 """
                 INSERT INTO nodes (
                     id, name, hostname, machine_id, arch, os, public_key,
-                    state, ip_prefix, node_group, version, worker_version,
-                    enrolled_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    state, ip_prefix, node_group, last_ip, version, worker_version,
+                    last_heartbeat, enrolled_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node_id,
@@ -311,8 +313,10 @@ async def _run_enrollment(
                     NodeState.CONNECTED.value,
                     ip_prefix,
                     pending_group,
+                    ip_to_store,
                     version,
                     version,
+                    now,
                     now,
                     now,
                     now,
@@ -329,6 +333,7 @@ async def _run_enrollment(
                     public_key = ?,
                     version = COALESCE(NULLIF(?, ''), version),
                     worker_version = COALESCE(NULLIF(?, ''), worker_version),
+                    last_ip = COALESCE(?, last_ip),
                     enrolled_at = ?,
                     updated_at = ?
                 WHERE id = ?
@@ -341,6 +346,7 @@ async def _run_enrollment(
                     public_key_b64,
                     version,
                     version,
+                    ip_to_store,
                     now,
                     now,
                     node_id,
@@ -370,26 +376,18 @@ async def _run_enrollment(
     logger.info("Enrollment DB committed for node %s (hostname=%s)", node_id, hostname)
 
     # ── Step 11: Transition to CONNECTED ────────────────────────────────────
-    # On first enrollment, the INSERT above already set state=CONNECTED —
-    # we just need to update last_heartbeat. Otherwise we go through the
-    # state machine transition.
-    if is_first_enrollment:
-        await db.execute(
-            "UPDATE nodes SET last_heartbeat = ?, updated_at = ? WHERE id = ?",
-            (now, now, node_id),
-        )
-        await db.commit()
-    else:
+    # On first enrollment, the INSERT above already set state=CONNECTED + last_heartbeat.
+    if not is_first_enrollment:
         await node_manager.transition_state(
             db,
             node_id,
             NodeState.CONNECTED,
-            extra_fields={"last_heartbeat": now},
+            extra_fields={"last_heartbeat": now, "last_ip": ip_to_store} if ip_to_store else {"last_heartbeat": now},
         )
 
     # ── Step 12: Register WebSocket connection ───────────────────────────────
     conn = await node_manager.register_connection(node_id, websocket)
-    conn.remote_address = remote
+    conn.remote_address = remote or "unknown"
 
     # ── Step 13: Send ENROLLMENT_SUCCESS ────────────────────────────────────
     await _send(
@@ -437,7 +435,7 @@ async def _run_enrollment(
 async def _run_reconnect(
     websocket: WebSocket,
     db: aiosqlite.Connection,
-    remote: str,
+    remote: str | None,
     worker_token: str,
     public_key_b64: str,
     fingerprint: dict | None = None,
@@ -503,6 +501,7 @@ async def _run_reconnect(
     arch = fingerprint.get("arch", "")
     os_name = fingerprint.get("os", "")
     version = fingerprint.get("version", "")
+    ip_to_store = remote
     async with transaction(db):
         # Update node fingerprint/version on reconnect
         await db.execute(
@@ -514,10 +513,11 @@ async def _run_reconnect(
                 os = ?,
                 version = COALESCE(NULLIF(?, ''), version),
                 worker_version = COALESCE(NULLIF(?, ''), worker_version),
+                last_ip = COALESCE(?, last_ip),
                 updated_at = ?
             WHERE id = ?
             """,
-            (hostname, machine_id, arch, os_name, version, version, now, node_id),
+            (hostname, machine_id, arch, os_name, version, version, ip_to_store, now, node_id),
         )
         # Revoke old token
         old_token_hash = security.worker_token_hash(worker_token)
@@ -551,12 +551,12 @@ async def _run_reconnect(
         db,
         node_id,
         NodeState.CONNECTED,
-        extra_fields={"last_heartbeat": now},
+        extra_fields={"last_heartbeat": now, "last_ip": ip_to_store} if ip_to_store else {"last_heartbeat": now},
     )
 
     # ── R7: Register WebSocket connection ──────────────────────────────────
     conn = await node_manager.register_connection(node_id, websocket)
-    conn.remote_address = remote
+    conn.remote_address = remote or "unknown"
 
     # ── R8: Send ENROLLMENT_SUCCESS ────────────────────────────────────────
     await _send(
@@ -609,7 +609,7 @@ async def _run_operational(
     websocket: WebSocket,
     db: aiosqlite.Connection,
     node_id: str,
-    remote: str,
+    remote: str | None,
 ) -> None:
     """
     Handle the ongoing operational WebSocket session after enrollment.
@@ -903,18 +903,52 @@ async def _get_node_state(db: aiosqlite.Connection, node_id: str) -> NodeState |
     return NodeState(row["state"])
 
 
-def _get_remote_address(websocket: WebSocket) -> str:
+def _clean_ip(raw: str) -> str | None:
+    """Strip ports/brackets and validate — return canonical IP or None."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    # Bracketed IPv6: "[::1]" or "[::1]:8080" or "[2001:db8::1]:443"
+    if raw.startswith("["):
+        end = raw.find("]")
+        if end != -1:
+            raw = raw[1:end].strip()
+        else:
+            raw = raw.strip("[] ").strip()
+    else:
+        # Plain host with port: "1.2.3.4:8080" → strip port (only when single colon)
+        if raw.count(":") == 1 and "." in raw:
+            ip_part, port_part = raw.rsplit(":", 1)
+            if port_part.isdigit():
+                raw = ip_part.strip()
+    try:
+        return str(ipaddress.ip_address(raw))
+    except Exception:
+        return None
+
+
+def _get_remote_address(websocket: WebSocket) -> str | None:
     """Extract the client IP address from the WebSocket connection.
-    Only trusts X-Forwarded-For if the direct peer is in the trusted_proxies list."""
+
+    Only trusts X-Forwarded-For if the direct peer is in trusted_proxies.
+    Cleans ports/brackets and validates with ipaddress — returns canonical
+    string or None on invalid/unknown.
+    """
     client = websocket.client
     client_ip = client.host if client else ""
 
-    # Only use X-Forwarded-For if the direct connection comes from a trusted proxy
     trusted_proxies = getattr(websocket.app.state, "trusted_proxies", [])
+
+    # Prefer X-Forwarded-For when peer is trusted
     if client_ip and trusted_proxies:
         if client_ip in trusted_proxies:
             forwarded_for = websocket.headers.get("x-forwarded-for", "")
             if forwarded_for:
-                return forwarded_for.split(",")[0].strip()
+                candidate = forwarded_for.split(",")[0].strip()
+                cleaned = _clean_ip(candidate)
+                if cleaned is not None:
+                    return cleaned
+                return None
 
-    return client_ip or "unknown"
+    cleaned = _clean_ip(client_ip) if client_ip else None
+    return cleaned

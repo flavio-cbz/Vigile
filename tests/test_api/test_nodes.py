@@ -720,30 +720,34 @@ async def test_update_worker_success(client: AsyncClient, db, auth_headers):
     )
     await db.commit()
 
+    from master.api import deps
     from master.api.deps import node_manager
     from master.core.proposal_dispatcher import ApprovedProposalDispatcher
     dispatcher = ApprovedProposalDispatcher(node_manager)
 
-    with mock.patch("master.api.nodes_operations.get_proposal_dispatcher", return_value=dispatcher), \
-         mock.patch.object(node_manager, "is_connected", return_value=True), \
-         mock.patch.object(
-             node_manager,
-             "_send_intent",
-             new_callable=mock.AsyncMock,
-             return_value={"success": True, "output": "updated successfully"},
-         ) as mock_send:
-        response = await client.post(
-            "/api/nodes/n-update-1/update",
-            headers=auth_headers("admin"),
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"success": True, "output": "updated successfully"}
-        call_args = mock_send.call_args
-        print("DEBUG INTENT DICT:", call_args.args[1])
-        assert call_args.args[0] == "n-update-1"
-        assert call_args.args[1]["action"] == "UPDATE_WORKER"
-        assert "os" in call_args.args[1]["params"]
-        assert call_args.args[1]["params"]["arch"] == "amd64"
+    app.dependency_overrides[deps.get_proposal_dispatcher] = lambda: dispatcher
+    try:
+        with mock.patch.object(node_manager, "is_connected", return_value=True), \
+             mock.patch.object(
+                 node_manager,
+                 "_send_intent",
+                 new_callable=mock.AsyncMock,
+                 return_value={"success": True, "output": "updated successfully"},
+             ) as mock_send:
+            response = await client.post(
+                "/api/nodes/n-update-1/update",
+                headers=auth_headers("admin"),
+            )
+            assert response.status_code == status.HTTP_200_OK
+            assert response.json() == {"success": True, "output": "updated successfully"}
+            call_args = mock_send.call_args
+            assert call_args.args[0] == "n-update-1"
+            assert call_args.args[1]["action"] == "UPDATE_WORKER"
+            assert "os" in call_args.args[1]["params"]
+            assert call_args.args[1]["params"]["arch"] == "amd64"
+    finally:
+        app.dependency_overrides.pop(deps.get_proposal_dispatcher, None)
+
 
 
 @pytest.mark.asyncio
@@ -754,3 +758,95 @@ async def test_update_worker_requires_admin(client: AsyncClient, auth_headers):
         headers=auth_headers("operator"),
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_get_node_stats_aggregated_includes_disks(client: AsyncClient, db, auth_headers):
+    """Verify that hourly-aggregated stats endpoint (>=2 days) preserves disks data from disks_json and handles multi-snapshot buckets."""
+    import json
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-disks-agg', 'node-disks-agg', 'CONNECTED', ?, ?)",
+        (now, now),
+    )
+    # Insert snapshots across several days with disks_json
+    disks_payload = [
+        {"mount_point": "/", "device": "/dev/sda1", "fs_type": "ext4", "total_bytes": 100 * 1024**3, "used_bytes": 40 * 1024**3, "percent": 40.0},
+        {"mount_point": "/data", "device": "/dev/sdb1", "fs_type": "ext4", "total_bytes": 500 * 1024**3, "used_bytes": 200 * 1024**3, "percent": 40.0},
+    ]
+    disks_json_str = json.dumps(disks_payload)
+
+    for days_ago in [5, 4, 3, 2, 1]:
+        t = now - days_ago * 86400
+        # Insert 3 snapshots in the same hour bucket, one with NULL disks_json to test MAX(disks_json)
+        await db.execute(
+            "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds, disks_json) "
+            "VALUES (?, 'n-disks-agg', ?, ?, 10.0, 8000, 4000, 50.0, 1000, 100, 100000, 40000, 40.0, 3600.0, NULL)",
+            (f"s-agg-{days_ago}-null", t - 60, t - 60),
+        )
+        await db.execute(
+            "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds, disks_json) "
+            "VALUES (?, 'n-disks-agg', ?, ?, 15.0, 8000, 4000, 50.0, 1000, 100, 100000, 40000, 40.0, 3600.0, ?)",
+            (f"s-agg-{days_ago}-valid", t, t, disks_json_str),
+        )
+    await db.commit()
+
+    start_long = int(now - 7 * 86400)
+    end = int(now + 60)
+    response = await client.get(
+        f"/api/nodes/n-disks-agg/stats?limit=5000&start={start_long}&end={end}",
+        headers=auth_headers("operator"),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data.get("is_truncated") is False
+    assert len(data["snapshots"]) >= 5
+    for snap in data["snapshots"]:
+        assert snap["disks"] is not None
+        assert len(snap["disks"]) == 2
+        mounts = [d["mount_point"] for d in snap["disks"]]
+        assert "/" in mounts
+        assert "/data" in mounts
+        assert "disks_json" not in snap
+
+
+@pytest.mark.asyncio
+async def test_get_node_stats_truncation_detection(client: AsyncClient, db, auth_headers):
+    """Verify that is_truncated is True when limit is smaller than total available snapshots."""
+    now = time.time()
+    await db.execute(
+        "INSERT INTO nodes (id, name, state, created_at, updated_at) "
+        "VALUES ('n-trunc', 'node-trunc', 'CONNECTED', ?, ?)",
+        (now, now),
+    )
+    for i in range(10):
+        t = now - (10 - i) * 60
+        await db.execute(
+            "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds) "
+            "VALUES (?, 'n-trunc', ?, ?, 10.0, 8000, 4000, 50.0, 1000, 100, 100000, 40000, 40.0, 3600.0)",
+            (f"s-trunc-{i}", t, t),
+        )
+    await db.commit()
+
+    # Query with limit=3 (out of 10 snapshots)
+    response = await client.get(
+        "/api/nodes/n-trunc/stats?limit=3",
+        headers=auth_headers("operator"),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["is_truncated"] is True
+    assert len(data["snapshots"]) == 3
+
+    # Query with limit=20 (exceeds 10 snapshots)
+    response2 = await client.get(
+        "/api/nodes/n-trunc/stats?limit=20",
+        headers=auth_headers("operator"),
+    )
+    assert response2.status_code == status.HTTP_200_OK
+    data2 = response2.json()
+    assert data2["is_truncated"] is False
+    assert len(data2["snapshots"]) == 10
+
+

@@ -33,6 +33,8 @@ HELP_LINES: dict[str, str] = {
     "master_info": "Master node version and build information",
     "nodes_lost": "Number of nodes in LOST state",
     "intents_failed_total": "Total failed intents by node and action",
+    "alerts_firing_total": "Total number of active firing alerts by severity and name",
+    "fleet_coverage_percent": "Percentage of registered nodes that are currently connected",
 }
 
 TYPE_LINES: dict[str, str] = {
@@ -44,6 +46,8 @@ TYPE_LINES: dict[str, str] = {
     "master_info": "gauge",
     "nodes_lost": "gauge",
     "intents_failed_total": "counter",
+    "alerts_firing_total": "gauge",
+    "fleet_coverage_percent": "gauge",
 }
 
 
@@ -150,6 +154,34 @@ async def render_prometheus(connected_count: int, startup_time: float, version: 
     # 8. vigile_master_info
     lines.append(_with_help_type("master_info"))
     lines.append(_metric_line("master_info", 1, {"version": version}))
+    lines.append("")
+
+    # 9. vigile_alerts_firing_total
+    async with db.execute(
+        "SELECT severity, alert_name, COUNT(*) AS cnt FROM alerts WHERE status = 'firing' GROUP BY severity, alert_name"
+    ) as cursor:
+        alert_rows = await cursor.fetchall()
+    lines.append(_with_help_type("alerts_firing_total"))
+    for arow in alert_rows:
+        lines.append(_metric_line(
+            "alerts_firing_total",
+            arow["cnt"],
+            {"severity": arow["severity"], "name": arow["alert_name"]},
+        ))
+    if not alert_rows:
+        lines.append(_metric_line("alerts_firing_total", 0))
+    lines.append("")
+
+    # 10. vigile_fleet_coverage_percent
+    async with db.execute(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN state = 'CONNECTED' THEN 1 ELSE 0 END) AS connected FROM nodes"
+    ) as cursor:
+        cov_row = await cursor.fetchone()
+    total_nodes = cov_row["total"] if cov_row else 0
+    connected_nodes = cov_row["connected"] if cov_row and cov_row["connected"] is not None else 0
+    cov_pct = (float(connected_nodes) / float(total_nodes) * 100.0) if total_nodes > 0 else 100.0
+    lines.append(_with_help_type("fleet_coverage_percent"))
+    lines.append(_metric_line("fleet_coverage_percent", f"{cov_pct:.1f}"))
     lines.append("")
 
     # Prometheus exposition format: end with a trailing newline

@@ -220,7 +220,7 @@ async def test_disk_scan_cache_then_force(
 async def test_disk_scan_path_not_allowed(
     client: AsyncClient, db, auth_headers, stub_nm  # noqa: ANN001
 ):
-    """Worker returns {success: false, error: 'path not allowed'} → Master 502."""
+    """Disallowed mount point is rejected fail-closed with 400."""
 
     def handler(intent):
         action = intent.get("action", "")
@@ -235,8 +235,8 @@ async def test_disk_scan_path_not_allowed(
         headers=auth_headers("admin"),
         params={"path": "/etc/shadow"},
     )
-    assert resp.status_code == 502
-    assert "path not allowed" in resp.json()["detail"]
+    assert resp.status_code == 400
+    assert "Path is not an allowed mount point" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -290,6 +290,14 @@ async def test_disk_scan_audit_logged(
     client: AsyncClient, db, auth_headers, stub_nm  # noqa: ANN001
 ):
     """After a successful scan, audit log has a DISK_SCAN entry."""
+    def handler(intent):
+        action = intent.get("action", "")
+        if action == "GET_STATS":
+            return {"success": True, "disks": [{"mount_point": "/var"}]}
+        return {"success": True, "output": _disk_scan_json(name="var", path="/var")}
+
+    stub_nm._intent_handler = handler
+
     resp = await client.get(
         f"/api/nodes/{NODE_ID}/disk-scan",
         headers=auth_headers("admin"),

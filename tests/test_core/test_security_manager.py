@@ -397,3 +397,24 @@ def test_sign_policy_bundle_and_execution_grant(security: SecurityManager):
     assert isinstance(grant_sig, str)
     assert len(grant_sig) > 0
 
+
+def test_verify_access_token_invalid_role(security: SecurityManager):
+    """S5: Ensure invalid role in access token raises InvalidTokenError."""
+    from jose import jwt
+    from master.core.security_manager import InvalidTokenError
+
+    now = time.time()
+    payload = {
+        "sub": "user-evil",
+        "username": "evil",
+        "role": "superadmin_fake",
+        "type": "access",
+        "iat": int(now),
+        "exp": int(now + 3600),
+    }
+    fake_token = jwt.encode(payload, security._jwt_access_secret, algorithm=security._jwt_algorithm)
+
+    with pytest.raises(InvalidTokenError, match="Invalid role"):
+        security.verify_access_token(fake_token)
+
+

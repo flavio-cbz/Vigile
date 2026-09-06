@@ -339,3 +339,120 @@ async def test_unauthorized(client):
 async def test_viewer_forbidden(client, auth_headers):
     resp = await client.get("/api/nodes/some-id/services", headers=auth_headers("viewer"))
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_services_cache_hit_vs_force_refresh(db, client, auth_headers):
+    """Vérifie que force_refresh=False sert le cache instantanément sans interroger le Worker,
+    tandis que force_refresh=True force l'interrogation live et met à jour le cache."""
+    import time
+    from master.db.service_cache import get_cached_services, set_cached_services
+
+    node_id = await _setup_node(db, "svc-cache-hit-test")
+    now = time.time()
+    await set_cached_services(db, node_id, SERVICES_JSON, now)
+
+    call_count = 0
+    LIVE_SERVICES = json.dumps([{"name": "custom.service", "state": "active", "status": "running"}])
+
+    async def mock_live_services(nid, intent, *, timeout=30.0):
+        nonlocal call_count
+        call_count += 1
+        return {"intent_id": "s-live", "success": True, "output": LIVE_SERVICES, "error": ""}
+
+    orig = node_manager._send_intent
+    node_manager._send_intent = mock_live_services
+    try:
+        # 1. force_refresh=False → cache hit (0 Worker call)
+        resp = await client.get(f"/api/nodes/{node_id}/services", headers=auth_headers("admin"))
+        assert resp.status_code == 200
+        d = resp.json()
+        assert len(d["services"]) == 3
+        assert d["services"][0]["name"] == "ssh.service"
+        assert d["stale"] is False
+        assert call_count == 0
+
+        # 2. force_refresh=True → live query (Worker called once, cache updated)
+        resp2 = await client.get(
+            f"/api/nodes/{node_id}/services?force_refresh=true", headers=auth_headers("admin")
+        )
+        assert resp2.status_code == 200
+        d2 = resp2.json()
+        assert len(d2["services"]) == 1
+        assert d2["services"][0]["name"] == "custom.service"
+        assert d2["stale"] is False
+        assert call_count == 1
+
+        # 3. Cache in DB updated to custom.service
+        cached_json, cached_at = await get_cached_services(db, node_id)
+        assert "custom.service" in (cached_json or "")
+    finally:
+        node_manager._send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_list_services_single_flight_concurrency(db, client, auth_headers):
+    """Vérifie que des requêtes HTTP concurrentes sur le même nœud ne déclenchent
+    qu'UN SEUL appel Worker grâce au Single-Flight."""
+    node_id = await _setup_node(db, "svc-single-flight")
+    call_count = 0
+
+    async def mock_slow_services(nid, intent, *, timeout=30.0):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return {"intent_id": "sf-1", "success": True, "output": SERVICES_JSON, "error": ""}
+
+    orig = node_manager._send_intent
+    node_manager._send_intent = mock_slow_services
+    try:
+        # Send 5 concurrent requests with force_refresh=True
+        tasks = [
+            client.get(
+                f"/api/nodes/{node_id}/services?force_refresh=true",
+                headers=auth_headers("admin"),
+            )
+            for _ in range(5)
+        ]
+        responses = await asyncio.gather(*tasks)
+        for r in responses:
+            assert r.status_code == 200
+            d = r.json()
+            assert len(d["services"]) == 3
+
+        # Only ONE worker query was triggered
+        assert call_count == 1
+    finally:
+        node_manager._send_intent = orig
+
+
+@pytest.mark.asyncio
+async def test_restart_service_invalidates_cache(db, client, auth_headers):
+    """Vérifie que le restart d'un service invalide le cache en DB (cached_services_at = 0)."""
+    import time
+    from master.db.service_cache import get_cached_services, is_stale, set_cached_services
+
+    node_id = await _setup_node(db, "svc-restart-inval")
+    now = time.time()
+    await set_cached_services(db, node_id, SERVICES_JSON, now)
+
+    _, ts = await get_cached_services(db, node_id)
+    assert ts is not None and is_stale(ts) is False
+
+    orig = node_manager._send_intent
+    node_manager._send_intent = mock_restart_service
+    try:
+        resp = await client.post(
+            f"/api/nodes/{node_id}/services/nginx.service/restart",
+            headers=auth_headers("admin"),
+        )
+        assert resp.status_code == 200
+
+        # Cache must be invalidated (cached_services_at = 0)
+        j, ts_after = await get_cached_services(db, node_id)
+        assert j is not None  # data preserved for SWR
+        assert ts_after == 0
+        assert is_stale(ts_after) is True
+    finally:
+        node_manager._send_intent = orig
+

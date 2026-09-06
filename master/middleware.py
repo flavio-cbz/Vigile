@@ -163,3 +163,32 @@ def setup_rate_limiter(app):
         rate_limiter.max_requests,
         rate_limiter.window,
     )
+
+
+def setup_csp_middleware(app):
+    """Configure Content-Security-Policy middleware.
+
+    Sets a restrictive CSP header on all responses to mitigate XSS and
+    data-injection attacks (faille 10 du plan de migration plugins — hardening
+    J5). The policy allows scripts/styles only from 'self' and 'unsafe-inline'
+    (required for the server-rendered SPA in master/static/).
+    """
+    csp_policy = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
+    @app.middleware("http")
+    async def _csp_middleware(request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = csp_policy
+        return response
+
+    logger.info("CSP middleware active: restrictive policy on all HTTP responses.")

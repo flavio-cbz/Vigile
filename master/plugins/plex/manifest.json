@@ -5,6 +5,7 @@
   "author": "Vigile",
   "trusted": true,
   "description": "Auto-detect Plex Media Server, report active streaming sessions, and diagnose CPU load spikes.",
+  "external_auth_domains": ["plex.tv"],
   "hooks": [
     "on_status_report",
     "get_heavy_process_patterns"
@@ -33,6 +34,24 @@
       "roles": ["admin", "operator"]
     },
     {
+      "path": "/plex.auth.start",
+      "method": "POST",
+      "handler": "auth_start_route",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/plex.auth.cancel",
+      "method": "POST",
+      "handler": "auth_cancel_route",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/auth/status/stream",
+      "method": "GET",
+      "handler": "auth_status_stream_route",
+      "roles": ["admin", "operator"]
+    },
+    {
       "path": "/servers",
       "method": "GET",
       "handler": "servers_route",
@@ -57,6 +76,36 @@
       "roles": ["operator", "viewer"]
     },
     {
+      "path": "/{node_id}/sessions/{session_key}",
+      "method": "DELETE",
+      "handler": "kill_session_route",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/{node_id}/transcodes",
+      "method": "GET",
+      "handler": "transcodes_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/files",
+      "method": "GET",
+      "handler": "files_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/library/{section_id}/scan",
+      "method": "POST",
+      "handler": "scan_library_section_route",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "path": "/{node_id}/photo",
+      "method": "GET",
+      "handler": "photo_proxy_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
       "path": "/{node_id}/library",
       "method": "GET",
       "handler": "library_route",
@@ -66,6 +115,18 @@
       "path": "/{node_id}/users",
       "method": "GET",
       "handler": "users_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/history",
+      "method": "GET",
+      "handler": "history_route",
+      "roles": ["operator", "viewer"]
+    },
+    {
+      "path": "/{node_id}/stats",
+      "method": "GET",
+      "handler": "stats_route",
       "roles": ["operator", "viewer"]
     }
   ],
@@ -78,7 +139,8 @@
         "type": "string",
         "title": "Plex Auth Token",
         "default": "",
-        "description": "Auth token to communicate with Plex API (can be auto-configured via OAuth login)."
+        "description": "Auth token to communicate with Plex API (can be auto-configured via OAuth login).",
+        "secret": true
       },
       "plex_server_url": {
         "type": "string",

@@ -56,9 +56,18 @@ from master.api.schemas.admin import (
 )
 from master.api.worker_binary import refresh_binary_cache
 from master.core.audit import AuditAction, log_action, verify_chain
+from master.core.config_encryption import (
+    SECRET_MASK,
+    derive_config_key,
+    encrypt_secret,
+    is_secret_field,
+    load_manifest_json,
+    mask_secret_fields,
+)
 from master.core.llm_client import LLMClient, LLMError
 from master.core.node_manager import node_manager
 from master.core.plugin_ids import canonical_plugin_id, plugin_file_stem
+from master.core.security_manager import get_security_instance
 import master.core.plugin_manager as _pm_mod
 from master.db.database import get_db_conn, transaction
 
@@ -435,7 +444,7 @@ async def list_plugins(
                 try:
                     meta.update(mod.get_config_schema())
                 except Exception:
-                    pass
+                    logger.debug("Failed to get config schema for plugin", exc_info=True)
 
         elif getattr(active_pm, "_sandbox", False) and any(
             k in active_pm.loaded_plugins
@@ -465,6 +474,12 @@ async def list_plugins(
             if any(k in plugins for k in (plugin_id, name, plugin_file_stem(plugin_id))):
                 plugin_hooks.append(hook_name)
 
+        # Masquage des secrets (chiffrement au repos, plan §5.1) : l'API ne
+        # renvoie jamais le clair ni le chiffré d'un champ `secret: true` —
+        # uniquement le masque `••••••••`.
+        manifest_raw = load_manifest_json(path)
+        masked_config = mask_secret_fields(db_state["config"], manifest_raw)
+
         result.append(
             {
                 "id": plugin_id,
@@ -473,13 +488,18 @@ async def list_plugins(
                 "category": meta["category"],
                 "schema": meta["schema"],
                 "enabled": db_state["enabled"],
-                "config": db_state["config"],
+                "config": masked_config,
                 "loaded": is_loaded,
                 "hooks": plugin_hooks,
                 "path": path,
                 "module": module_name,
                 "error": error,
                 "version": version,
+                "kill_switch": (
+                    active_pm._kill_switch.get(plugin_id)
+                    if hasattr(active_pm, "_kill_switch")
+                    else {}
+                ),
             }
         )
 
@@ -671,8 +691,8 @@ async def install_plugin(
         if os.path.exists(plugin_path):
             try:
                 os.remove(plugin_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to remove plugin file %s: %s", plugin_path, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Impossible de charger le plugin dans PluginManager.",
@@ -772,8 +792,8 @@ async def upload_plugin(
         if os.path.exists(plugin_path):
             try:
                 os.remove(plugin_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to remove plugin file %s: %s", plugin_path, exc)
         raise HTTPException(
             status_code=500, detail="Impossible de charger le plugin dans PluginManager."
         )
@@ -813,6 +833,27 @@ async def configure_plugin(
     plugin_path = _resolve_plugin_path(raw_plugin_id, plugin_stem, settings.plugins_dir)
     if plugin_path is None:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' introuvable.")
+
+    # Chiffrement au repos (plan §5.1) : tout champ marqué `secret: true` dans
+    # le manifest du plugin est chiffré AES-256-GCM avant persistance. Une
+    # valeur égale au masque `••••••••` signifie « inchangé » → on conserve la
+    # valeur stockée (même sémantique que l'API key LLM). Les champs non
+    # secrets passent par le chemin historique, inchangé.
+    manifest = load_manifest_json(plugin_path)
+    secret_fields = [k for k in config if is_secret_field(manifest, k)] if manifest else []
+    if secret_fields:
+        key = derive_config_key(get_security_instance().master_private_key)
+        async with db.execute(
+            "SELECT config_json FROM plugins WHERE id = ?", (plugin_id_canonical,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        stored_config = json.loads(row[0]) if row and row[0] else {}
+        for field in secret_fields:
+            value = config.get(field)
+            if value == SECRET_MASK:
+                config[field] = stored_config.get(field, "")
+            elif isinstance(value, str) and value and not value.startswith("v1:"):
+                config[field] = encrypt_secret(value, key)
 
     config_str = json.dumps(config)
     async with transaction(db):

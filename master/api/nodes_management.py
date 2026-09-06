@@ -28,6 +28,8 @@ from master.api.nodes_models import (
     ConfigureRequest,
     GenerateJoinRequest,
     JoinTokenResponse,
+    LogFileEntry,
+    LogFilesResponse,
     LogsResponse,
     MetricsSnapshotResponse,
     NodePatchRequest,
@@ -39,8 +41,28 @@ from master.core.audit import AuditAction, log_action
 from master.core.enums import WorkerAction
 from master.core.node_manager import NodeManager, NodeState
 from master.core.security_manager import SecurityManager
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Log file browsing
+# ---------------------------------------------------------------------------
+
+# Mirrors worker/logs.go allowedLogPrefixes boundary semantics: a path is
+# allowed when it equals a prefix or starts with a prefix followed by "/"
+# (prevents /var/log_backup and /var/lib/docker/containers_evil). The
+# normalized bases are precomputed once (normpath strips the trailing slash,
+# like filepath.Clean on the Worker side). /var/log/journal/ is already
+# covered by /var/log/.
+ALLOWED_LOG_PREFIXES: tuple[str, ...] = (
+    "/var/log/",
+    "/var/lib/docker/containers/",
+)
+_ALLOWED_LOG_BASES: tuple[str, ...] = tuple(
+    os.path.normpath(prefix) for prefix in ALLOWED_LOG_PREFIXES
+)
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +165,7 @@ async def generate_join_token(
     master_url = request.app.state.master_url
     curl_command = (
         f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-        f"sudo bash -s -- --token {token} --master {master_url}"
+        f"sudo JOIN_TOKEN='{token}' bash -s -- --master {master_url}"
     )
 
     expires_in = int(payload["expires_at"] - now)
@@ -189,7 +211,7 @@ async def regenerate_join_token(
             expires_in=1800,
             curl_command=(
                 f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-                f"sudo bash -s -- --token {fake_token} --master {master_url}"
+                f"sudo JOIN_TOKEN='{fake_token}' bash -s -- --master {master_url}"
             ),
         )
 
@@ -247,7 +269,7 @@ async def regenerate_join_token(
     master_url = request.app.state.master_url
     curl_command = (
         f"curl -sSL {master_url}/api/nodes/kickstart.sh | "
-        f"sudo bash -s -- --token {token} --master {master_url}"
+        f"sudo JOIN_TOKEN='{token}' bash -s -- --master {master_url}"
     )
     expires_in = int(payload["expires_at"] - now)
     logger.info("JOIN_TOKEN regenerated: node_id=%s expires_in=%ds", node_id, expires_in)
@@ -568,7 +590,7 @@ async def get_bulk_status(
                     if isinstance(conts, list):
                         containers_count = len(conts)
                 except Exception:
-                    pass
+                    logger.debug("Failed to parse cached containers JSON", exc_info=True)
 
             statuses[node_id] = BulkNodeStatus(
                 cpu=snap.get("cpu"),
@@ -596,6 +618,8 @@ async def get_node_stats(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     limit: Annotated[int, Query(ge=1, le=1440, description="Number of snapshots to return")] = 1440,
+    start: Annotated[float | None, Query(description="Start timestamp")] = None,
+    end: Annotated[float | None, Query(description="End timestamp")] = None,
     nm: NodeManager = Depends(get_node_manager),
 ) -> NodeStatsResponse:
     """Return the latest metrics snapshots for a node, ordered by time descending."""
@@ -615,23 +639,63 @@ async def get_node_stats(
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
+    effective_end = end if end is not None else time.time()
+
+    where_clauses = ["node_id = ?"]
+    params: list[Any] = [node_id]
+    if start is not None:
+        where_clauses.append("collected_at >= ?")
+        params.append(start)
+    if end is not None:
+        where_clauses.append("collected_at <= ?")
+        params.append(end)
+
+    where_str = " AND ".join(where_clauses)
+    # Query limit + 1 to detect if results are truncated
+    params.append(limit + 1)
+
     rows: list[dict] = []
-    async with db.execute(
+    if start is not None and (effective_end - start) >= 86400 * 2:
+        query = f"""
+            SELECT
+                MAX(collected_at) as collected_at,
+                AVG(cpu_percent) as cpu_percent,
+                AVG(cpu_load_1m) as cpu_load_1m,
+                AVG(cpu_load_5m) as cpu_load_5m,
+                AVG(cpu_load_15m) as cpu_load_15m,
+                MAX(cpu_cores) as cpu_cores,
+                CAST(AVG(mem_total_bytes) AS INTEGER) as mem_total_bytes,
+                CAST(AVG(mem_used_bytes) AS INTEGER) as mem_used_bytes,
+                AVG(mem_percent) as mem_percent,
+                CAST(AVG(swap_total_bytes) AS INTEGER) as swap_total_bytes,
+                CAST(AVG(swap_used_bytes) AS INTEGER) as swap_used_bytes,
+                CAST(AVG(disk_total_bytes) AS INTEGER) as disk_total_bytes,
+                CAST(AVG(disk_used_bytes) AS INTEGER) as disk_used_bytes,
+                AVG(disk_percent) as disk_percent,
+                MAX(uptime_seconds) as uptime_seconds,
+                MAX(processes) as processes,
+                MAX(disks_json) as disks_json
+            FROM metrics_snapshots
+            WHERE {where_str}
+            GROUP BY CAST(collected_at / 3600 AS INTEGER)
+            ORDER BY collected_at DESC
+            LIMIT ?
         """
-        SELECT
-            collected_at,
-            cpu_percent, cpu_load_1m, cpu_load_5m, cpu_load_15m, cpu_cores,
-            mem_total_bytes, mem_used_bytes, mem_percent,
-            swap_total_bytes, swap_used_bytes,
-            disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes, disks_json
-        FROM metrics_snapshots
-        WHERE node_id = ?
-        ORDER BY collected_at DESC
-        LIMIT ?
-        """,
-        (node_id, limit),
-    ) as cursor:
+    else:
+        query = f"""
+            SELECT
+                collected_at,
+                cpu_percent, cpu_load_1m, cpu_load_5m, cpu_load_15m, cpu_cores,
+                mem_total_bytes, mem_used_bytes, mem_percent,
+                swap_total_bytes, swap_used_bytes,
+                disk_total_bytes, disk_used_bytes, disk_percent,
+                uptime_seconds, processes, disks_json
+            FROM metrics_snapshots
+            WHERE {where_str}
+            ORDER BY collected_at DESC
+            LIMIT ?
+        """
+    async with db.execute(query, tuple(params)) as cursor:
         for row in await cursor.fetchall():
             d = dict(row)
             if d.get("disks_json"):
@@ -642,9 +706,14 @@ async def get_node_stats(
             d.pop("disks_json", None)
             rows.append(d)
 
+    is_truncated = len(rows) > limit
+    if is_truncated:
+        rows = rows[:limit]
+
     return NodeStatsResponse(
         node_id=node_id,
         snapshots=[MetricsSnapshotResponse(**r) for r in rows],
+        is_truncated=is_truncated,
     )
 
 
@@ -710,10 +779,13 @@ async def get_node_logs(
         params = {"service": service, "lines": lines}
     elif effective_path:
         clean_path = os.path.normpath(effective_path)
-        if not clean_path.startswith("/var/log/") and clean_path != "/var/log":
+        if not any(
+            clean_path == base or clean_path.startswith(base + "/")
+            for base in _ALLOWED_LOG_BASES
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Path outside allowed prefix (/var/log/)",
+                detail=f"Path outside allowed prefix ({', '.join(ALLOWED_LOG_PREFIXES)})",
             )
         action = WorkerAction.READ_LOGS
         params = {"path": clean_path, "lines": lines}
@@ -744,4 +816,89 @@ async def get_node_logs(
         service=service,
         path=effective_path if not service else None,
         error=result.get("error") if not result.get("success") else None,
+    )
+
+
+@router.get(
+    "/{node_id}/log-files",
+    response_model=LogFilesResponse,
+    summary="List log files on a node (Operator+)",
+)
+async def list_node_log_files(
+    node_id: Annotated[str, Path(description="Node UUID")],
+    db: DB,
+    claims: Annotated[dict, Depends(require_role("operator", "admin"))],
+    nm: NodeManager = Depends(get_node_manager),
+    port: WorkerQueryPort = Depends(get_worker_query_port),
+) -> LogFilesResponse:
+    """
+    List log files browsable on a Worker via the LIST_LOG_FILES intent.
+
+    Read-only: returns the file listing (path, size, mtime) for the log
+    browser UI. No mutation, no audit entry.
+    """
+    # Demo mode: return a fixed synthetic listing
+    if is_demo(claims):
+        demo_node = get_demo_node(node_id)
+        if demo_node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+        now = int(time.time())
+        demo_files = [
+            LogFileEntry(path="/var/log/syslog", size=1_234_567, mtime=now - 300),
+            LogFileEntry(path="/var/log/auth.log", size=890_123, mtime=now - 600),
+            LogFileEntry(path="/var/log/kern.log", size=456_789, mtime=now - 900),
+            LogFileEntry(path="/var/log/nginx/access.log", size=2_345_678, mtime=now - 120),
+            LogFileEntry(path="/var/log/nginx/error.log", size=123_456, mtime=now - 180),
+        ]
+        return LogFilesResponse(node_id=node_id, files=demo_files)
+
+    node = await nm.get_node(db, node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    try:
+        result = await port.list_log_files(node_id, timeout=10.0)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    except TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Worker did not respond to log-file request in time",
+        )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.get("error") or "LIST_LOG_FILES failed",
+        )
+
+    try:
+        payload = json.loads(result.get("output", ""))
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="invalid LIST_LOG_FILES payload",
+        )
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="invalid LIST_LOG_FILES payload",
+        )
+
+    try:
+        files = [LogFileEntry(**f) for f in payload["files"]]
+    except (ValidationError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="invalid LIST_LOG_FILES payload",
+        )
+
+    return LogFilesResponse(
+        node_id=node_id,
+        files=files,
+        truncated=bool(payload.get("truncated", False)),
     )

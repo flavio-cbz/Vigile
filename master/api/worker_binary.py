@@ -262,7 +262,7 @@ def _get_etag(binary_path: Path) -> str:
             if val:
                 return f'"{val}"'
         except Exception:
-            pass
+            logger.debug("Failed to read SHA256 file for ETag", exc_info=True)
     return f'"{binary_path.stat().st_mtime}"'
 
 

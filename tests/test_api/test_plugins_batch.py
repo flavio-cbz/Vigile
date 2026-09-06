@@ -114,6 +114,13 @@ class _FakeNodeManager:
             return {"id": node_id}
         return None
 
+    def get_connected_nodes(self):
+        # docker plugin expects get_connected_nodes() → list of objects with .id
+        return []
+
+    async def is_connected(self, node_id: str) -> bool:
+        return False
+
 
 @pytest.fixture
 def auth_headers(security: SecurityManager):
@@ -432,7 +439,9 @@ async def test_batch_rejects_docker_mutation_command_403(
     assert "mutation" in results[0]["error"].lower()
     # The sibling read sub-request still succeeds (per-sub-request semantics)
     assert results[1]["status"] == 200
-    assert results[1]["data"] == {"containers": [], "count": 0}
+    # B5: docker plugin now returns cached_at via time.time() — accept superset
+    assert results[1]["data"]["containers"] == []
+    assert results[1]["data"]["count"] == 0
 
 
 @pytest.fixture
@@ -490,7 +499,10 @@ async def test_batch_rejects_systemd_mutation_command_403(
     assert "mutation" in results[0]["error"].lower()
     # The sibling read sub-request still succeeds (per-sub-request semantics)
     assert results[1]["status"] == 200
-    assert results[1]["data"] == {"services": [], "count": 0}
+    # B4: list_services_route now returns {services, count, cached_at, stale, errors}
+    # — accept superset to keep test stable across cache contract evolution
+    assert results[1]["data"]["services"] == []
+    assert results[1]["data"]["count"] == 0
 
 
 # ---------------------------------------------------------------------------

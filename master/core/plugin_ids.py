@@ -8,7 +8,10 @@ and public canonical plugin identifiers.
 from __future__ import annotations
 
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 _BUILTIN_FILE_TO_ID: dict[str, str] = {
     "metrics_plugin": "metrics",
@@ -31,8 +34,8 @@ def canonical_plugin_id(name: str, plugins_dir: str | None = None) -> str:
                     data = json.load(f)
                 if isinstance(data, dict) and "id" in data and data["id"]:
                     return str(data["id"])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to read plugin manifest at %s: %s", manifest_path, exc)
 
     if name in _BUILTIN_FILE_TO_ID:
         return _BUILTIN_FILE_TO_ID[name]

@@ -40,6 +40,7 @@ def _node_to_response(node: dict) -> dict:
         "enrolled_recently": enrolled_recently,
         "version": node.get("worker_version") or node.get("version"),
         "worker_version": node.get("worker_version") or node.get("version"),
+        "last_ip": node.get("last_ip"),
     }
 
 
