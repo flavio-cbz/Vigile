@@ -168,54 +168,109 @@ Le Worker se connecte directement en `ws://` au Master sur le port 8000.
 
 ### Authentification et Sécurité
 *   `POST /api/auth/login` : Authentification et génération de jetons d'accès JWT / Refresh Tokens avec rotation de famille et détection de vol.
-*   `POST /api/auth/change-password` : Force le changement du mot de passe initial.
 *   `POST /api/auth/refresh` : Rafraîchissement des jetons d'accès.
 *   `POST /api/auth/logout` : Révocation de la session.
+*   `POST /api/auth/change-password` : Force le changement du mot de passe initial.
+*   `GET /api/auth/me` : Retourne les informations de l'utilisateur authentifié.
 
 ### Gestion de Flotte
-*   `GET /api/nodes` : Liste paginée des serveurs supervisés.
 *   `POST /api/nodes/generate-join` : Génération d'un jeton HMAC-SHA256 à usage unique pour enrôler un nouveau nœud.
+*   `GET /api/nodes` : Liste paginée des serveurs supervisés.
+*   `GET /api/nodes/{node_id}` : Détails d'un nœud spécifique.
 *   `DELETE /api/nodes/{node_id}` : Révocation permanente d'un nœud.
+*   `PATCH /api/nodes/{node_id}` : Mise à jour partielle de la configuration d'un nœud.
+*   `POST /api/nodes/{node_id}/configure` : Configurer un nœud (nom, groupe, etc.).
+*   `POST /api/nodes/{node_id}/regenerate-token` : Régénérer le token d'enrôlement d'un nœud.
+*   `POST /api/nodes/{node_id}/update` : Déclencher la mise à jour du Worker (admin).
+*   `GET /api/nodes/{node_id}/stats` : Statistiques en temps réel d'un nœud.
+*   `GET /api/nodes/{node_id}/logs` : Récupère les journaux en direct d'un nœud.
+*   `GET /api/nodes/{node_id}/alerts` : Liste les alertes d'un nœud.
+*   `GET /api/nodes/alerts/{alert_id}` : Détails d'une alerte avec investigation LLM.
+*   `GET /api/nodes/{node_id}/baseline` : Percentiles de référence statistique d'un nœud.
+*   `POST /api/nodes/{node_id}/baseline/recalculate` : Forcer le recalcul des baselines.
+*   `GET /api/nodes/{node_id}/insights` : Insights en temps réel d'un nœud.
+*   `POST /api/nodes/{node_id}/profile/regenerate` : Régénérer le profil d'insights.
+*   `POST /api/nodes/{node_id}/insights/analyze` : Lancer une analyse LLM des insights.
+*   `GET /api/nodes/{node_id}/disk-scan` : Analyse d'utilisation du disque d'un nœud.
+*   `GET /api/nodes/verify-chain` : Vérifie l'intégrité de la chaîne de nœuds.
+*   `GET /api/nodes/bulk/status` : Statut en masse de tous les nœuds.
+*   `GET /api/nodes/kickstart.sh` : Script d'installation du Worker (Linux).
+*   `GET /api/nodes/kickstart.ps1` : Script d'installation du Worker (Windows).
+
+### Services et Conteneurs
+*   `GET /api/nodes/{node_id}/services` : Liste les services systemd d'un nœud.
+*   `GET /api/nodes/{node_id}/services/{service_name}` : Statut d'un service systemd.
+*   `POST /api/nodes/{node_id}/services/{service_name}/restart` : Redémarrer un service.
+*   `GET /api/nodes/{node_id}/containers` : Liste les conteneurs Docker d'un nœud.
+*   `POST /api/nodes/{node_id}/containers/{container_id}/restart` : Redémarrer un conteneur.
 
 ### Audit
 *   `GET /api/audit` : Journal d'audit paginé et sécurisé.
 *   `GET /api/admin/audit-verify` : Vérifie l'intégrité de la chaîne de hash de l'audit.
 
-### Alerts et Monitoring
-*   `GET /api/alerts` : Liste paginée des alertes déclenchées.
-*   `GET /api/alerts/summary` : Résumé agrégé des alertes par sévérité et nœud.
-*   `POST /api/alerts/{alert_id}/acknowledge` : Acquitte une alerte active.
+### Alertes et Monitoring
+*   `GET /api/admin/alerts` : Liste paginée des alertes déclenchées.
+*   `GET /api/admin/alerts/summary` : Résumé agrégé des alertes par sévérité et nœud.
+*   `POST /api/admin/alerts/{alert_id}/acknowledge` : Acquitte une alerte active.
+*   `GET /api/admin/alerts/metrics` : Métriques de comptage des alertes pour le tableau de bord.
 
 ### Plugins
-*   `GET /api/plugins` : Liste des plugins installés.
-*   `GET /api/plugins/{plugin_id}` : Détail et configuration d'un plugin.
-*   `POST /api/plugins/{plugin_id}/config` : Mise à jour de la configuration d'un plugin.
-*   `POST /api/plugins/{plugin_id}/toggle` : Activer/désactiver un plugin.
-*   `POST /api/plugins/upload` : Téléverser un nouveau plugin.
 *   `GET /api/plugins/pages` : Pages de l'interface fournies par les plugins.
-*   `POST /api/plugins/registry/{plugin_id}/install` : Installer un plugin depuis le registre.
+*   `POST /api/plugins/batch` : Exécuter plusieurs commandes read-only en lot.
+*   `POST /api/plugins/{plugin_id}/disable` : Désactiver un plugin via le kill switch.
+*   `POST /api/plugins/{plugin_id}/enable` : Réactiver un plugin via le kill switch.
+*   `GET /api/admin/plugins` : Liste des plugins installés et chargés.
+*   `GET /api/admin/plugins/registry` : Liste des plugins disponibles dans le registre.
+*   `POST /api/admin/plugins/registry/{plugin_id}/install` : Installer un plugin depuis le registre.
+*   `POST /api/admin/plugins/upload` : Téléverser un nouveau plugin.
+*   `POST /api/admin/plugins/{plugin_id}/config` : Mettre à jour la configuration d'un plugin.
+*   `POST /api/admin/plugins/{plugin_id}/toggle` : Activer/désactiver un plugin.
+*   `DELETE /api/admin/plugins/{plugin_id}` : Désinstaller un plugin.
+
+### Chat et Copilote
+*   `POST /api/chat` : Envoyer un message et streamer la réponse de l'IA.
+*   `GET /api/chat/suggestions` : Suggestions d'actions de l'IA.
+*   `GET /api/chat/sessions` : Liste les sessions de chat.
+*   `GET /api/chat/sessions/{session_id}` : Détails d'une session de chat.
+*   `POST /api/chat/sessions` : Créer ou mettre à jour une session de chat.
+*   `DELETE /api/chat/sessions/{session_id}` : Supprimer une session de chat.
+
+### Propositions d'Actions
+*   `GET /api/chat/proposals` : Liste les propositions d'actions du Copilote.
+*   `GET /api/chat/proposals/{proposal_id}` : Détails d'une proposition.
+*   `POST /api/chat/proposals/{proposal_id}/approve` : Approuver et exécuter une proposition.
+*   `POST /api/chat/proposals/{proposal_id}/reject` : Rejeter une proposition.
+
+### Investigations
+*   `GET /api/investigations` : Liste les investigations ouvertes.
+
+### Streaming (SSE)
+*   `GET /api/nodes/events/stream` : Flux SSE des événements de nœuds en temps réel (connexions, déconnexions, métriques).
+*   `GET /api/plugins/events/stream` : Flux SSE des événements de plugins (chargement, invalidation).
 
 ### Settings
-*   `GET /api/settings` : Récupérer la configuration LLM et globale.
-*   `POST /api/settings/llm` : Mettre à jour les paramètres LLM (modèle, température, API key).
-*   `POST /api/settings/llm/test` : Tester la connectivité LLM avec un ping simple.
+*   `GET /api/admin/settings` : Récupérer la configuration LLM et globale.
+*   `POST /api/admin/settings/llm` : Mettre à jour les paramètres LLM (modèle, température, API key).
+*   `POST /api/admin/settings/llm/test` : Tester la connectivité LLM avec un ping simple.
+*   `POST /api/admin/intent-config` : Mettre à jour l'âge maximal d'une intention par défaut.
 
-### Worker Binary
-*   `GET /api/{os}/{arch}/worker` : Télécharger le binaire Worker compilé pour l'OS et l'architecture cible.
-*   `GET /api/{os}/{arch}/worker.sha256` : Télécharger le hash SHA-256 du binaire Worker.
-*   `GET /api/binary/refresh` : Reconstruire le cache des binaires Worker.
-*   `GET /api/manifest.json` : Manifest des versions de Worker disponibles.
-*   `GET /api/public-key` : Clé publique Ed25519 du Master pour vérification des signatures.
-
-### Streaming
-*   `GET /api/stream` : Flux SSE des événements nœuds en temps réel (connexions, déconnexions, métriques).
-
-### Nœuds (étendu)
-*   `GET /api/nodes/connections` : Liste des connexions WebSocket actives.
+### Binaire Worker
+*   `GET /api/nodes/binary/{os}/{arch}/worker` : Télécharger le binaire Worker compilé pour l'OS et l'architecture cible.
+*   `GET /api/nodes/binary/{os}/{arch}/worker.sha256` : Télécharger le hash SHA-256 du binaire Worker.
+*   `GET /api/nodes/binary/manifest.json` : Manifest des versions de Worker disponibles.
+*   `GET /api/nodes/binary/public-key` : Clé publique Ed25519 du Master pour vérification des signatures.
+*   `GET /api/admin/binary/refresh` : Reconstruire le cache des binaires Worker.
 
 ### Administration
+*   `GET /api/admin/nodes/connections` : Liste des connexions WebSocket actives.
 *   `GET /api/admin-only` : Vérification des permissions administrateur.
-*   `POST /api/reset` : Réinitialiser la base de données de démonstration.
+
+### Démo
+*   `POST /api/demo/reset` : Réinitialiser la base de données de démonstration.
+
+### Système
+*   `GET /health` : Vérification de l'état du Master.
+*   `GET /metrics` : Métriques Prometheus.
 
 ---
 
