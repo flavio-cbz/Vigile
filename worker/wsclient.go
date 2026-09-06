@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/url"
 	"strings"
@@ -63,10 +64,10 @@ func httpReadResponse(r *bufio.Reader) (int, map[string]string, error) {
 // ---------------------------------------------------------------------------
 
 const (
-	opText   = 0x1
-	opClose  = 0x8
-	opPing   = 0x9
-	opPong   = 0xA
+	opText  = 0x1
+	opClose = 0x8
+	opPing  = 0x9
+	opPong  = 0xA
 
 	wsKeyLen     = 16 // RFC 6455: 16-byte random key for Sec-WebSocket-Key
 	wsMaskKeyLen = 4  // RFC 6455: 4-byte XOR mask for client frames
@@ -248,10 +249,14 @@ func (ws *WSConn) ReadText() ([]byte, error) {
 		case opPing:
 			// Respond with Pong automatically
 			ws.mu.Lock()
-			_ = ws.writeFrame(opPong, payload)
+			if err := ws.writeFrame(opPong, payload); err != nil {
+				slog.Warn("failed to send pong frame in response to ping", "error", err)
+			}
 			ws.mu.Unlock()
 		case opClose:
-			_ = ws.Close()
+			if err := ws.Close(); err != nil {
+				slog.Debug("failed to close connection after peer close frame", "error", err)
+			}
 			return nil, errors.New("ws: peer closed connection")
 		case opPong:
 			// ignore
@@ -330,7 +335,9 @@ func (ws *WSConn) Close() error {
 	}
 	ws.closed = true
 	// Best-effort close frame
-	_ = ws.writeFrame(opClose, []byte{0x03, 0xE8}) // 1000 normal
+	if err := ws.writeFrame(opClose, []byte{0x03, 0xE8}); err != nil { // 1000 normal
+		slog.Debug("failed to send close frame", "error", err)
+	}
 	return ws.conn.Close()
 }
 

@@ -3,6 +3,7 @@ package sys
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -22,8 +23,12 @@ func WriteFileAtomic(filename string, data []byte, perm os.FileMode) error {
 	tmpName := tmpFile.Name()
 
 	defer func() {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpName)
+		if err := tmpFile.Close(); err != nil {
+			slog.Debug("failed to close temp file in cleanup", "path", tmpName, "error", err)
+		}
+		if err := os.Remove(tmpName); err != nil && !os.IsNotExist(err) {
+			slog.Debug("failed to remove temp file in cleanup", "path", tmpName, "error", err)
+		}
 	}()
 
 	if _, err := tmpFile.Write(data); err != nil {

@@ -3,6 +3,7 @@ package updater
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -56,12 +57,16 @@ func CheckAndRollbackIfFailed(execPath string) (bool, error) {
 
 	var state UpdatePendingState
 	if err := json.Unmarshal(data, &state); err != nil {
-		_ = os.Remove(pendingPath)
+		if err := os.Remove(pendingPath); err != nil {
+			slog.Debug("failed to remove pending update file after unmarshal error", "path", pendingPath, "error", err)
+		}
 		return false, nil
 	}
 
 	if state.Confirmed {
-		_ = os.Remove(pendingPath)
+		if err := os.Remove(pendingPath); err != nil {
+			slog.Debug("failed to remove confirmed pending update file", "path", pendingPath, "error", err)
+		}
 		return false, nil
 	}
 
@@ -69,9 +74,13 @@ func CheckAndRollbackIfFailed(execPath string) (bool, error) {
 	if time.Since(state.UpdatedAt) > 60*time.Second {
 		backupPath := execPath + ".previous"
 		if _, err := os.Stat(backupPath); err == nil && execPath != "" {
-			_ = sys.CopyFile(backupPath, execPath, 0755)
+			if err := sys.CopyFile(backupPath, execPath, 0755); err != nil {
+				slog.Warn("automated rollback: failed to restore backup binary", "backup_path", backupPath, "exec_path", execPath, "error", err)
+			}
 		}
-		_ = os.Remove(pendingPath)
+		if err := os.Remove(pendingPath); err != nil {
+			slog.Debug("failed to remove pending update file after rollback", "path", pendingPath, "error", err)
+		}
 		return true, fmt.Errorf("automated rollback performed for failed update version %s", state.NewVersion)
 	}
 

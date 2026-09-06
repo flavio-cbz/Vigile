@@ -19,11 +19,11 @@ const (
 
 // Store manages thread-safe policy state and atomic persistence.
 type Store struct {
-	mu           sync.RWMutex
-	filePath     string
-	masterPub    ed25519.PublicKey
-	nodeID       string
-	activeState  *ActivePolicyState
+	mu          sync.RWMutex
+	filePath    string
+	masterPub   ed25519.PublicKey
+	nodeID      string
+	activeState *ActivePolicyState
 }
 
 // NewStore initializes a policy store targeting specified filePath.

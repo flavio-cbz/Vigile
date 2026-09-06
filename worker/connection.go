@@ -132,14 +132,14 @@ func (wc *WorkerConn) runEnrollment(ctx context.Context) error {
 	req := buildEnrollmentRequest(wc.joinToken, wc.workerToken, wc.pubKey, wc.fingerprint)
 	slog.Info("ENROLL: sending request",
 		"token_len", len(wc.joinToken), "pubkey_len", len(b64enc.EncodeToString(wc.pubKey)), "reconnect", wc.workerToken != "")
-	if err := wc.sendJSON(ctx,req); err != nil {
+	if err := wc.sendJSON(ctx, req); err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
 
 	// Reconnect mode: master skips the Ed25519 challenge and sends SUCCESS directly
 	if wc.workerToken != "" {
 		slog.Info("ENROLL: reconnect mode — waiting for ENROLLMENT_SUCCESS (skip challenge)")
-		success, err := wc.readTyped(ctx,"ENROLLMENT_SUCCESS")
+		success, err := wc.readTyped(ctx, "ENROLLMENT_SUCCESS")
 		if err != nil {
 			return fmt.Errorf("read success (reconnect): %w", err)
 		}
@@ -164,7 +164,7 @@ func (wc *WorkerConn) runEnrollment(ctx context.Context) error {
 	}
 
 	// 2. Receive ENROLLMENT_CHALLENGE (first-time enrollment only)
-	challengeMsg, err := wc.readTyped(ctx,"ENROLLMENT_CHALLENGE")
+	challengeMsg, err := wc.readTyped(ctx, "ENROLLMENT_CHALLENGE")
 	if err != nil {
 		return fmt.Errorf("read challenge: %w", err)
 	}
@@ -189,12 +189,12 @@ func (wc *WorkerConn) runEnrollment(ctx context.Context) error {
 		"signature": sigB64,
 	}
 	slog.Info("ENROLL: signed challenge", "raw_bytes", len(challengeRaw), "sig_prefix", sigB64[:20])
-	if err := wc.sendJSON(ctx,resp); err != nil {
+	if err := wc.sendJSON(ctx, resp); err != nil {
 		return fmt.Errorf("send response: %w", err)
 	}
 
 	// 4. Receive ENROLLMENT_SUCCESS
-	success, err := wc.readTyped(ctx,"ENROLLMENT_SUCCESS")
+	success, err := wc.readTyped(ctx, "ENROLLMENT_SUCCESS")
 	if err != nil {
 		return fmt.Errorf("read success: %w", err)
 	}
@@ -266,7 +266,9 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 				return
 			default:
 			}
-			_ = ws.SetReadDeadline(time.Now().Add(90 * time.Second))
+			if err := ws.SetReadDeadline(time.Now().Add(90 * time.Second)); err != nil {
+				slog.Warn("failed to set read deadline", "error", err)
+			}
 			data, err := ws.ReadText()
 			select {
 			case msgCh <- wsMsg{data, err}:
@@ -289,7 +291,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 			return nil
 
 		case <-heartbeatTicker.C:
-			if err := wc.sendJSON(ctx,map[string]interface{}{
+			if err := wc.sendJSON(ctx, map[string]interface{}{
 				"type":    "HEARTBEAT",
 				"ts":      float64(time.Now().UnixMicro()) / 1_000_000,
 				"version": Version,
@@ -299,7 +301,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 
 		case <-statusTicker.C:
 			report := buildStatusReport(wc.ctx)
-			if err := wc.sendJSON(ctx,report); err != nil {
+			if err := wc.sendJSON(ctx, report); err != nil {
 				slog.Warn("status report error", "error", err)
 			}
 
@@ -339,7 +341,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 					continue
 				}
 				resObj["type"] = "INTENT_RESULT"
-				if err := wc.sendJSON(ctx,resObj); err != nil {
+				if err := wc.sendJSON(ctx, resObj); err != nil {
 					slog.Warn("failed to send INTENT_RESULT", "error", err)
 				}
 
@@ -355,7 +357,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 				if err := persistWorkerToken(newToken); err != nil {
 					slog.Warn("failed to persist rotated token", "error", err)
 				}
-				if err := wc.sendJSON(ctx,map[string]interface{}{
+				if err := wc.sendJSON(ctx, map[string]interface{}{
 					"type": "TOKEN_ROTATION_ACK",
 				}); err != nil {
 					slog.Warn("failed to send TOKEN_ROTATION_ACK", "error", err)
@@ -412,18 +414,18 @@ func (wc *WorkerConn) RunWithBackoff() {
 			}
 			wc.disconnect()
 
-		select {
-		case <-wc.stopCh:
-			slog.Info("stopped during backoff")
-			close(wc.doneCh)
-			return
-		case <-wc.ctx.Done():
-			slog.Info("context cancelled during backoff")
-			wc.disconnect()
-			close(wc.doneCh)
-			return
-		case <-time.After(backoff):
-		}
+			select {
+			case <-wc.stopCh:
+				slog.Info("stopped during backoff")
+				close(wc.doneCh)
+				return
+			case <-wc.ctx.Done():
+				slog.Info("context cancelled during backoff")
+				wc.disconnect()
+				close(wc.doneCh)
+				return
+			case <-time.After(backoff):
+			}
 
 			backoff = time.Duration(math.Min(
 				float64(backoff)*2,
@@ -463,7 +465,6 @@ func (wc *WorkerConn) RunWithBackoff() {
 		}
 
 		slog.Info("reconnecting with persisted worker token")
-		_ = backoff // Reset backoff for reconnect attempts
 		backoff = initialBackoff
 		continue
 	}

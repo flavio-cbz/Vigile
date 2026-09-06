@@ -2,6 +2,7 @@ package updater
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -9,10 +10,10 @@ import (
 )
 
 const (
-	DefaultVigileDir     = "/var/lib/vigile"
-	DefaultReleasesDir   = "/var/lib/vigile/releases"
-	DefaultCurrentLink   = "/var/lib/vigile/worker.current"
-	DefaultPreviousLink  = "/var/lib/vigile/worker.previous"
+	DefaultVigileDir    = "/var/lib/vigile"
+	DefaultReleasesDir  = "/var/lib/vigile/releases"
+	DefaultCurrentLink  = "/var/lib/vigile/worker.current"
+	DefaultPreviousLink = "/var/lib/vigile/worker.previous"
 )
 
 // PromoteStagedRelease promotes a staged binary to active worker.current and preserves worker.previous.
@@ -23,7 +24,9 @@ func PromoteStagedRelease(stagedPath, version string, execPath string) error {
 	}
 
 	targetReleasePath := filepath.Join(releasesDir, fmt.Sprintf("worker-%s", version))
-	_ = os.Remove(targetReleasePath)
+	if err := os.Remove(targetReleasePath); err != nil && !os.IsNotExist(err) {
+		slog.Debug("failed to remove stale target release path", "path", targetReleasePath, "error", err)
+	}
 
 	// Move staged file to release path
 	if err := os.Rename(stagedPath, targetReleasePath); err != nil {
@@ -31,34 +34,52 @@ func PromoteStagedRelease(stagedPath, version string, execPath string) error {
 		if err := sys.CopyFile(stagedPath, targetReleasePath, 0755); err != nil {
 			return fmt.Errorf("failed to promote staged binary to %s: %w", targetReleasePath, err)
 		}
-		_ = os.Remove(stagedPath)
+		if err := os.Remove(stagedPath); err != nil {
+			slog.Debug("failed to remove staged file after cross-device copy", "path", stagedPath, "error", err)
+		}
 	}
 
-	_ = os.Chmod(targetReleasePath, 0755)
+	if err := os.Chmod(targetReleasePath, 0755); err != nil {
+		slog.Warn("failed to chmod target release path", "path", targetReleasePath, "error", err)
+	}
 
 	// If execPath is directly a file rather than symlink (e.g. /usr/local/bin/vigile-worker),
 	// attempt atomic replacement or copy fallback
 	if execPath != "" && execPath != DefaultCurrentLink {
 		backupPath := execPath + ".previous"
-		_ = os.Remove(backupPath)
-		_ = os.Rename(execPath, backupPath)
+		if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
+			slog.Debug("failed to remove stale backup path", "path", backupPath, "error", err)
+		}
+		if err := os.Rename(execPath, backupPath); err != nil {
+			slog.Warn("failed to create backup of current binary", "exec_path", execPath, "backup_path", backupPath, "error", err)
+		}
 
 		if err := sys.CopyFile(targetReleasePath, execPath, 0755); err != nil {
-			_ = os.Rename(backupPath, execPath) // Rollback
+			if err := os.Rename(backupPath, execPath); err != nil {
+				slog.Error("rollback failed: could not restore backup binary after copy failure", "backup_path", backupPath, "exec_path", execPath, "error", err)
+			}
 			return fmt.Errorf("failed to copy binary to execPath %s: %w", execPath, err)
 		}
 	}
 
 	// Update current symlink
-	_ = os.Remove(DefaultPreviousLink)
+	if err := os.Remove(DefaultPreviousLink); err != nil && !os.IsNotExist(err) {
+		slog.Debug("failed to remove previous link", "path", DefaultPreviousLink, "error", err)
+	}
 	if curTarget, err := os.Readlink(DefaultCurrentLink); err == nil {
-		_ = os.Symlink(curTarget, DefaultPreviousLink)
+		if err := os.Symlink(curTarget, DefaultPreviousLink); err != nil {
+			slog.Warn("failed to create previous symlink", "target", curTarget, "link", DefaultPreviousLink, "error", err)
+		}
 	}
 
 	tmpLink := DefaultCurrentLink + ".tmp"
-	_ = os.Remove(tmpLink)
+	if err := os.Remove(tmpLink); err != nil && !os.IsNotExist(err) {
+		slog.Debug("failed to remove stale tmp link", "path", tmpLink, "error", err)
+	}
 	if err := os.Symlink(targetReleasePath, tmpLink); err == nil {
-		_ = os.Rename(tmpLink, DefaultCurrentLink)
+		if err := os.Rename(tmpLink, DefaultCurrentLink); err != nil {
+			slog.Warn("failed to promote tmp link to current", "tmp_link", tmpLink, "current_link", DefaultCurrentLink, "error", err)
+		}
 	}
 
 	return nil

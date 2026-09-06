@@ -4,17 +4,17 @@ import "encoding/json"
 
 // Message Types
 const (
-	MsgTypeHello               = "HELLO"
-	MsgTypeHeartbeat           = "HEARTBEAT"
-	MsgTypeInventorySnapshot   = "INVENTORY_SNAPSHOT"
-	MsgTypeMetricsSnapshot     = "METRICS_SNAPSHOT"
-	MsgTypePolicyBundle        = "POLICY_BUNDLE"
-	MsgTypePolicyApplied       = "POLICY_APPLIED"
-	MsgTypePolicyRejected      = "POLICY_REJECTED"
-	MsgTypeActionRequest       = "ACTION_REQUEST"
-	MsgTypeActionResult        = "ACTION_RESULT"
-	MsgTypeWorkerUpdateOffer   = "WORKER_UPDATE_OFFER"
-	MsgTypeWorkerUpdateResult  = "WORKER_UPDATE_RESULT"
+	MsgTypeHello              = "HELLO"
+	MsgTypeHeartbeat          = "HEARTBEAT"
+	MsgTypeInventorySnapshot  = "INVENTORY_SNAPSHOT"
+	MsgTypeMetricsSnapshot    = "METRICS_SNAPSHOT"
+	MsgTypePolicyBundle       = "POLICY_BUNDLE"
+	MsgTypePolicyApplied      = "POLICY_APPLIED"
+	MsgTypePolicyRejected     = "POLICY_REJECTED"
+	MsgTypeActionRequest      = "ACTION_REQUEST"
+	MsgTypeActionResult       = "ACTION_RESULT"
+	MsgTypeWorkerUpdateOffer  = "WORKER_UPDATE_OFFER"
+	MsgTypeWorkerUpdateResult = "WORKER_UPDATE_RESULT"
 )
 
 // BaseMessage wraps all WSS messages on the wire.
@@ -52,7 +52,7 @@ type PolicyBundlePayload struct {
 	RecoveryTicketID    string       `json:"recovery_ticket_id,omitempty"`
 	ApprovedByAdmins    []string     `json:"approved_by_admins,omitempty"`
 	Rules               []PolicyRule `json:"rules"`
-	Signature           string       `json:"signature"`             // Ed25519 signature of RFC8785 canonical bytes (without signature field)
+	Signature           string       `json:"signature"` // Ed25519 signature of RFC8785 canonical bytes (without signature field)
 	Admin2RecoveryProof string       `json:"recovery_proof,omitempty"`
 }
 
@@ -84,12 +84,12 @@ type ActionResultPayload struct {
 
 // PolicyAppliedPayload is sent by Worker to acknowledge policy activation.
 type PolicyAppliedPayload struct {
-	PolicyID      string   `json:"policy_id"`
-	PolicyVersion int64    `json:"policy_version"`
-	BundleHash    string   `json:"bundle_hash"`
-	AppliedAt     float64  `json:"applied_at"`
-	ValidatedRules int     `json:"validated_rules"`
-	RejectedRules []string `json:"rejected_rules,omitempty"`
+	PolicyID       string   `json:"policy_id"`
+	PolicyVersion  int64    `json:"policy_version"`
+	BundleHash     string   `json:"bundle_hash"`
+	AppliedAt      float64  `json:"applied_at"`
+	ValidatedRules int      `json:"validated_rules"`
+	RejectedRules  []string `json:"rejected_rules,omitempty"`
 }
 
 // PolicyRejectedPayload is sent by Worker if policy validation fails.

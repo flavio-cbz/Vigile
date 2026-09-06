@@ -14,9 +14,9 @@ import (
 
 const (
 	scanTimeout        = 45 * time.Second
-	maxScanResultBytes = 2 * 1024 * 1024  // 2 MB output cap
-	maxChildrenPerNode = 50               // cap children per directory
-	defaultMinSize     = 1 * 1024 * 1024  // 1 MB default min file size
+	maxScanResultBytes = 2 * 1024 * 1024 // 2 MB output cap
+	maxChildrenPerNode = 50              // cap children per directory
+	defaultMinSize     = 1 * 1024 * 1024 // 1 MB default min file size
 )
 
 // DiskNode matches master/schemas/disk_scan.py DiskNode schema exactly.

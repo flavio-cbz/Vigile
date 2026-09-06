@@ -61,14 +61,14 @@ func VerifyPolicyBundle(bundle *PolicyBundle, currentPolicy *PolicyBundle, maste
 
 	// Construct payload without signature field for JCS canonicalization
 	payloadMap := map[string]interface{}{
-		"policy_id":             bundle.PolicyID,
-		"node_id":               bundle.NodeID,
-		"master_key_id":         bundle.MasterKeyID,
-		"policy_epoch":          bundle.PolicyEpoch,
-		"policy_version":        bundle.PolicyVersion,
-		"issued_at":             bundle.IssuedAt,
-		"expires_at":            bundle.ExpiresAt,
-		"rules":                 bundle.Rules,
+		"policy_id":      bundle.PolicyID,
+		"node_id":        bundle.NodeID,
+		"master_key_id":  bundle.MasterKeyID,
+		"policy_epoch":   bundle.PolicyEpoch,
+		"policy_version": bundle.PolicyVersion,
+		"issued_at":      bundle.IssuedAt,
+		"expires_at":     bundle.ExpiresAt,
+		"rules":          bundle.Rules,
 	}
 	if bundle.IsRecovery {
 		payloadMap["recovery"] = true

@@ -44,4 +44,3 @@ func TestCollectMetrics(t *testing.T) {
 	m := collectMetrics(context.Background())
 	t.Logf("Collected: %+v", m)
 }
-

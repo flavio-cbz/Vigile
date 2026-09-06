@@ -21,8 +21,8 @@ type PolicyBundle struct {
 
 // ActivePolicyState holds the current verified policy in memory and meta info.
 type ActivePolicyState struct {
-	Bundle      *PolicyBundle `json:"bundle"`
-	BundleHash  string        `json:"bundle_hash"`
-	AppliedAt   float64       `json:"applied_at"`
-	MasterPub   []byte        `json:"-"`
+	Bundle     *PolicyBundle `json:"bundle"`
+	BundleHash string        `json:"bundle_hash"`
+	AppliedAt  float64       `json:"applied_at"`
+	MasterPub  []byte        `json:"-"`
 }

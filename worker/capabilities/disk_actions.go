@@ -10,10 +10,10 @@ import (
 
 // FileMeta describes file metadata without content.
 type FileMeta struct {
-	Path     string    `json:"path"`
+	Path      string    `json:"path"`
 	SizeBytes int64     `json:"size_bytes"`
-	ModTime  time.Time `json:"mod_time"`
-	IsDir    bool      `json:"is_dir"`
+	ModTime   time.Time `json:"mod_time"`
+	IsDir     bool      `json:"is_dir"`
 }
 
 // DirectoryUsageResult holds output for GET_DIRECTORY_USAGE.

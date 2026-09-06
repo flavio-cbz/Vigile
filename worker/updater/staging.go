@@ -6,13 +6,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 )
 
 const (
-	DefaultStagingDir = "/var/lib/vigile/staging"
+	DefaultStagingDir  = "/var/lib/vigile/staging"
 	FallbackStagingDir = "/tmp/vigile-staging"
 )
 
@@ -38,8 +39,13 @@ func StageRelease(ctx context.Context, client *http.Client, baseURL string, mani
 	}
 
 	stagedPath := filepath.Join(stagingDir, fmt.Sprintf("worker-%s.tmp", manifest.WorkerVersion))
+	stagedOK := false
 	defer func() {
-		// Clean up temporary file on failure
+		if !stagedOK {
+			if err := os.Remove(stagedPath); err != nil && !os.IsNotExist(err) {
+				slog.Debug("failed to clean up staged file on failure", "path", stagedPath, "error", err)
+			}
+		}
 	}()
 
 	downloadURL := manifest.URL
@@ -71,24 +77,33 @@ func StageRelease(ctx context.Context, client *http.Client, baseURL string, mani
 	writer := io.MultiWriter(tmpFile, hasher)
 
 	written, err := io.Copy(writer, resp.Body)
-	_ = tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		slog.Debug("failed to close staging temp file", "path", stagedPath, "error", err)
+	}
 
 	if err != nil {
-		_ = os.Remove(stagedPath)
+		if err := os.Remove(stagedPath); err != nil {
+			slog.Debug("failed to remove staged file after copy error", "path", stagedPath, "error", err)
+		}
 		return nil, fmt.Errorf("failed during binary download copy: %w", err)
 	}
 
 	if manifest.SizeBytes > 0 && written != manifest.SizeBytes {
-		_ = os.Remove(stagedPath)
+		if err := os.Remove(stagedPath); err != nil {
+			slog.Debug("failed to remove staged file after size mismatch", "path", stagedPath, "error", err)
+		}
 		return nil, fmt.Errorf("size mismatch: expected %d bytes, got %d", manifest.SizeBytes, written)
 	}
 
 	actualHash := hex.EncodeToString(hasher.Sum(nil))
 	if manifest.SHA256 != "" && actualHash != manifest.SHA256 {
-		_ = os.Remove(stagedPath)
+		if err := os.Remove(stagedPath); err != nil {
+			slog.Debug("failed to remove staged file after checksum mismatch", "path", stagedPath, "error", err)
+		}
 		return nil, fmt.Errorf("SHA256 checksum mismatch: expected %s, got %s", manifest.SHA256, actualHash)
 	}
 
+	stagedOK = true
 	return &StagingResult{
 		StagedPath: stagedPath,
 		SHA256:     actualHash,

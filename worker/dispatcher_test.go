@@ -24,14 +24,22 @@ func TestAllowedActionsContainsExpected(t *testing.T) {
 		"GET_STATS",
 		"READ_LOGS",
 		"RESTART_CONTAINER",
+		"STOP_CONTAINER",
+		"START_CONTAINER",
+		"DELETE_CONTAINER",
 		"LIST_CONTAINERS",
+		"LIST_LOG_FILES",
 		"LIST_SERVICES",
 		"STATUS_SERVICE",
 		"RESTART_SERVICE",
+		"STOP_SERVICE",
+		"START_SERVICE",
 		"READ_LOGS_SERVICE",
 		"UPDATE_WORKER",
 		"TOKEN_ROTATION",
 		"DISK_SCAN",
+		"LIST_LOG_SOURCES",
+		"LOG_HISTOGRAM",
 	}
 	for _, action := range expected {
 		if !ALLOWED_ACTIONS[action] {

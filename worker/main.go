@@ -42,7 +42,7 @@ func main() {
 	url := getMasterURL(*masterURL)
 	if url == "" {
 		slog.Error("MASTER_URL is required. Set --master flag or write to /etc/vigile/master_url")
-	os.Exit(1)
+		os.Exit(1)
 	}
 
 	allowInsecure := os.Getenv("ALLOW_INSECURE") == "true"
@@ -62,7 +62,7 @@ func main() {
 
 	if strings.HasPrefix(url, "http://") && !allowInsecure {
 		slog.Error("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set ALLOW_INSECURE=true to bypass.")
-	os.Exit(1)
+		os.Exit(1)
 	}
 
 	slog.Info("Vigile Worker starting")
@@ -90,7 +90,7 @@ func main() {
 			token = ""
 		} else {
 			slog.Error("Failed to read JOIN_TOKEN", "error", err)
-		os.Exit(1)
+			os.Exit(1)
 		}
 	}
 	if token != "" {

@@ -1,4 +1,4 @@
-	package main
+package main
 
 import (
 	"bufio"
@@ -56,12 +56,15 @@ func init() {
 
 // DiskMount describes a single mounted filesystem's usage.
 type DiskMount struct {
-	MountPoint string  `json:"mount_point"`
-	FsType     string  `json:"fs_type"`
-	Device     string  `json:"device"`
-	TotalBytes int64   `json:"total_bytes"`
-	UsedBytes  int64   `json:"used_bytes"`
-	Percent    float64 `json:"percent"`
+	MountPoint    string  `json:"mount_point"`
+	FsType        string  `json:"fs_type"`
+	Device        string  `json:"device"`
+	TotalBytes    int64   `json:"total_bytes"`
+	UsedBytes     int64   `json:"used_bytes"`
+	Percent       float64 `json:"percent"`
+	InodesTotal   int64   `json:"inodes_total,omitempty"`
+	InodesUsed    int64   `json:"inodes_used,omitempty"`
+	InodesPercent float64 `json:"inodes_percent,omitempty"`
 }
 
 // ProcessInfo describes a single running process with its CPU and memory usage.
@@ -76,11 +79,11 @@ type ProcessInfo struct {
 // MetricsSnapshot contains the system metrics collected from /proc.
 type MetricsSnapshot struct {
 	// CPU
-	CPUPercent    float64 `json:"cpu_percent"`
-	CPULoad1m     float64 `json:"cpu_load_1m,omitempty"`
-	CPULoad5m     float64 `json:"cpu_load_5m,omitempty"`
-	CPULoad15m    float64 `json:"cpu_load_15m,omitempty"`
-	CPUCores      int     `json:"cpu_cores,omitempty"`
+	CPUPercent float64 `json:"cpu_percent"`
+	CPULoad1m  float64 `json:"cpu_load_1m,omitempty"`
+	CPULoad5m  float64 `json:"cpu_load_5m,omitempty"`
+	CPULoad15m float64 `json:"cpu_load_15m,omitempty"`
+	CPUCores   int     `json:"cpu_cores,omitempty"`
 	// Memory
 	MemTotalBytes int64   `json:"mem_total_bytes"`
 	MemUsedBytes  int64   `json:"mem_used_bytes"`
@@ -97,15 +100,16 @@ type MetricsSnapshot struct {
 	UptimeSeconds float64       `json:"uptime_seconds"`
 	Processes     int           `json:"processes,omitempty"`
 	TopProcesses  []ProcessInfo `json:"top_processes,omitempty"`
+	TopByMem      []ProcessInfo `json:"top_by_mem,omitempty"`
 	// Network I/O (cumulative since boot, aggregate across non-loopback interfaces)
-	NetBytesRecv  int64 `json:"net_bytes_recv,omitempty"`
-	NetBytesSent  int64 `json:"net_bytes_sent,omitempty"`
-	NetPktRecv    int64 `json:"net_packets_recv,omitempty"`
-	NetPktSent    int64 `json:"net_packets_sent,omitempty"`
-	NetErrIn      int64 `json:"net_errors_in,omitempty"`
-	NetErrOut     int64 `json:"net_errors_out,omitempty"`
-	NetDropIn     int64 `json:"net_drops_in,omitempty"`
-	NetDropOut    int64 `json:"net_drops_out,omitempty"`
+	NetBytesRecv int64 `json:"net_bytes_recv,omitempty"`
+	NetBytesSent int64 `json:"net_bytes_sent,omitempty"`
+	NetPktRecv   int64 `json:"net_packets_recv,omitempty"`
+	NetPktSent   int64 `json:"net_packets_sent,omitempty"`
+	NetErrIn     int64 `json:"net_errors_in,omitempty"`
+	NetErrOut    int64 `json:"net_errors_out,omitempty"`
+	NetDropIn    int64 `json:"net_drops_in,omitempty"`
+	NetDropOut   int64 `json:"net_drops_out,omitempty"`
 	// Disk I/O (cumulative since boot, aggregate across physical devices)
 	DiskReads      int64 `json:"disk_reads,omitempty"`
 	DiskWrites     int64 `json:"disk_writes,omitempty"`
@@ -120,6 +124,10 @@ type MetricsSnapshot struct {
 	// File handles / inodes
 	FileHandlesUsed int64 `json:"file_handles_used,omitempty"`
 	FileHandlesMax  int64 `json:"file_handles_max,omitempty"`
+	// Per-app FD (sshd) — for apps_group_file_descriptors_utilization
+	AppSshdFdsUsed    int64   `json:"app_sshd_fds_used,omitempty"`
+	AppSshdFdsMax     int64   `json:"app_sshd_fds_max,omitempty"`
+	AppSshdFdsPercent float64 `json:"app_sshd_fds_percent,omitempty"`
 	// Entropy available
 	EntropyAvail int64 `json:"entropy_avail,omitempty"`
 	// Context switches since boot
@@ -138,49 +146,55 @@ func collectMetrics(ctx context.Context) MetricsSnapshot {
 	}
 	diskTotal, diskUsed, diskPercent, disks := getDiskMetrics()
 	netBR, netBS, netPR, netPS, netEI, netEO, netDI, netDO := getNetworkStats()
+	topCPU, topMem := getTopProcesses(10)
 	diskR, diskW, diskRB, diskWB := getDiskIO()
 	psiCPU, psiMem, psiIO := getPSI()
 	fhUsed, fhMax := getFileHandles()
+	sshdUsed, sshdMax, sshdPct := getAppSshdFdUsage()
 	return MetricsSnapshot{
-		CPUPercent:       getCPUPercent(),
-		CPULoad1m:        getLoadAvg(0),
-		CPULoad5m:        getLoadAvg(1),
-		CPULoad15m:       getLoadAvg(2),
-		CPUCores:         getCPUCores(),
-		MemTotalBytes:    getMemField("MemTotal"),
-		MemUsedBytes:     getMemUsed(),
-		MemPercent:       getMemPercent(),
-		SwapTotal:        getMemField("SwapTotal"),
-		SwapUsed:         getSwapUsed(),
-		DiskTotal:        diskTotal,
-		DiskUsed:         diskUsed,
-		DiskPercent:      diskPercent,
-		Disks:            disks,
-		UptimeSeconds:    getUptime(),
-		Processes:        getProcessCount(),
-		TopProcesses:     getTopProcesses(10),
-		NetBytesRecv:     netBR,
-		NetBytesSent:     netBS,
-		NetPktRecv:       netPR,
-		NetPktSent:       netPS,
-		NetErrIn:         netEI,
-		NetErrOut:        netEO,
-		NetDropIn:        netDI,
-		NetDropOut:       netDO,
-		DiskReads:        diskR,
-		DiskWrites:       diskW,
-		DiskReadBytes:    diskRB,
-		DiskWriteBytes:   diskWB,
-		TempCelsius:      getTemperature(),
-		PSICPUAvg10:      psiCPU,
-		PSIMemAvg10:      psiMem,
-		PSIOAvg10:        psiIO,
-		FileHandlesUsed:  fhUsed,
-		FileHandlesMax:   fhMax,
-		EntropyAvail:     getEntropy(),
-		ContextSwitches:  getContextSwitches(),
+		CPUPercent:        getCPUPercent(),
+		CPULoad1m:         getLoadAvg(0),
+		CPULoad5m:         getLoadAvg(1),
+		CPULoad15m:        getLoadAvg(2),
+		CPUCores:          getCPUCores(),
+		MemTotalBytes:     getMemField("MemTotal"),
+		MemUsedBytes:      getMemUsed(),
+		MemPercent:        getMemPercent(),
+		SwapTotal:         getMemField("SwapTotal"),
+		SwapUsed:          getSwapUsed(),
+		DiskTotal:         diskTotal,
+		DiskUsed:          diskUsed,
+		DiskPercent:       diskPercent,
+		Disks:             disks,
+		UptimeSeconds:     getUptime(),
+		Processes:         getProcessCount(),
+		TopProcesses:      topCPU,
+		TopByMem:          topMem,
+		NetBytesRecv:      netBR,
+		NetBytesSent:      netBS,
+		NetPktRecv:        netPR,
+		NetPktSent:        netPS,
+		NetErrIn:          netEI,
+		NetErrOut:         netEO,
+		NetDropIn:         netDI,
+		NetDropOut:        netDO,
+		DiskReads:         diskR,
+		DiskWrites:        diskW,
+		DiskReadBytes:     diskRB,
+		DiskWriteBytes:    diskWB,
+		TempCelsius:       getTemperature(),
+		PSICPUAvg10:       psiCPU,
+		PSIMemAvg10:       psiMem,
+		PSIOAvg10:         psiIO,
+		FileHandlesUsed:   fhUsed,
+		FileHandlesMax:    fhMax,
+		AppSshdFdsUsed:    sshdUsed,
+		AppSshdFdsMax:     sshdMax,
+		AppSshdFdsPercent: sshdPct,
+		EntropyAvail:      getEntropy(),
+		ContextSwitches:   getContextSwitches(),
 		CPUThrottledCount: getCPUThrottling(),
-		CollectedAt:      now,
+		CollectedAt:       now,
 	}
 }
 
@@ -371,7 +385,7 @@ func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
 	cmd := exec.Command("df", "-k")
 	out, err := cmd.Output()
 	if err != nil {
-		total, used, percent := getRootDiskMetrics("/")
+		total, used, percent, _, _, _ := getRootDiskMetrics("/")
 		return total, used, percent, nil
 	}
 
@@ -442,7 +456,7 @@ func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
 	}
 
 	if total <= 0 {
-		rootTotal, rootUsed, rootPercent := getRootDiskMetrics("/")
+		rootTotal, rootUsed, rootPercent, _, _, _ := getRootDiskMetrics("/")
 		return rootTotal, rootUsed, rootPercent, nil
 	}
 
@@ -452,7 +466,7 @@ func getDarwinDiskMetrics() (int64, int64, float64, []DiskMount) {
 func getLinuxDiskMetrics() (int64, int64, float64, []DiskMount) {
 	file, err := os.Open(procPrefix + "/proc/mounts")
 	if err != nil {
-		total, used, percent := getRootDiskMetrics("/")
+		total, used, percent, _, _, _ := getRootDiskMetrics("/")
 		return total, used, percent, nil
 	}
 	defer file.Close()
@@ -480,33 +494,36 @@ func getLinuxDiskMetrics() (int64, int64, float64, []DiskMount) {
 		}
 		seenDevices[device] = struct{}{}
 
-		mountTotal, mountUsed, mountPercent := getRootDiskMetrics(mountPoint)
+		mountTotal, mountUsed, mountPercent, iTot, iUsed, iPct := getRootDiskMetrics(mountPoint)
 		if mountTotal <= 0 {
 			continue
 		}
 		total += mountTotal
 		used += mountUsed
 		disks = append(disks, DiskMount{
-			MountPoint: mountPoint,
-			FsType:     fsType,
-			Device:     device,
-			TotalBytes: mountTotal,
-			UsedBytes:  mountUsed,
-			Percent:    mountPercent,
+			MountPoint:    mountPoint,
+			FsType:        fsType,
+			Device:        device,
+			TotalBytes:    mountTotal,
+			UsedBytes:     mountUsed,
+			Percent:       mountPercent,
+			InodesTotal:   iTot,
+			InodesUsed:    iUsed,
+			InodesPercent: iPct,
 		})
 	}
 
 	if total <= 0 {
-		rootTotal, rootUsed, rootPercent := getRootDiskMetrics("/")
+		rootTotal, rootUsed, rootPercent, _, _, _ := getRootDiskMetrics("/")
 		return rootTotal, rootUsed, rootPercent, nil
 	}
 	return total, used, math.Round(float64(used)/float64(total)*1000) / 10, disks
 }
 
-func getRootDiskMetrics(path string) (int64, int64, float64) {
+func getRootDiskMetrics(path string) (int64, int64, float64, int64, int64, float64) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, 0, 0, 0
 	}
 	total := int64(stat.Blocks) * int64(stat.Bsize)
 	free := int64(stat.Bavail) * int64(stat.Bsize)
@@ -514,10 +531,23 @@ func getRootDiskMetrics(path string) (int64, int64, float64) {
 	if used < 0 {
 		used = 0
 	}
-	if total == 0 {
-		return 0, 0, 0
+	var percent float64
+	if total > 0 {
+		percent = math.Round(float64(used)/float64(total)*1000) / 10
 	}
-	return total, used, math.Round(float64(used)/float64(total)*1000) / 10
+
+	inodesTotal := int64(stat.Files)
+	inodesFree := int64(stat.Ffree)
+	inodesUsed := inodesTotal - inodesFree
+	if inodesUsed < 0 {
+		inodesUsed = 0
+	}
+	var inodesPercent float64
+	if inodesTotal > 0 {
+		inodesPercent = math.Round(float64(inodesUsed)/float64(inodesTotal)*1000) / 10
+	}
+
+	return total, used, percent, inodesTotal, inodesUsed, inodesPercent
 }
 
 func unescapeMountField(value string) string {
@@ -779,6 +809,88 @@ func getFileHandles() (used, max int64) {
 	return
 }
 
+func getAppSshdFdUsage() (used, max int64, percent float64) {
+	procRoot := procPrefix + "/proc"
+	if _, err := os.Stat(procRoot); err != nil {
+		procRoot = "/proc"
+	}
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return 0, 0, 0
+	}
+	var totalUsed, totalMax int64
+	var found bool
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+		pid := e.Name()
+		commPath := filepath.Join(procRoot, pid, "comm")
+		comm, err := os.ReadFile(commPath)
+		if err != nil {
+			continue
+		}
+		commStr := strings.TrimSpace(string(comm))
+		// Strict match on comm == "sshd" only — avoids false positives from
+		// processes whose cmdline merely contains the substring "sshd"
+		// (e.g. grep sshd, python scripts inspecting sshd, etc.) which would
+		// inflate the denominator with unrelated limits (often 1M) and
+		// distort the group utilisation.
+		if commStr != "sshd" {
+			continue
+		}
+		// Read limits first — if we cannot determine the soft limit for this
+		// PID, skip it entirely (do not count its FDs) to avoid inflating
+		// the numerator without a corresponding denominator, which would
+		// produce a spurious 100% when some PIDs are unreadable.
+		limitsData, err := os.ReadFile(filepath.Join(procRoot, pid, "limits"))
+		if err != nil {
+			continue
+		}
+		var softLimit int64
+		var haveLimit bool
+		for _, line := range strings.Split(string(limitsData), "\n") {
+			if strings.HasPrefix(line, "Max open files") {
+				fields := strings.Fields(line)
+				if len(fields) >= 4 {
+					if fields[3] == "unlimited" {
+						// unlimited → skip, not countable towards a percentage
+						haveLimit = false
+					} else if v, err := strconv.ParseInt(fields[3], 10, 64); err == nil && v > 0 {
+						softLimit = v
+						haveLimit = true
+					}
+				}
+				break
+			}
+		}
+		if !haveLimit {
+			continue
+		}
+		fdDir := filepath.Join(procRoot, pid, "fd")
+		fds, err := os.ReadDir(fdDir)
+		if err != nil {
+			continue
+		}
+		totalUsed += int64(len(fds))
+		totalMax += softLimit
+		found = true
+	}
+	if !found || totalMax == 0 {
+		return totalUsed, totalMax, 0
+	}
+	percent = float64(totalUsed) / float64(totalMax) * 100
+	// Clamp and round to one decimal like other percent metrics
+	if percent > 100 {
+		percent = 100
+	}
+	percent = math.Round(percent*10) / 10
+	return totalUsed, totalMax, percent
+}
+
 func getEntropy() int64 {
 	data, err := os.ReadFile(procPrefix + "/proc/sys/kernel/random/entropy_avail")
 	if err != nil {
@@ -876,18 +988,18 @@ func parseProcStat(data []byte) (name, state string, utime, stime, starttime uin
 	return
 }
 
-func getTopProcesses(limit int) []ProcessInfo {
+func getTopProcesses(limit int) ([]ProcessInfo, []ProcessInfo) {
 	if limit <= 0 {
 		limit = 10
 	}
 	d, err := os.Open(procPrefix + "/proc")
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer d.Close()
 	entries, err := d.Readdirnames(-1)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	hz := 100.0
 	now := float64(time.Now().UnixMicro()) / 1_000_000
@@ -952,9 +1064,6 @@ func getTopProcesses(limit int) []ProcessInfo {
 			State:      pState,
 		})
 	}
-	sort.Slice(procs, func(i, j int) bool {
-		return procs[i].CPUPercent > procs[j].CPUPercent
-	})
 	// Garbage-collect samples for PIDs that no longer exist, keeping the map
 	// bounded by the current process list (short-lived processes would
 	// otherwise leak entries forever).
@@ -966,10 +1075,26 @@ func getTopProcesses(limit int) []ProcessInfo {
 		}
 		return true
 	})
-	if len(procs) > limit {
-		procs = procs[:limit]
+
+	topCPU := make([]ProcessInfo, len(procs))
+	copy(topCPU, procs)
+	sort.Slice(topCPU, func(i, j int) bool {
+		return topCPU[i].CPUPercent > topCPU[j].CPUPercent
+	})
+	if len(topCPU) > limit {
+		topCPU = topCPU[:limit]
 	}
-	return procs
+
+	topMem := make([]ProcessInfo, len(procs))
+	copy(topMem, procs)
+	sort.Slice(topMem, func(i, j int) bool {
+		return topMem[i].MemRSSKB > topMem[j].MemRSSKB
+	})
+	if len(topMem) > limit {
+		topMem = topMem[:limit]
+	}
+
+	return topCPU, topMem
 }
 
 // ── Intent handler ───────────────────────────────────────────────────
@@ -1030,6 +1155,9 @@ func buildStatusReport(ctx context.Context) map[string]interface{} {
 		"psi_io_avg10":        m.PSIOAvg10,
 		"file_handles_used":   m.FileHandlesUsed,
 		"file_handles_max":    m.FileHandlesMax,
+		"app_sshd_fds_used":   m.AppSshdFdsUsed,
+		"app_sshd_fds_max":    m.AppSshdFdsMax,
+		"app_sshd_fds_percent": m.AppSshdFdsPercent,
 		"entropy_avail":       m.EntropyAvail,
 		"context_switches":    m.ContextSwitches,
 		"cpu_throttled_count": m.CPUThrottledCount,

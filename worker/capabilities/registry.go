@@ -4,20 +4,20 @@ package capabilities
 type RiskTier string
 
 const (
-	Tier1PassivePush   RiskTier = "TIER1_PASSIVE_PUSH"    // No policy required (Metrics, Inventory, Global Mount stats)
-	Tier2TargetedRead  RiskTier = "TIER2_TARGETED_READ"   // Signed Policy required (Status, Log source, Directory usage)
-	Tier3GlobalRead    RiskTier = "TIER3_GLOBAL_READ"     // Explicit Admin Policy grant required (List Services, List Containers)
-	Tier4Mutating      RiskTier = "TIER4_MUTATING"        // Policy + Signed Execution Grant (RELOAD_SERVICE, RESTART_SERVICE, RESTART_CONTAINER)
+	Tier1PassivePush  RiskTier = "TIER1_PASSIVE_PUSH"  // No policy required (Metrics, Inventory, Global Mount stats)
+	Tier2TargetedRead RiskTier = "TIER2_TARGETED_READ" // Signed Policy required (Status, Log source, Directory usage)
+	Tier3GlobalRead   RiskTier = "TIER3_GLOBAL_READ"   // Explicit Admin Policy grant required (List Services, List Containers)
+	Tier4Mutating     RiskTier = "TIER4_MUTATING"      // Policy + Signed Execution Grant (RELOAD_SERVICE, RESTART_SERVICE, RESTART_CONTAINER)
 )
 
 // PrimitiveMeta defines metadata for a compiled Worker primitive.
 type PrimitiveMeta struct {
-	Name            string   `json:"name"`
-	Risk            RiskTier `json:"risk_tier"`
-	TargetKind      string   `json:"target_kind"` // e.g. "systemd_service", "docker_container", "directory", "mount", ""
-	RequiresGrant   bool     `json:"requires_grant"`
-	RequiresPolicy  bool     `json:"requires_policy"`
-	IsMutating      bool     `json:"is_mutating"`
+	Name           string   `json:"name"`
+	Risk           RiskTier `json:"risk_tier"`
+	TargetKind     string   `json:"target_kind"` // e.g. "systemd_service", "docker_container", "directory", "mount", ""
+	RequiresGrant  bool     `json:"requires_grant"`
+	RequiresPolicy bool     `json:"requires_policy"`
+	IsMutating     bool     `json:"is_mutating"`
 }
 
 // Registry maps primitive names to their immutable metadata definitions.

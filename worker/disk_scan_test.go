@@ -74,6 +74,9 @@ func TestDiskScan_RejectsSymlinkTraversal(t *testing.T) {
 }
 
 func TestDiskScan_HandlesPermissionDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("skip permission test when running as root (chmod 0000 has no effect)")
+	}
 	tmpDir := t.TempDir()
 
 	// Create a readable subdir and an unreadable one
