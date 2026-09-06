@@ -1,68 +1,106 @@
 import React, { useEffect, useState } from 'react';
 import type { PluginAPI } from '../../../types/plugins';
 import { useNodeStore } from '../../../store/nodeStore';
-import { Play, Square, RotateCw, Server, Search, AlertCircle, RefreshCw } from 'lucide-react';
+import { Server } from 'lucide-react';
+import { useBlockData } from '../../../hooks/useBlockData';
+import { PageHeader } from '../../../components/blocks/PageHeader';
+import { FilterPanel } from '../../../components/blocks/FilterPanel';
+import { DataTable } from '../../../components/blocks/DataTable';
+import { StatusPill } from '../../../components/blocks/StatusPill';
+import { ActionButtonRow } from '../../../components/blocks/ActionButtonRow';
+import type { ColumnConfig, BlockAction } from '../../../components/blocks/types';
+import { t } from '../../../i18n';
+import { formatAgo } from '../../../utils/formatTime';
+import { useAuthStore } from '../../../store/authStore';
+import { ConfirmDeleteModal } from '../../../components/modals/ConfirmDeleteModal';
 
-interface Container {
+type Container = {
   node_id: string;
   id: string;
   name: string;
   image: string;
   state: string;
   ports: string[];
-}
+};
 
 interface DockerContainersProps {
   api: PluginAPI;
 }
 
+// Contrat §4.3 : les tokens de hover sont portés par les variantes de bloc
+// (danger/success/warning → DEFAULT_HOVER_TOKENS), jamais codés en dur dans la page.
+const ACTION_STOP: BlockAction = { label: 'Arrêter le conteneur', command: 'stop', variant: 'danger' };
+const ACTION_START: BlockAction = { label: 'Démarrer le conteneur', command: 'start', variant: 'success' };
+const ACTION_RESTART: BlockAction = { label: 'Redémarrer le conteneur', command: 'restart', variant: 'warning' };
+const ACTION_DELETE: BlockAction = { label: 'Supprimer le conteneur', command: 'delete', variant: 'danger', icon: 'trash' };
+
 export const DockerContainers: React.FC<DockerContainersProps> = ({ api }) => {
   const { nodes } = useNodeStore();
-  const [containers, setContainers] = useState<Container[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'admin';
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNode, setSelectedNode] = useState<string>('all');
   const [stateFilter, setStateFilter] = useState<string>('all');
   const [actionInProgress, setActionInProgress] = useState<Record<string, boolean>>({});
+  const [containerToDelete, setContainerToDelete] = useState<Container | null>(null);
 
+  const { data, error, isLoading, isValidating, mutate, fetchedAt } = useBlockData<{
+    containers: Container[];
+    cached_at?: number | null;
+  }>(
+    {
+      command: 'docker.list_containers_route',
+      params: { node_id: selectedNode !== 'all' ? selectedNode : undefined },
+    },
+    { revalidateInterval: 30_000 },
+  );
+
+  // B5 #11 : tick de fraîcheur périodique (toutes les 5s) pour recalculer dynamiquement formatAgo(cachedAt)
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const doFetch = async () => {
-      setLoading(true);
-      try {
-        const url = selectedNode === 'all' ? '/containers' : `/containers?node_id=${selectedNode}`;
-        const data = await api.fetch<{ containers: Container[] }>(url);
-        setContainers(data?.containers || []);
-      } catch (err) {
-        console.error('Failed to fetch docker containers:', err);
-        api.toast(
-          err instanceof Error ? err.message : 'Erreur lors du chargement des conteneurs',
-          'error'
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-    doFetch();
-  }, [selectedNode, api]);
+    const timer = window.setInterval(() => {
+      setTick((t) => t + 1);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
-  const handleContainerAction = async (nodeId: string, containerId: string, action: string) => {
+  const containers = data?.containers ?? [];
+  const cachedAt = data?.cached_at ?? (fetchedAt ? Math.floor(fetchedAt / 1000) : null);
+
+  const handleContainerAction = async (
+    nodeId: string,
+    containerId: string,
+    action: string,
+    containerName?: string,
+  ) => {
     const key = `${nodeId}-${containerId}`;
     setActionInProgress((prev) => ({ ...prev, [key]: true }));
     try {
-      // Vigile orchestrates container actions via nodes REST API (as approved in design)
-      await api.fetch(`/containers/${containerId}/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ node_id: nodeId }),
-      });
-      api.toast(`Action ${action} envoyée avec succès pour le conteneur ${containerId}`, 'success');
-      setTimeout(fetchContainers, 2000); // Reload after delay to let the state transition
+      const res = await api.fetch<{ success?: boolean; error?: string }>(
+        `/containers/${containerId}/${action}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            node_id: nodeId,
+            ...(containerName ? { container_name: containerName } : {}),
+          }),
+        },
+      );
+      if (!res || !res.success) {
+        api.toast(res?.error || `Échec de l'action ${action}`, 'error');
+        return;
+      }
+      api.toast(`Action ${action} exécutée avec succès`, 'success');
+      setTimeout(() => void mutate(), 2000); // Rechargement après délai pour laisser la transition d'état
     } catch (err) {
       console.error(`Failed to trigger action ${action} on container ${containerId}:`, err);
       api.toast(
         err instanceof Error ? err.message : `L'action ${action} a échoué`,
-        'error'
+        'error',
       );
+      throw err;
     } finally {
       setActionInProgress((prev) => ({ ...prev, [key]: false }));
     }
@@ -95,200 +133,192 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ api }) => {
     return matchesSearch && matchesState;
   });
 
+  const serveurOptions = [
+    { value: 'all', label: 'Tous les serveurs' },
+    ...nodes.map((n) => ({ value: n.id, label: n.name })),
+  ];
+
+  const statutOptions = [
+    { value: 'all', label: 'Tous les statuts' },
+    { value: 'running', label: "En cours d'exécution" },
+    { value: 'stopped', label: 'Arrêtés' },
+    { value: 'failed', label: 'Échoués' },
+  ];
+
+  const columns: ColumnConfig<Container>[] = [
+    {
+      key: 'name',
+      label: 'Conteneur',
+      render: (c) => (
+        <div className="flex flex-col">
+          <span className="font-semibold text-text-1">{c.name}</span>
+          <span className="text-[10px] text-text-3 font-mono mt-0.5">{c.id.slice(0, 12)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'image',
+      label: 'Image',
+      render: (c) => (
+        <span className="block font-mono text-xs text-text-2 max-w-[200px] truncate" title={c.image}>
+          {c.image}
+        </span>
+      ),
+    },
+    {
+      key: 'node_id',
+      label: 'Serveur',
+      render: (c) => (
+        <span className="flex items-center gap-1.5 text-text-3 font-mono text-xs">
+          <Server className="w-3.5 h-3.5 text-text-3" />
+          {getNodeName(c.node_id)}
+        </span>
+      ),
+    },
+    {
+      key: 'ports',
+      label: 'Ports',
+      render: (c) =>
+        c.ports && c.ports.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {c.ports.slice(0, 3).map((p, idx) => (
+              <span
+                key={idx}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-text-3 border border-border-strong/40"
+              >
+                {p}
+              </span>
+            ))}
+            {c.ports.length > 3 && (
+              <span className="text-[9px] font-mono text-text-3 px-1">
+                +{c.ports.length - 3}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-text-3 font-mono">—</span>
+        ),
+    },
+    {
+      key: 'state',
+      label: 'Statut',
+      render: (c) => <StatusPill status={c.state} />,
+    },
+  ];
+
+  const showBusy = isLoading && !data;
+  const showError = !!error && !data;
+  const showEmpty = !showBusy && !showError && containers.length === 0;
+  const showFilteredEmpty = !showBusy && !showError && containers.length > 0 && filteredContainers.length === 0;
+
   return (
-    <div className="p-6 max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-text-1 flex items-center gap-2">
-            🐳 Conteneurs Docker
-          </h1>
-          <p className="text-sm text-text-3 mt-1">
-            Gérez et supervisez les conteneurs Docker en temps réel sur l'ensemble de votre flotte.
-          </p>
-        </div>
+    <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 space-y-6 pb-12 animate-fade-in">
+      <PageHeader
+        title="🐳 Conteneurs Docker"
+        subtitle="Gérez et supervisez les conteneurs Docker en temps réel sur l'ensemble de votre flotte."
+        actions={
+          /* B5 #11 — Indicateur passif remplaçant le bouton Rafraîchir (polling SWR 30s actif) */
+          cachedAt != null ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-strong/30 bg-surface-2 text-text-3 font-mono text-xs font-semibold">
+              {isValidating && (
+                <span className="w-2 h-2 rounded-full bg-accent animate-pulse inline-block" />
+              )}
+              {t('common.last_updated', { time: formatAgo(cachedAt) })}
+            </span>
+          ) : undefined
+        }
+      />
 
-        <button
-          onClick={fetchContainers}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-strong/50 bg-surface-2 hover:bg-surface-hover/80 text-text-1 font-mono text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors duration-150 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Rafraîchir
-        </button>
-      </div>
+      <FilterPanel
+        fields={[
+          {
+            name: 'search',
+            type: 'search',
+            label: 'Rechercher par nom, image ou ID...',
+            placeholder: 'Rechercher par nom, image ou ID...',
+            value: searchTerm,
+            onChange: setSearchTerm,
+          },
+          {
+            name: 'serveur',
+            label: 'Serveur',
+            type: 'select',
+            options: serveurOptions,
+            value: selectedNode,
+            onChange: setSelectedNode,
+          },
+          {
+            name: 'statut',
+            label: 'Statut',
+            type: 'select',
+            options: statutOptions,
+            value: stateFilter,
+            onChange: setStateFilter,
+          },
+        ]}
+      />
 
-      {/* Filter panel */}
-      <div className="flex flex-col md:flex-row gap-4 p-4 rounded-xl bg-surface-2/40 border border-border-strong/30 backdrop-blur-xs">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
-          <input
-            type="text"
-            placeholder="Rechercher par nom, image ou ID..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-border bg-surface text-text-1 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all duration-150"
-          />
-        </div>
+      <DataTable
+        columns={columns}
+        data={filteredContainers.map((c) => ({ ...c, _rowKey: `${c.node_id}-${c.id}` }))}
+        rowKey="_rowKey"
+        state={showBusy ? 'busy' : showError ? 'error' : showEmpty || showFilteredEmpty ? 'empty' : 'data'}
+        busyMessage="Chargement des conteneurs..."
+        emptyMessage={
+          showEmpty
+            ? 'Aucun conteneur trouvé'
+            : 'Aucun conteneur Docker ne correspond aux critères de recherche actuels.'
+        }
+        error={error?.message}
+        onRetry={() => void mutate()}
+        actions={(c) => {
+          const inProgress = actionInProgress[`${c.node_id}-${c.id}`];
+          const stateLower = c.state.toLowerCase();
+          const isRunning = stateLower === 'running';
+          const isExitedOrCreated = stateLower === 'exited' || stateLower === 'dead' || stateLower === 'created';
 
-        <div className="flex flex-wrap gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-3 font-mono uppercase">Serveur:</span>
-            <select
-              value={selectedNode}
-              onChange={(e) => setSelectedNode(e.target.value)}
-              className="px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-1 focus:outline-none focus:border-accent transition-all duration-150"
-            >
-              <option value="all">Tous les serveurs</option>
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          let rowActions: BlockAction[];
+          if (isRunning) {
+            rowActions = isAdmin ? [ACTION_STOP, ACTION_RESTART] : [ACTION_RESTART];
+          } else if (isExitedOrCreated) {
+            rowActions = [ACTION_START, ACTION_RESTART, ...(isAdmin ? [ACTION_DELETE] : [])];
+          } else {
+            rowActions = [ACTION_RESTART];
+          }
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-3 font-mono uppercase">Statut:</span>
-            <select
-              value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value)}
-              className="px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-1 focus:outline-none focus:border-accent transition-all duration-150"
-            >
-              <option value="all">Tous les statuts</option>
-              <option value="running">En cours d'exécution</option>
-              <option value="stopped">Arrêtés</option>
-              <option value="failed">Échoués</option>
-            </select>
-          </div>
-        </div>
-      </div>
+          return (
+            <ActionButtonRow
+              actions={rowActions}
+              busyCommands={inProgress ? new Set(['stop', 'start', 'restart', 'delete']) : new Set()}
+              onAction={(command) => {
+                if (command === 'delete') {
+                  setContainerToDelete(c);
+                } else {
+                  void handleContainerAction(c.node_id, c.id, command, c.name);
+                }
+              }}
+            />
+          );
+        }}
+      />
 
-      {loading && containers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 bg-zinc-900/10 rounded-2xl border border-zinc-800/40">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-orange-500 border-zinc-800 mb-4"></div>
-          <span className="text-zinc-500 text-sm font-mono">Chargement des conteneurs...</span>
-        </div>
-      ) : filteredContainers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 bg-zinc-900/15 rounded-2xl border border-zinc-800/40 text-center px-6">
-          <AlertCircle className="w-12 h-12 text-zinc-600 mb-4" />
-          <h3 className="text-lg font-bold text-zinc-300">Aucun conteneur trouvé</h3>
-          <p className="text-zinc-500 text-sm max-w-md mt-1">
-            Aucun conteneur Docker ne correspond aux critères de recherche actuels.
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border-strong/30 bg-surface-2/10 backdrop-blur-xs">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-border-strong/40 bg-surface-2/30 font-mono text-[10px] text-text-3 uppercase tracking-wider select-none">
-                <th className="px-6 py-4 font-bold">Conteneur</th>
-                <th className="px-6 py-4 font-bold">Image</th>
-                <th className="px-6 py-4 font-bold">Serveur</th>
-                <th className="px-6 py-4 font-bold">Ports</th>
-                <th className="px-6 py-4 font-bold">Statut</th>
-                <th className="px-6 py-4 font-bold text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredContainers.map((c) => {
-                const key = `${c.node_id}-${c.id}`;
-                const inProgress = actionInProgress[key];
-                const isRunning = c.state.toLowerCase() === 'running';
-
-                return (
-                  <tr
-                    key={key}
-                    className="border-b border-border-strong/15 hover:bg-surface-2/20 transition-colors duration-150 text-sm"
-                  >
-                    <td className="px-6 py-4 font-semibold text-text-1">
-                      <div className="flex flex-col">
-                        <span>{c.name}</span>
-                        <span className="text-[10px] text-text-3 font-mono mt-0.5">{c.id.slice(0, 12)}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-text-2 font-mono text-xs max-w-[200px] truncate" title={c.image}>
-                      {c.image}
-                    </td>
-                    <td className="px-6 py-4 text-text-2 font-mono text-xs">
-                      <span className="flex items-center gap-1.5 text-zinc-400">
-                        <Server className="w-3.5 h-3.5 text-zinc-500" />
-                        {getNodeName(c.node_id)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {c.ports && c.ports.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {c.ports.slice(0, 3).map((p, idx) => (
-                            <span
-                              key={idx}
-                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/40"
-                            >
-                              {p}
-                            </span>
-                          ))}
-                          {c.ports.length > 3 && (
-                            <span className="text-[9px] font-mono text-zinc-500 px-1">
-                              +{c.ports.length - 3}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-text-3 font-mono">—</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold leading-none ${
-                          isRunning
-                            ? 'bg-green-custom/10 text-green-custom border border-green-custom/20'
-                            : 'bg-zinc-800 text-zinc-400 border border-zinc-700/50'
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            isRunning ? 'bg-green-custom animate-pulse' : 'bg-zinc-500'
-                          }`}
-                        />
-                        {c.state}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        {isRunning ? (
-                          <button
-                            onClick={() => handleContainerAction(c.node_id, c.id, 'stop')}
-                            disabled={inProgress}
-                            className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors border border-transparent hover:border-zinc-700/50 cursor-pointer"
-                            title="Arrêter le conteneur"
-                          >
-                            <Square className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleContainerAction(c.node_id, c.id, 'start')}
-                            disabled={inProgress}
-                            className="p-1.5 rounded hover:bg-green-custom/10 text-green-custom hover:text-green-custom transition-colors border border-transparent hover:border-green-custom/20 cursor-pointer"
-                            title="Démarrer le conteneur"
-                          >
-                            <Play className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleContainerAction(c.node_id, c.id, 'restart')}
-                          disabled={inProgress}
-                          className="p-1.5 rounded hover:bg-orange-500/10 text-orange-500 hover:text-orange-400 transition-colors border border-transparent hover:border-orange-500/20 cursor-pointer"
-                          title="Redémarrer le conteneur"
-                        >
-                          <RotateCw className={`w-4 h-4 ${inProgress ? 'animate-spin' : ''}`} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      {containerToDelete && (
+        <ConfirmDeleteModal
+          title="Supprimer le conteneur Docker"
+          message={`Cette action est irréversible. Le conteneur "${containerToDelete.name}" (${containerToDelete.id.slice(0, 12)}) sera définitivement détruit.`}
+          confirmWord={containerToDelete.name}
+          confirmLabel="Supprimer définitivement"
+          onClose={() => setContainerToDelete(null)}
+          onConfirm={async () => {
+            await handleContainerAction(
+              containerToDelete.node_id,
+              containerToDelete.id,
+              'delete',
+              containerToDelete.name,
+            );
+            setContainerToDelete(null);
+          }}
+        />
       )}
     </div>
   );

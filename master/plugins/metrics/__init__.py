@@ -75,8 +75,8 @@ class MetricsSnapshot(BaseModel):
         "net_packets_recv", "net_packets_sent", "net_errors_in", "net_errors_out",
         "net_drops_in", "net_drops_out", "disk_reads", "disk_writes",
         "disk_read_bytes", "disk_write_bytes", "file_handles_used",
-        "file_handles_max", "entropy_avail", "context_switches",
-        "cpu_throttled_count",
+        "file_handles_max", "app_sshd_fds_used", "app_sshd_fds_max",
+        "entropy_avail", "context_switches", "cpu_throttled_count",
         mode="before"
     )
     @classmethod
@@ -274,6 +274,20 @@ class MetricsSnapshot(BaseModel):
         description="Maximum file handles allowed (kernel limit)",
     )
 
+    # Per-app FD (sshd) — for apps_group_file_descriptors_utilization
+    app_sshd_fds_used: int | None = Field(
+        default=None, ge=0,
+        description="Total open FDs across all sshd PIDs",
+    )
+    app_sshd_fds_max: int | None = Field(
+        default=None, ge=0,
+        description="Sum of soft limits (Max open files) across all sshd PIDs",
+    )
+    app_sshd_fds_percent: float | None = Field(
+        default=None, ge=0.0, le=100.0,
+        description="FD utilisation % for the sshd app group (used/max*100)",
+    )
+
     # Entropy available
     entropy_avail: int | None = Field(
         default=None, ge=0,
@@ -432,8 +446,9 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             temp_celsius,
             psi_cpu_avg10, psi_mem_avg10, psi_io_avg10,
             file_handles_used, file_handles_max,
+            app_sshd_fds_used, app_sshd_fds_max, app_sshd_fds_percent,
             entropy_avail, context_switches, cpu_throttled_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_id,
@@ -480,6 +495,10 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
             # File handles
             snapshot.get("file_handles_used"),
             snapshot.get("file_handles_max"),
+            # Per-app sshd FD
+            snapshot.get("app_sshd_fds_used"),
+            snapshot.get("app_sshd_fds_max"),
+            snapshot.get("app_sshd_fds_percent"),
             # Entropy / context switches / CPU throttling
             snapshot.get("entropy_avail"),
             snapshot.get("context_switches"),
@@ -556,7 +575,7 @@ class MetricsPlugin(PluginBase):
                 "disk_percent": r["disk_percent"],
             })
 
-        return {"history": history, "count": len(history)}
+        return {"history": history, "count": len(history), "cached_at": time.time()}
 
 
 def register(pm):

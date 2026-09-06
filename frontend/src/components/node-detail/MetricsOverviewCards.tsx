@@ -7,6 +7,9 @@ import {
   TrendingDown,
   Activity,
 } from 'lucide-react';
+import { HelpTooltip } from '../blocks/HelpTooltip';
+import { useLocale } from '../../i18n';
+import { METRIC_ALERT_THRESHOLDS } from '../../constants/alertThresholds';
 
 const METRIC_THEMES = {
   cpu: { stroke: '#06B6D4' },
@@ -67,6 +70,7 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
   focusedMetric, onToggleMetric, getStatus,
   dataWindowHours = 999,
 }) => {
+  const { t } = useLocale();
   const cpuValue = lastSnap?.cpu ?? 0;
   const ramValue = lastSnap?.ram ?? 0;
   const diskValue = lastSnap?.disk ?? 0;
@@ -101,6 +105,12 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
               <Cpu className="w-4 h-4" />
             </div>
             <span className="font-interface font-extrabold uppercase text-[10px] tracking-wider text-text-2">CPU</span>
+            <HelpTooltip
+              title={t('metrics.help.cpu.title')}
+              description={t('metrics.help.cpu.description')}
+              thresholds={METRIC_ALERT_THRESHOLDS.cpu}
+              consequence={t('metrics.help.cpu.consequence')}
+            />
           </div>
           <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border ${cpuStatus.bg}`}>{cpuStatus.text}</span>
         </div>
@@ -129,6 +139,12 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
               <Database className="w-4 h-4" />
             </div>
             <span className="font-interface font-extrabold uppercase text-[10px] tracking-wider text-text-2">RAM</span>
+            <HelpTooltip
+              title={t('metrics.help.ram.title')}
+              description={t('metrics.help.ram.description')}
+              thresholds={METRIC_ALERT_THRESHOLDS.ram}
+              consequence={t('metrics.help.ram.consequence')}
+            />
           </div>
           <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border ${ramStatus.bg}`}>{ramStatus.text}</span>
         </div>
@@ -157,6 +173,12 @@ export const MetricsOverviewCards: React.FC<MetricsOverviewCardsProps> = ({
               <Layers className="w-4 h-4" />
             </div>
             <span className="font-interface font-extrabold uppercase text-[10px] tracking-wider text-text-2">STORAGE</span>
+            <HelpTooltip
+              title={t('metrics.help.disk.title')}
+              description={t('metrics.help.disk.description')}
+              thresholds={METRIC_ALERT_THRESHOLDS.disk}
+              consequence={t('metrics.help.disk.consequence')}
+            />
           </div>
           <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border ${diskStatus.bg}`}>{diskStatus.text}</span>
         </div>

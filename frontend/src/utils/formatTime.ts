@@ -91,3 +91,28 @@ export const formatDateTime = (timestamp: number | null | undefined): string => 
   const minutes = pad(date.getMinutes());
   return `${day}/${month} à ${hours}:${minutes}`;
 };
+
+/**
+ * Formats an epoch timestamp (in seconds) into a localized relative "ago" duration.
+ * Uses translation keys: common.never, common.ago_seconds, common.ago_minutes, common.ago_hours, common.ago_days.
+ * e.g., "il y a 5s", "il y a 2m 15s", "il y a 1h 30m", "jamais"
+ */
+export const formatAgo = (tsInSeconds: number | null | undefined): string => {
+  if (tsInSeconds == null || isNaN(tsInSeconds)) return translate('common.never');
+  const diff = Math.max(0, Math.floor(Date.now() / 1000 - tsInSeconds));
+  if (diff < 60) {
+    return translate('common.ago_seconds', { count: diff, n: diff });
+  }
+  if (diff < 3600) {
+    const min = Math.floor(diff / 60);
+    const sec = diff % 60;
+    return translate('common.ago_minutes', { min, sec, n: min });
+  }
+  if (diff < 86400) {
+    const hours = Math.floor(diff / 3600);
+    const min = Math.floor((diff % 3600) / 60);
+    return translate('common.ago_hours', { hours, min, n: hours });
+  }
+  const days = Math.floor(diff / 86400);
+  return translate('common.ago_days', { n: days, count: days });
+};

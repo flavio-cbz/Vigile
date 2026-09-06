@@ -1,9 +1,29 @@
 import React, { useState } from 'react';
-import { RefreshCw, RotateCw, Calendar } from 'lucide-react';
+import { RotateCw, Calendar } from 'lucide-react';
 import { api } from '../../hooks/useApi';
 import { useToastStore } from '../../store/useToastStore';
+import {
+  TIME_RANGE_PRESETS,
+  sanitizeCustomRangeSeconds,
+  type SelectableTimeRangePreset,
+  type TimeRangePreset,
+} from './metricsRanges';
 
-export type TimeRangePreset = '1h' | '6h' | '12h' | '24h' | '7d' | '30d' | 'custom';
+export type { TimeRangePreset };
+
+const RANGE_LABELS: Record<SelectableTimeRangePreset, string> = {
+  '1h': '1H',
+  '6h': '6H',
+  '12h': '12H',
+  '24h': '24H',
+  '7d': '7J',
+  '30d': '30J',
+};
+
+const timeRanges: { id: SelectableTimeRangePreset; label: string }[] = TIME_RANGE_PRESETS.map((id) => ({
+  id,
+  label: RANGE_LABELS[id],
+}));
 
 interface MetricsOverviewProps {
   timeRange: TimeRangePreset;
@@ -12,7 +32,8 @@ interface MetricsOverviewProps {
   locale: string;
   nodeId?: string;
   onTimeRangeChange: (range: TimeRangePreset, customStartSec?: number, customEndSec?: number) => void;
-  onRefresh: () => void;
+  /** Callback de rafraîchissement invoqué après recalcul d'analyse/baselines. */
+  onRefresh?: () => void;
 }
 
 export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
@@ -32,23 +53,35 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
     if (!nodeId || isRecalculating) return;
     setIsRecalculating(true);
     try {
-      await Promise.all([
-        api(`/api/nodes/${nodeId}/profile/regenerate`, { method: 'POST', timeoutMs: 60000 }).catch(() => {}),
-        api(`/api/nodes/${nodeId}/baseline/recalculate`, { method: 'POST', timeoutMs: 30000 }).catch(() => {}),
+      const results = await Promise.allSettled([
+        api(`/api/nodes/${nodeId}/profile/regenerate`, { method: 'POST', timeoutMs: 60000 }),
+        api(`/api/nodes/${nodeId}/baseline/recalculate`, { method: 'POST', timeoutMs: 30000 }),
       ]);
-      useToastStore.getState().addToast(
-        'success',
-        localT('Succès', 'Success'),
-        localT('Analyse et baselines recalculées avec succès', 'Analysis and baselines successfully recalculated'),
-      );
-      onRefresh();
-    } catch (err) {
-      console.error('Failed to recalculate analysis:', err);
-      useToastStore.getState().addToast(
-        'error',
-        localT('Erreur', 'Error'),
-        localT("Échec du recalcul de l'analyse", 'Failed to recalculate analysis'),
-      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed === results.length) {
+        useToastStore.getState().addToast(
+          'error',
+          localT('Erreur', 'Error'),
+          localT("Échec du recalcul de l'analyse", 'Failed to recalculate analysis'),
+        );
+      } else if (failed > 0) {
+        useToastStore.getState().addToast(
+          'warning',
+          localT('Partiel', 'Partial'),
+          localT(
+            "Recalcul partiel : une des opérations a échoué, les données affichées peuvent être incomplètes",
+            'Partial recalculation: one operation failed, displayed data may be incomplete',
+          ),
+        );
+        onRefresh?.();
+      } else {
+        useToastStore.getState().addToast(
+          'success',
+          localT('Succès', 'Success'),
+          localT('Analyse et baselines recalculées avec succès', 'Analysis and baselines successfully recalculated'),
+        );
+        onRefresh?.();
+      }
     } finally {
       setIsRecalculating(false);
     }
@@ -58,20 +91,11 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
     if (!customStart || !customEnd) return;
     const startSec = Math.floor(new Date(customStart).getTime() / 1000);
     const endSec = Math.floor(new Date(customEnd).getTime() / 1000);
-    if (startSec && endSec && endSec > startSec) {
-      onTimeRangeChange('custom', startSec, endSec);
-      setShowCustomPicker(false);
-    }
+    // Fail-closed mirror of the hook validation — reject before propagating
+    if (!sanitizeCustomRangeSeconds({ start: startSec, end: endSec })) return;
+    onTimeRangeChange('custom', startSec, endSec);
+    setShowCustomPicker(false);
   };
-
-  const timeRanges: { id: TimeRangePreset; label: string }[] = [
-    { id: '1h', label: '1H' },
-    { id: '6h', label: '6H' },
-    { id: '12h', label: '12H' },
-    { id: '24h', label: '24H' },
-    { id: '7d', label: '7J' },
-    { id: '30d', label: '30J' },
-  ];
 
   return (
     <div className="flex flex-col space-y-3 border-b border-border/80 pb-5">
@@ -94,6 +118,7 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex bg-surface-2 p-1 rounded-lg border border-border">
             {timeRanges.map((r) => {
+              // timeRange is guaranteed valid upstream (hook fails-closed)
               const isSelected = timeRange === r.id;
               return (
                 <button
@@ -102,7 +127,8 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
                     setShowCustomPicker(false);
                     onTimeRangeChange(r.id);
                   }}
-                  className={`px-2.5 py-1 text-[10px] font-interface font-bold uppercase rounded transition-all cursor-pointer ${
+                  disabled={isRefreshing || isRecalculating}
+                  className={`px-2.5 py-1 text-[10px] font-interface font-bold uppercase rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
                     isSelected
                       ? 'bg-accent text-bg shadow'
                       : 'text-text-3 hover:text-text-2'
@@ -115,7 +141,8 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
 
             <button
               onClick={() => setShowCustomPicker(!showCustomPicker)}
-              className={`px-2.5 py-1 text-[10px] font-interface font-bold uppercase rounded transition-all cursor-pointer flex items-center gap-1 ${
+              disabled={isRefreshing || isRecalculating}
+              className={`px-2.5 py-1 text-[10px] font-interface font-bold uppercase rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 ${
                 timeRange === 'custom'
                   ? 'bg-accent text-bg shadow'
                   : 'text-text-3 hover:text-text-2'
@@ -135,15 +162,6 @@ export const MetricsOverview: React.FC<MetricsOverviewProps> = ({
           >
             <RotateCw className={`w-3.5 h-3.5 text-accent ${isRecalculating ? 'animate-spin' : ''}`} />
             <span>{localT("Recalculer l'analyse", "Recalculate analysis")}</span>
-          </button>
-
-          <button
-            onClick={onRefresh}
-            disabled={isRefreshing || isRecalculating}
-            className="flex items-center justify-center p-2 bg-surface-2 hover:bg-surface-3 border border-border text-text-2 hover:text-accent rounded-lg transition-all cursor-pointer"
-            title={localT('Rafraîchir les données', 'Refresh data')}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-accent' : ''}`} />
           </button>
         </div>
       </div>

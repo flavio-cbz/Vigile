@@ -49,6 +49,13 @@ export interface PluginInvalidationEvent {
   action: string;
 }
 
+export interface MutateOptions {
+  /** Forcer le rafraîchissement en contournant le cache serveur. */
+  forceRefresh?: boolean;
+  /** Paramètres supplémentaires pour la requête de revalidation. */
+  params?: Record<string, unknown>;
+}
+
 export interface UseBlockDataResult<T = unknown> {
   /** Données de la sous-requête (undefined tant que non chargées / jetées). */
   data: T | undefined;
@@ -59,8 +66,11 @@ export interface UseBlockDataResult<T = unknown> {
   /** `true` pendant qu'une revalidation est en vol. */
   isValidating: boolean;
   /** Revalidation manuelle. */
-  mutate: () => Promise<void>;
+  mutate: (options?: MutateOptions) => Promise<void>;
+  /** Timestamp en millisecondes (Date.now()) de la dernière réponse réussie ou entrée de cache. */
+  fetchedAt: number | null;
 }
+
 
 // ── Cache SWR first-party, keyé par commande + params ──
 
@@ -204,6 +214,11 @@ export function useBlockData<T = unknown>(
     const entry = cache.get(stableCacheKey(command));
     return entry ? (entry.data as T) : undefined;
   });
+  const [fetchedAt, setFetchedAt] = useState<number | null>(() => {
+    if (!command) return null;
+    const entry = cache.get(stableCacheKey(command));
+    return entry ? entry.fetchedAt : null;
+  });
   const [error, setError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(() => {
     if (!command) return false;
@@ -232,7 +247,7 @@ export function useBlockData<T = unknown>(
   const mountedRef = useRef(true);
   const activeControllerRef = useRef<AbortController | null>(null);
 
-  const fetchData = useCallback(async (since?: string): Promise<void> => {
+  const fetchData = useCallback(async (since?: string, extraParams?: Record<string, unknown>): Promise<void> => {
     const cmd = commandRef.current;
     if (!cmd) return;
 
@@ -255,8 +270,12 @@ export function useBlockData<T = unknown>(
     try {
       // T26 : `since` (`<boot_id>:<counter>`) permet au serveur de répondre
       // `{unchanged: true}` quand aucune invalidation n'est survenue depuis.
+      const effectiveParams = {
+        ...(cmd.params ?? {}),
+        ...(extraParams ?? {}),
+      };
       const body: Record<string, unknown> = {
-        requests: [{ command: cmd.command, params: cmd.params ?? {} }],
+        requests: [{ command: cmd.command, params: effectiveParams }],
       };
       if (since) body.since = since;
 
@@ -294,8 +313,10 @@ export function useBlockData<T = unknown>(
         throw new Error(errDetail);
       }
 
-      setCacheEntry(stableCacheKey(cmd), { data: result.data, fetchedAt: Date.now() });
+      const now = Date.now();
+      setCacheEntry(stableCacheKey(cmd), { data: result.data, fetchedAt: now });
       setData(result.data);
+      setFetchedAt(now);
       setError(null);
     } catch (err) {
       if (controller.signal.aborted) return;
@@ -328,6 +349,7 @@ export function useBlockData<T = unknown>(
       if (pending === 'full') {
         cache.delete(stableCacheKey(cmd));
         setData(undefined);
+        setFetchedAt(null);
         setError(null);
         setIsLoading(true);
         void fetchData();
@@ -354,6 +376,7 @@ export function useBlockData<T = unknown>(
     const cmd = commandRef.current;
     if (!cmd) {
       setData(undefined);
+      setFetchedAt(null);
       setError(null);
       setIsLoading(false);
       setIsValidating(false);
@@ -364,10 +387,12 @@ export function useBlockData<T = unknown>(
     const fresh = entry !== undefined && Date.now() - entry.fetchedAt < revalidateInterval;
     if (entry) {
       setData(entry.data as T);
+      setFetchedAt(entry.fetchedAt);
       setError(null);
       setIsLoading(false);
     } else {
       setData(undefined);
+      setFetchedAt(null);
       setError(null);
       setIsLoading(true);
     }
@@ -426,9 +451,16 @@ export function useBlockData<T = unknown>(
     };
   }, [commandKey, accessToken, scheduleFlush]);
 
-  const mutate = useCallback(async (): Promise<void> => {
-    await fetchData();
+  const mutate = useCallback(async (options?: MutateOptions): Promise<void> => {
+    const extraParams: Record<string, unknown> = {};
+    if (options?.forceRefresh) {
+      extraParams.force_refresh = true;
+    }
+    if (options?.params) {
+      Object.assign(extraParams, options.params);
+    }
+    await fetchData(undefined, Object.keys(extraParams).length > 0 ? extraParams : undefined);
   }, [fetchData]);
 
-  return { data, error, isLoading, isValidating, mutate };
+  return { data, error, isLoading, isValidating, mutate, fetchedAt };
 }

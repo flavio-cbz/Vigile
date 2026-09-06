@@ -1,0 +1,1 @@
+"""Vigile — Background Jobs package."""

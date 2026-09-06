@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import { Activity } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, RotateCw } from 'lucide-react';
 import { Spinner } from '../primitives/Spinner';
 import { useLocale } from '../../i18n';
-import type { StatsPoint, DiskMount, NodeBaseline, AlertRecord } from './types';
+import type { StatsPoint, NodeBaseline, AlertRecord } from './types';
 import type { StatsSnapshot } from '../../hooks/useNodeDetailData';
 import { estimateDiskSaturation } from './diskUtils';
 import { formatRelativeDuration } from '../../utils/formatTime';
@@ -30,10 +30,13 @@ function generateSparklinePaths(points: number[], width = 120, height = 32, padd
   return { line: linePath, area: areaPath };
 }
 
+const MIN_REFRESH_SPIN_MS = 800;
+
 export const NodeDetailMetricsTab: React.FC<{
   statsHistory?: StatsPoint[];
   fullDiskHistory?: StatsSnapshot[];
   loading: boolean;
+  statsError?: string | null;
   nodeId?: string;
   onRefresh: () => void;
   timeRange: TimeRangePreset;
@@ -43,34 +46,60 @@ export const NodeDetailMetricsTab: React.FC<{
   nodeBaseline?: NodeBaseline | null;
   nodeAlerts?: AlertRecord[];
 }> = ({
-  statsHistory = [], fullDiskHistory = [], loading, nodeId, onRefresh, timeRange, onSetTimeRange,
+  statsHistory = [], fullDiskHistory = [], loading, statsError, nodeId, onRefresh, timeRange, onSetTimeRange,
   dataWindowHours, observationReady = true, nodeBaseline, nodeAlerts,
 }) => {
   const { locale, t } = useLocale();
   const [focusedMetric, setFocusedMetric] = useState<'all' | 'cpu' | 'ram' | 'disk'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<AlertRecord | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshStartRef = useRef(0);
 
   const localT = (frText: string, enText: string) => {
     return locale === 'fr' ? frText : enText;
   };
 
-  const lastRefreshed = useMemo(
-    () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    [],
+  const [lastRefreshed, setLastRefreshed] = useState(() =>
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   );
+  useEffect(() => {
+    if (!loading && statsHistory) {
+      setLastRefreshed(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    }
+  }, [loading, statsHistory]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+    };
+  }, []);
+
+  // Single owner of the isRefreshing lifecycle: the click arms it, this effect
+  // retires it once the parent fetch settles AND the minimum spin duration elapsed.
+  useEffect(() => {
+    if (!isRefreshing) return;
+    if (loading) return;
+    const elapsed = Date.now() - refreshStartRef.current;
+    const remaining = Math.max(0, MIN_REFRESH_SPIN_MS - elapsed);
+    refreshTimeoutRef.current = setTimeout(() => setIsRefreshing(false), remaining);
+    return () => {
+      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+    };
+  }, [isRefreshing, loading]);
 
   const handleRefreshClick = () => {
+    if (isRefreshing) return;
     setIsRefreshing(true);
+    refreshStartRef.current = Date.now();
     onRefresh();
-    setTimeout(() => setIsRefreshing(false), 800);
   };
 
   const handleTimeRangeChange = (preset: TimeRangePreset, customStartSec?: number, customEndSec?: number) => {
     onSetTimeRange(preset, customStartSec, customEndSec);
   };
 
-  const filteredHistory = statsHistory || [];
+  const filteredHistory = useMemo(() => statsHistory || [], [statsHistory]);
 
   const mappedHistory = useMemo(() => {
     return filteredHistory.map((point, idx) => ({
@@ -103,7 +132,7 @@ export const NodeDetailMetricsTab: React.FC<{
 
   const diskChartData = useMemo(() => {
     return filteredHistory.map((point, idx) => {
-      const dataPoint: Record<string, number | string | DiskMount[]> = {
+      const dataPoint: Record<string, unknown> = {
         ...point,
         chartIndex: idx,
       };
@@ -155,6 +184,9 @@ export const NodeDetailMetricsTab: React.FC<{
       ...d,
       days_left: estimates[d.mount_point]?.days_left ?? null,
       growth_gb_per_day: estimates[d.mount_point]?.growth_gb_per_day ?? null,
+      confidence: estimates[d.mount_point]?.confidence ?? 'none',
+      hours_collected: estimates[d.mount_point]?.hours_collected ?? 0,
+      is_noisy: estimates[d.mount_point]?.is_noisy ?? false,
     }));
   }, [filteredHistory, fullDiskHistory]);
 
@@ -208,6 +240,25 @@ export const NodeDetailMetricsTab: React.FC<{
   }
 
   if (filteredHistory.length === 0) {
+    // Failed load with nothing to show: surface the error instead of a misleading "no data" state
+    if (statsError && !loading) {
+      return (
+        <div className="py-24 border rounded-2xl bg-red-500/10 border-red-500/20 text-center flex flex-col items-center justify-center gap-3">
+          <Activity className="w-8 h-8 text-severity-critical opacity-70" />
+          <span className="font-interface text-xs font-semibold text-severity-critical">
+            {t('node_detail.metrics_load_error')}
+          </span>
+          <button
+            onClick={handleRefreshClick}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-border-strong/50 bg-surface-2 hover:bg-surface-hover/80 text-text-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors duration-150 disabled:opacity-50 cursor-pointer"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {t('node_detail.metrics_retry')}
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="py-24 border border-dashed border-border rounded-2xl bg-surface/40 text-center text-text-3 flex flex-col items-center justify-center gap-2">
         <Activity className="w-8 h-8 text-text-3 opacity-40" />
@@ -218,6 +269,22 @@ export const NodeDetailMetricsTab: React.FC<{
 
   return (
     <div className="space-y-8 animate-fade-in">
+      {statsError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-lg border bg-red-500/10 border-red-500/20">
+          <span className="font-interface text-xs font-semibold text-severity-critical">
+            {t('node_detail.metrics_load_error')}
+          </span>
+          <button
+            onClick={handleRefreshClick}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md border border-border-strong/50 bg-surface-2 hover:bg-surface-hover/80 text-text-1 font-mono text-[10px] font-semibold uppercase tracking-wider transition-colors duration-150 disabled:opacity-50 cursor-pointer"
+          >
+            <RotateCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {t('node_detail.metrics_retry')}
+          </button>
+        </div>
+      )}
+
       <MetricsOverview
         timeRange={timeRange}
         isRefreshing={isRefreshing}

@@ -22,16 +22,18 @@ function computeTimeAgo(timestamp: string | number | null, t: (k: string, variab
   const seconds = Math.floor((now - parsedTime) / 1000);
 
   if (seconds < 5) return t('common.just_now');
-  if (seconds < 60) return t('common.ago_seconds', { n: seconds });
+  if (seconds < 60) return t('common.ago_seconds', { n: seconds, count: seconds });
 
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return t('common.ago_minutes', { n: minutes });
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return t('common.ago_minutes', { n: minutes, min: minutes, sec: remainingSeconds });
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t('common.ago_hours', { n: hours });
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) return t('common.ago_hours', { n: hours, hours, min: remainingMinutes });
 
   const days = Math.floor(hours / 24);
-  return t('common.ago_days', { n: days });
+  return t('common.ago_days', { n: days, count: days });
 }
 
 export const TimeAgo: React.FC<TimeAgoProps> = ({ timestamp, className = '' }) => {

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { formatRelativeDuration } from './formatTime';
+import { formatRelativeDuration, formatAgo } from './formatTime';
 
 describe('formatRelativeDuration', () => {
   it('formats seconds', () => {
@@ -23,3 +23,32 @@ describe('formatRelativeDuration', () => {
     expect(formatRelativeDuration(-172800)).toBe('-2j');
   });
 });
+
+describe('formatAgo', () => {
+  it('returns jamais for null or undefined', () => {
+    expect(formatAgo(null)).toBe('jamais');
+    expect(formatAgo(undefined)).toBe('jamais');
+  });
+
+  it('formats seconds', () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(formatAgo(nowSec - 15)).toBe('il y a 15s');
+    expect(formatAgo(nowSec)).toBe('il y a 0s');
+  });
+
+  it('formats minutes and seconds', () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(formatAgo(nowSec - 135)).toBe('il y a 2m 15s');
+  });
+
+  it('formats hours and minutes', () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(formatAgo(nowSec - 3665)).toBe('il y a 1h 1m');
+  });
+
+  it('formats days', () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(formatAgo(nowSec - 90000)).toBe('il y a 1j');
+  });
+});
+

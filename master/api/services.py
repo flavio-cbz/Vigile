@@ -49,10 +49,14 @@ from master.core.plugin_helpers import (
     parse_service_list,
     parse_service_status,
 )
+from master.core.single_flight import SingleFlight
 
 logger = logging.getLogger(__name__)
 
+_services_single_flight = SingleFlight()
+
 router = APIRouter(prefix="/api/nodes/{node_id}", tags=["services"])
+
 
 
 # ---------------------------------------------------------------------------
@@ -73,11 +77,12 @@ async def _query_intent(
     node_id: str,
     action: str,
     params: dict[str, Any],
+    timeout: float = 15.0,
 ) -> dict[str, Any]:
     """Send a read-only intent via WorkerQueryPort and handle errors."""
     port = WorkerQueryPort(nm)
     try:
-        return await port.query(node_id, action, params, timeout=15.0)
+        return await port.query(node_id, action, params, timeout=timeout)
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -126,6 +131,9 @@ async def _dispatch_intent(
 class ServiceListResponse(BaseModel):
     node_id: str
     services: list[dict[str, str]]
+    cached_at: float | None = None
+    stale: bool = False
+    errors: list[str] = []
 
 
 class ServiceStatusResponse(BaseModel):
@@ -170,8 +178,18 @@ async def list_services(
     db: DB,
     claims: Annotated[dict, Depends(require_role("operator", "admin"))],
     nm: NodeManager = Depends(get_node_manager),
+    force_refresh: bool = False,
 ) -> ServiceListResponse:
-    """Fetch the list of all systemd services from a Worker."""
+    """Fetch the list of all systemd services from a Worker — cache-first (B4).
+
+    Contract: cache hit → DB only (10-50ms). TTL 300s, stale flag.
+    Only writes on success:true && parsed!=None.
+    """
+    import json as _json
+    import time as _time
+
+    from master.db.service_cache import get_cached_services, is_stale, set_cached_services
+
     if not is_plugin_active("systemd"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -181,24 +199,80 @@ async def list_services(
     if is_demo(claims):
         if get_demo_node(node_id) is None:
             raise HTTPException(status_code=404, detail="Node not found")
-        return ServiceListResponse(node_id=node_id, services=DEMO_SERVICES)
+        return ServiceListResponse(node_id=node_id, services=DEMO_SERVICES, cached_at=_time.time(), stale=False)
 
     await _get_node_or_404(nm, db, node_id)
-    result = await _query_intent(nm, node_id, "LIST_SERVICES", {})
 
+    cached_json, cached_at = await get_cached_services(db, node_id)
+    stale = is_stale(cached_at)
+    errors: list[str] = []
     services: list[dict[str, str]] = []
-    if result.get("success"):
-        parsed = parse_service_list(result.get("output", ""))
-        if parsed is not None:
-            services = parsed
-        else:
-            logger.warning("Node %s: unparseable service list", node_id)
+
+    if cached_json is not None:
+        try:
+            services = _json.loads(cached_json)
+            # Normalize: ensure list of dicts with name/state/status
+            if not isinstance(services, list):
+                services = []
+        except Exception:
+            services = []
+            stale = True
     else:
-        logger.warning("Node %s: LIST_SERVICES failed: %s", node_id, result.get("error", "unknown"))
+        stale = True
+
+    should_live = force_refresh or cached_json is None
+    live_timeout = 15.0 if force_refresh else 12.0
+
+    if should_live:
+        async def _do_live_query() -> tuple[list[dict[str, str]] | None, float | None, str | None]:
+            try:
+                result = await _query_intent(nm, node_id, "LIST_SERVICES", {}, timeout=live_timeout)
+                if result.get("success"):
+                    parsed = parse_service_list(result.get("output", ""))
+                    if parsed is not None:
+                        enriched = parsed[:500]
+                        now_ts = _time.time()
+                        try:
+                            await set_cached_services(db, node_id, _json.dumps(enriched), now_ts)
+                        except Exception as e:
+                            logger.warning("Failed to cache services for node %s: %s", node_id, e)
+                        return enriched, now_ts, None
+                    else:
+                        logger.warning("Node %s: unparseable service list", node_id)
+                        return None, None, "unparseable service list"
+                else:
+                    logger.warning("Node %s: LIST_SERVICES failed: %s", node_id, result.get("error", "unknown"))
+                    return None, None, str(result.get("error", "worker failure"))
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning("Node %s: LIST_SERVICES live fallback failed: %s", node_id, e)
+                return None, None, str(e)
+
+        try:
+            live_services, live_cached_at, live_err = await _services_single_flight.run(node_id, _do_live_query)
+            if live_services is not None:
+                services = live_services
+                cached_at = live_cached_at
+                stale = False
+            elif live_err is not None:
+                errors.append(live_err)
+                stale = True
+        except HTTPException:
+            raise
+        except Exception as e:
+            errors.append(str(e))
+            stale = True
+
+    if len(services) > 500:
+        services = services[:500]
 
     return ServiceListResponse(
         node_id=node_id,
         services=services,
+        cached_at=cached_at,
+        stale=stale,
+        errors=errors,
     )
 
 
@@ -302,6 +376,12 @@ async def restart_service(
             node_id=node_id,
             details={"service_name": service_name},
         )
+        from master.db.service_cache import invalidate_cached_services
+
+        try:
+            await invalidate_cached_services(db, node_id)
+        except Exception as exc:
+            logger.warning("Failed to invalidate service cache for node %s: %s", node_id, exc)
 
     return ServiceActionResponse(
         node_id=node_id,
