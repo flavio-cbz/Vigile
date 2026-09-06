@@ -38,8 +38,16 @@ CREATE TABLE IF NOT EXISTS nodes (
     insight_profile              TEXT,                       -- Profile JSON for smart insights
     insight_profile_generated_at REAL,                       -- Timestamp when profile was generated
     cached_services_json         TEXT,                       -- Cached services JSON from background task
+    cached_services_at           REAL DEFAULT NULL,          -- Unix timestamp of last successful services cache refresh
     cached_containers_json       TEXT,                       -- Cached containers JSON from background task
-    version                      TEXT                        -- Worker binary version reported by Worker
+    version                      TEXT,                       -- Worker binary version reported by Worker
+    worker_version               TEXT DEFAULT NULL,
+    node_group                   TEXT DEFAULT '',
+    disabled                     INTEGER NOT NULL DEFAULT 0,
+    cached_disk_scan_json        TEXT DEFAULT NULL,
+    cached_disk_scan_at          REAL DEFAULT NULL,
+    cached_disks_json            TEXT DEFAULT NULL,
+    last_ip                      TEXT DEFAULT NULL
 )
 """
 
@@ -165,6 +173,8 @@ CREATE TABLE IF NOT EXISTS metrics_snapshots (
     -- System
     uptime_seconds   REAL NOT NULL DEFAULT 0,
     processes        INTEGER,
+    disks_json       TEXT DEFAULT NULL,
+    top_processes_json TEXT DEFAULT NULL,
 
     -- Network I/O
     net_bytes_recv      INTEGER,
@@ -193,6 +203,11 @@ CREATE TABLE IF NOT EXISTS metrics_snapshots (
     -- File handles
     file_handles_used   INTEGER,
     file_handles_max    INTEGER,
+
+    -- Per-app FD (sshd) — for apps_group_file_descriptors_utilization
+    app_sshd_fds_used    INTEGER DEFAULT NULL,
+    app_sshd_fds_max     INTEGER DEFAULT NULL,
+    app_sshd_fds_percent REAL DEFAULT NULL,
 
     -- Entropy
     entropy_avail       INTEGER,
@@ -245,21 +260,11 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     node_id       TEXT,
     title         TEXT NOT NULL,
     history_json  TEXT NOT NULL DEFAULT '[]',
+    is_pinned     INTEGER NOT NULL DEFAULT 0,
     created_at    REAL NOT NULL,
     updated_at    REAL NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE SET NULL
-)
-"""
-
-# ---------------------------------------------------------------------------
-# plugin_configs  (Plugin configurations and states)
-# ---------------------------------------------------------------------------
-CREATE_PLUGIN_CONFIGS = """
-CREATE TABLE IF NOT EXISTS plugin_configs (
-    plugin_id   TEXT PRIMARY KEY,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    config_json TEXT NOT NULL DEFAULT '{}'
 )
 """
 
@@ -478,6 +483,17 @@ CREATE TABLE IF NOT EXISTS policies (
 )
 """
 
+CREATE_DISK_SCANS_CACHE = """
+CREATE TABLE IF NOT EXISTS disk_scans_cache (
+    node_id    TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    scan_json  TEXT NOT NULL,
+    scanned_at REAL NOT NULL,
+    PRIMARY KEY (node_id, path),
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
 # ---------------------------------------------------------------------------
 # Indexes for common query patterns
 # ---------------------------------------------------------------------------
@@ -486,20 +502,26 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_join_tokens_consumed ON join_tokens(consumed, expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_worker_tokens_node_id ON worker_tokens(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_worker_tokens_hash ON worker_tokens(token_hash)",
-    "CREATE INDEX IF NOT EXISTS idx_nodes_state ON nodes(state)",
     "CREATE INDEX IF NOT EXISTS idx_audit_log_sequence ON audit_log(sequence)",
     "CREATE INDEX IF NOT EXISTS idx_audit_log_node_id ON audit_log(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_metrics_snapshots_node_time ON metrics_snapshots(node_id, collected_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_proposals_status ON action_proposals(status)",
     "CREATE INDEX IF NOT EXISTS idx_proposals_node ON action_proposals(node_id)",
     "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family ON refresh_tokens(family_id)",
-    "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_node ON chat_sessions(node_id)",
-    "CREATE INDEX IF NOT EXISTS idx_plugin_configs_enabled ON plugin_configs(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_node_sort ON chat_sessions(user_id, node_id, is_pinned DESC, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_sort ON chat_sessions(user_id, is_pinned DESC, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)",
+    "CREATE INDEX IF NOT EXISTS idx_nodes_state_heartbeat ON nodes(state, last_heartbeat)",
+    "CREATE INDEX IF NOT EXISTS idx_nodes_disabled_state ON nodes(disabled, state)",
+    "CREATE INDEX IF NOT EXISTS idx_proposals_status_dispatch ON action_proposals(status, dispatch_id)",
+    "CREATE INDEX IF NOT EXISTS idx_proposals_intent_dispatch ON action_proposals(intent_id, dispatch_id)",
+    "CREATE INDEX IF NOT EXISTS idx_proposals_expires ON action_proposals(expires_at)",
+    "CREATE INDEX IF NOT EXISTS idx_metrics_snapshots_collected_at ON metrics_snapshots(collected_at)",
     "CREATE INDEX IF NOT EXISTS idx_plugins_enabled ON plugins(enabled)",
     "CREATE INDEX IF NOT EXISTS idx_plugins_status ON plugins(status)",
+    "CREATE INDEX IF NOT EXISTS idx_plugins_manifest_hash ON plugins(manifest_hash)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_node_status ON alerts(node_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_name_status ON alerts(alert_name, node_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at)",
@@ -516,6 +538,7 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_plex_events_node_time ON plex_events(node_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_plugin_grants_node ON plugin_grants(node_id, plugin_id)",
     "CREATE INDEX IF NOT EXISTS idx_policies_node_ver ON policies(node_id, policy_epoch, policy_version DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_disk_scans_cache_node ON disk_scans_cache(node_id)",
 ]
 
 # All CREATE statements in dependency order
@@ -529,7 +552,6 @@ ALL_TABLES = [
     CREATE_METRICS_SNAPSHOTS,
     CREATE_PROPOSALS,
     CREATE_CHAT_SESSIONS,
-    CREATE_PLUGIN_CONFIGS,
     CREATE_PLUGINS,
     CREATE_ALERTS,
     CREATE_INVESTIGATIONS,
@@ -542,5 +564,6 @@ ALL_TABLES = [
     CREATE_PLUGIN_CAPABILITY_DECLARATIONS,
     CREATE_PLUGIN_GRANTS,
     CREATE_POLICIES,
+    CREATE_DISK_SCANS_CACHE,
 ]
 

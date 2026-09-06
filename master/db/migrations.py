@@ -17,7 +17,13 @@ from passlib.context import CryptContext
 
 from master.config import settings
 from master.core.audit import GENESIS_HASH, compute_entry_hash
-from master.db.models import ALL_TABLES, CREATE_INDEXES, CREATE_INVESTIGATIONS, CREATE_OUTBOX
+from master.db.models import (
+    ALL_TABLES,
+    CREATE_DISK_SCANS_CACHE,
+    CREATE_INDEXES,
+    CREATE_INVESTIGATIONS,
+    CREATE_OUTBOX,
+)
 
 # Safe identifier pattern for DDL generation
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -37,22 +43,22 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 async def run_migrations(db: aiosqlite.Connection) -> None:
     """
     Idempotent migration runner.
-    Creates all tables and indexes, then seeds initial data.
+    Creates all tables, purges orphans, applies defensive ALTER TABLE columns,
+    creates indexes, rebuilds modified tables with FK checks, and stamps Alembic version.
     """
     logger.info("Running database migrations...")
 
-    # Create tables
+    # 1. Tables de ALL_TABLES
     for ddl in ALL_TABLES:
         await db.execute(ddl)
-
-    # Create indexes
-    for idx_sql in CREATE_INDEXES:
-        await db.execute(idx_sql)
-
     await db.commit()
-    logger.info("Tables and indexes OK.")
 
-    # Idempotent dynamic columns upgrade for insights and caching
+    # 2. Purge des tables orphelines
+    for orphan in ("automation_rules", "automation_cooldowns", "automation_logs", "metrics_metrics_snapshots"):
+        await db.execute(f"DROP TABLE IF EXISTS {orphan}")
+    await db.commit()
+
+    # 3. Tous les ALTER TABLE ... ADD COLUMN défensifs (nodes, metrics_snapshots, action_proposals, chat_sessions, plugins)
     async with db.execute("PRAGMA table_info(nodes)") as cursor:
         columns = [row["name"] for row in await cursor.fetchall()]
 
@@ -67,6 +73,9 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         mutated = True
     if "cached_services_json" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_services_json TEXT DEFAULT '[]'")
+        mutated = True
+    if "cached_services_at" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN cached_services_at REAL DEFAULT NULL")
         mutated = True
     if "cached_containers_json" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_containers_json TEXT DEFAULT '[]'")
@@ -92,6 +101,9 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     if "cached_disks_json" not in columns:
         await db.execute("ALTER TABLE nodes ADD COLUMN cached_disks_json TEXT DEFAULT NULL")
         mutated = True
+    if "last_ip" not in columns:
+        await db.execute("ALTER TABLE nodes ADD COLUMN last_ip TEXT DEFAULT NULL")
+        mutated = True
 
     async with db.execute("PRAGMA table_info(metrics_snapshots)") as cursor:
         metrics_columns = [row["name"] for row in await cursor.fetchall()]
@@ -116,6 +128,8 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         ("temp_celsius", "REAL"), ("psi_cpu_avg10", "REAL"),
         ("psi_mem_avg10", "REAL"), ("psi_io_avg10", "REAL"),
         ("file_handles_used", "INTEGER"), ("file_handles_max", "INTEGER"),
+        ("app_sshd_fds_used", "INTEGER"), ("app_sshd_fds_max", "INTEGER"),
+        ("app_sshd_fds_percent", "REAL"),
         ("entropy_avail", "INTEGER"), ("context_switches", "INTEGER"),
         ("cpu_throttled_count", "INTEGER"),
     ]:
@@ -151,26 +165,13 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         await db.commit()
         logger.info("Added dispatch_id, intent_id, expires_at columns to action_proposals.")
 
-    # Migration: create investigations table (Sprint 9) — CREATE TABLE IF NOT EXISTS handles new DBs
-    async with db.execute("PRAGMA table_info(investigations)") as cursor:
-        inv_columns = [row["name"] for row in await cursor.fetchall()]
-    if not inv_columns:
-        # Table doesn't exist in old DBs — CREATE TABLE IF NOT EXISTS above handles new ones
-        # but the table was already executed by ALL_TABLES at startup, so this is a no-op
-        # for new databases. For old ones it was missed — need separate CREATE.
-        await db.execute(CREATE_INVESTIGATIONS)
-        logger.info("Created investigations table.")
+    # Migration: add is_pinned column to chat_sessions if missing
+    async with db.execute("PRAGMA table_info(chat_sessions)") as cursor:
+        chat_columns = [row["name"] for row in await cursor.fetchall()]
+    if "is_pinned" not in chat_columns:
+        await db.execute("ALTER TABLE chat_sessions ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
         await db.commit()
-
-    # Migration 010: allow investigations.status='dropped' (queue-full drops)
-    await _add_dropped_status_to_investigations_if_present(db)
-
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_group ON nodes(node_group)")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_nodes_disabled ON nodes(disabled)")
-    await db.commit()
-
-    # Self-healing: drop legacy FK on join_tokens.node_id -> nodes.id if present (migration 006)
-    await _drop_join_tokens_fk_if_present(db)
+        logger.info("Added is_pinned column to chat_sessions.")
 
     # Migration 008: rename plugin_configs -> plugins and add version/status/manifest_hash columns
     await _migrate_plugin_configs_to_plugins(db)
@@ -194,14 +195,22 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
     await db.commit()
     logger.info("Migration 009: added discovered_at, installed_at, activated_at, last_run_at, deactivated_at, manifest_json columns to plugins table.")
 
-    # Stamp Alembic version if not already versioned (idempotent)
+    # 4. CREATE_INDEXES (tous les index, après garantie d'existence des colonnes)
+    for idx_sql in CREATE_INDEXES:
+        await db.execute(idx_sql)
+    await db.commit()
+    logger.info("Tables and indexes OK.")
+
+    # 5. Rebuilds de tables (join_tokens, investigations)
+    await _drop_join_tokens_fk_if_present(db)
+    await _add_dropped_status_to_investigations_if_present(db)
+
+    # 6. Canonisation alembic_version (unicité '010')
     await db.execute(
-        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
     )
-    await db.execute(
-        "INSERT OR IGNORE INTO alembic_version (version_num) VALUES (?)",
-        ("009",),
-    )
+    await db.execute("DELETE FROM alembic_version")
+    await db.execute("INSERT INTO alembic_version (version_num) VALUES ('010')")
     await db.commit()
     logger.info("Migrations complete.")
 
@@ -229,23 +238,41 @@ async def _drop_join_tokens_fk_if_present(db: aiosqlite.Connection) -> None:
         return
 
     logger.info("Dropping legacy FK join_tokens.node_id -> nodes.id (migration 006).")
-    await db.execute("PRAGMA foreign_keys=OFF")
-    await db.execute("DROP TABLE IF EXISTS join_tokens_new")
-    await db.execute("""
-    CREATE TABLE IF NOT EXISTS join_tokens_new (
-        id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
-        token_hash TEXT NOT NULL UNIQUE, payload_b64 TEXT NOT NULL,
-        consumed INTEGER NOT NULL DEFAULT 0, expires_at REAL NOT NULL, created_at REAL NOT NULL
-    )""")
-    await db.execute("INSERT INTO join_tokens_new SELECT * FROM join_tokens")
-    await db.execute("DROP TABLE join_tokens")
-    await db.execute("ALTER TABLE join_tokens_new RENAME TO join_tokens")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_join_tokens_node_id ON join_tokens(node_id)")
-    await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_join_tokens_consumed ON join_tokens(consumed, expires_at)"
-    )
-    await db.execute("PRAGMA foreign_keys=ON")
     await db.commit()
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        await db.execute("DROP TABLE IF EXISTS join_tokens_new")
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS join_tokens_new (
+            id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE, payload_b64 TEXT NOT NULL,
+            consumed INTEGER NOT NULL DEFAULT 0, expires_at REAL NOT NULL, created_at REAL NOT NULL
+        )""")
+        await db.execute(
+            "INSERT INTO join_tokens_new (id, node_id, token_hash, payload_b64, consumed, expires_at, created_at) "
+            "SELECT id, node_id, token_hash, payload_b64, consumed, expires_at, created_at FROM join_tokens"
+        )
+        await db.execute("DROP TABLE join_tokens")
+        await db.execute("ALTER TABLE join_tokens_new RENAME TO join_tokens")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_join_tokens_node_id ON join_tokens(node_id)")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_join_tokens_consumed ON join_tokens(consumed, expires_at)"
+        )
+        async with db.execute("PRAGMA foreign_key_check") as cursor:
+            violations = await cursor.fetchall()
+            if violations:
+                await db.rollback()
+                raise RuntimeError(f"Foreign key violations detected: {violations}")
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    finally:
+        if db.in_transaction:
+            await db.rollback()
+        await db.execute("PRAGMA foreign_keys=ON")
+
     logger.info("Legacy FK dropped successfully.")
 
 
@@ -278,17 +305,35 @@ async def _add_dropped_status_to_investigations_if_present(db: aiosqlite.Connect
         "CREATE TABLE IF NOT EXISTS investigations_new",
         1,
     )
-    await db.execute("PRAGMA foreign_keys=OFF")
-    await db.execute("DROP TABLE IF EXISTS investigations_new")
-    await db.execute(new_ddl)
-    await db.execute("INSERT INTO investigations_new SELECT * FROM investigations")
-    await db.execute("DROP TABLE investigations")
-    await db.execute("ALTER TABLE investigations_new RENAME TO investigations")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_node ON investigations(node_id, created_at DESC)")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations(alert_id)")
-    await db.execute("PRAGMA foreign_keys=ON")
     await db.commit()
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        await db.execute("DROP TABLE IF EXISTS investigations_new")
+        await db.execute(new_ddl)
+        await db.execute(
+            "INSERT INTO investigations_new (id, alert_id, node_id, alert_name, severity, status, context_json, result, created_at, completed_at, updated_at) "
+            "SELECT id, alert_id, node_id, alert_name, severity, status, context_json, result, created_at, completed_at, updated_at FROM investigations"
+        )
+        await db.execute("DROP TABLE investigations")
+        await db.execute("ALTER TABLE investigations_new RENAME TO investigations")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_node ON investigations(node_id, created_at DESC)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations(alert_id)")
+        async with db.execute("PRAGMA foreign_key_check") as cursor:
+            violations = await cursor.fetchall()
+            if violations:
+                await db.rollback()
+                raise RuntimeError(f"Foreign key violations detected: {violations}")
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    finally:
+        if db.in_transaction:
+            await db.rollback()
+        await db.execute("PRAGMA foreign_keys=ON")
+
     logger.info("Migration 010: investigations table rebuilt successfully.")
 
 

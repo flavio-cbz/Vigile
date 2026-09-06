@@ -182,6 +182,12 @@ class TestMigration:
         await reset_db()
         conn = await init_db(db_path)
         try:
+            from master.db.models import CREATE_NODES
+
+            await conn.execute(CREATE_NODES)
+            await conn.execute(
+                "INSERT INTO nodes (id, name, created_at, updated_at) VALUES ('node-legacy', 'n', 1.0, 1.0)"
+            )
             await conn.execute(
                 """CREATE TABLE investigations (
                     id            TEXT PRIMARY KEY,
@@ -227,7 +233,7 @@ class TestMigration:
             # 'dropped' is now accepted (FK on node_id enforced → seed node)
             now = time.time()
             await conn.execute(
-                "INSERT INTO nodes (id, name, created_at, updated_at) VALUES ('node-legacy', 'n', ?, ?)",
+                "INSERT OR IGNORE INTO nodes (id, name, created_at, updated_at) VALUES ('node-legacy', 'n', ?, ?)",
                 (now, now),
             )
             await conn.execute(

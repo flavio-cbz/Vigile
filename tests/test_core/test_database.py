@@ -101,6 +101,28 @@ async def test_db_transaction_rollback(db: aiosqlite.Connection):
 
 
 @pytest.mark.asyncio
+async def test_db_transaction_cancelled_error_rollback(db: aiosqlite.Connection):
+    import asyncio
+    import master.db.database as db_mod
+
+    # CancelledError inherits from BaseException, not Exception.
+    # The transaction must still rollback and not leak in_transaction state.
+    with pytest.raises(asyncio.CancelledError):
+        async with db_mod.transaction(db) as conn:
+            await conn.execute(
+                "INSERT INTO nodes (id, name, state, created_at, updated_at) VALUES ('nod-cancel', 'Cancel Test', 'PENDING', 0, 0)"
+            )
+            raise asyncio.CancelledError()
+
+    # Verify node was not inserted
+    async with db.execute("SELECT id FROM nodes WHERE id = 'nod-cancel'") as cur:
+        row = await cur.fetchone()
+    assert row is None
+    assert not db.in_transaction
+
+
+
+@pytest.mark.asyncio
 async def test_db_connection_pool(db: aiosqlite.Connection):
     import master.db.database as db_mod
 

@@ -7,10 +7,13 @@ Provides a context-managed aiosqlite connection with WAL mode enabled.
 
 import asyncio
 import contextvars
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT: float = 30.0
 
@@ -26,20 +29,27 @@ class DatabaseConnectionPool:
     """
 
     def __init__(self, timeout: float | None = None) -> None:
-        self._pool: asyncio.Queue[aiosqlite.Connection] = asyncio.Queue(maxsize=5)
+        self._pool: asyncio.Queue[aiosqlite.Connection] | None = None
         self._connections: list[aiosqlite.Connection] = []
         self._path: str = ""
         self._timeout: float = timeout if timeout is not None else DEFAULT_TIMEOUT
 
-    async def init(self, database_path: str, size: int = 5, timeout: float | None = None) -> None:
+    async def init(
+        self,
+        database_path: str,
+        size: int | None = None,
+        timeout: float | None = None,
+        pool_size: int = 5,
+    ) -> None:
+        effective_size = size if size is not None else pool_size
         self._path = database_path
         self._timeout = timeout if timeout is not None else self._timeout
         # Recreate the queue in the current event loop to avoid
         # "bound to a different event loop" errors after reset_db().
         # maxsize must match pool size to avoid deadlock when size > 5.
-        self._pool = asyncio.Queue(maxsize=size)
+        self._pool = asyncio.Queue(maxsize=effective_size)
         self._connections = []
-        for _ in range(size):
+        for _ in range(effective_size):
             conn = await self._create_connection()
             self._connections.append(conn)
             await self._pool.put(conn)
@@ -54,12 +64,56 @@ class DatabaseConnectionPool:
         await conn.commit()
         return conn
 
+    async def _is_healthy(self, conn: aiosqlite.Connection) -> bool:
+        """Check if connection is alive and working."""
+        try:
+            async with conn.execute("SELECT 1") as cursor:
+                row = await cursor.fetchone()
+                return row is not None and row[0] == 1
+        except Exception:
+            return False
+
     async def acquire(self) -> aiosqlite.Connection:
-        return await self._pool.get()
+        if self._pool is None:
+            raise RuntimeError("Database connection pool not initialized. Call init_db() first.")
+
+        try:
+            conn = await asyncio.wait_for(self._pool.get(), timeout=self._timeout)
+        except (asyncio.TimeoutError, TimeoutError):
+            raise asyncio.TimeoutError(f"Database connection pool acquire timed out after {self._timeout}s")
+
+        if not await self._is_healthy(conn):
+            try:
+                if conn in self._connections:
+                    self._connections.remove(conn)
+                await conn.close()
+            except Exception:
+                pass
+            conn = await self._create_connection()
+            self._connections.append(conn)
+        return conn
 
     async def release(self, conn: aiosqlite.Connection) -> None:
         if conn in self._connections:
-            await self._pool.put(conn)
+            if not await self._is_healthy(conn):
+                try:
+                    self._connections.remove(conn)
+                    await conn.close()
+                except Exception:
+                    pass
+                try:
+                    conn = await self._create_connection()
+                    self._connections.append(conn)
+                except Exception:
+                    # Retry once before failing
+                    try:
+                        conn = await self._create_connection()
+                        self._connections.append(conn)
+                    except Exception as exc:
+                        logger.error("Failed to replace unhealthy connection in pool: %s", exc)
+                        raise RuntimeError(f"Failed to replace unhealthy connection in pool: {exc}") from exc
+            if self._pool is not None:
+                await self._pool.put(conn)
 
     async def close_all(self) -> None:
         for conn in self._connections:
@@ -69,8 +123,10 @@ class DatabaseConnectionPool:
                 pass
         self._connections.clear()
         # Drain the queue
-        while not self._pool.empty():
-            self._pool.get_nowait()
+        if self._pool is not None:
+            while not self._pool.empty():
+                self._pool.get_nowait()
+            self._pool = None
 
 
 _pool: DatabaseConnectionPool = DatabaseConnectionPool()
@@ -92,7 +148,7 @@ async def database_session() -> AsyncGenerator[aiosqlite.Connection, None]:
 
 
 async def init_db(
-    database_path: str, timeout: float | None = None, pool_size: int = 5
+    database_path: str, timeout: float | None = None, pool_size: int | None = None
 ) -> aiosqlite.Connection:
     """
     Open the SQLite database and configure it for production use.
@@ -116,7 +172,10 @@ async def init_db(
     _db = db
 
     # Initialize the database connection pool
-    await _pool.init(database_path, size=pool_size, timeout=timeout)
+    from master.config import settings
+
+    effective_pool_size = pool_size if pool_size is not None else settings.db_pool_size
+    await _pool.init(database_path, pool_size=effective_pool_size, timeout=timeout)
     return db
 
 
@@ -174,6 +233,7 @@ async def transaction(db: aiosqlite.Connection) -> AsyncGenerator[aiosqlite.Conn
     try:
         yield db
         await db.commit()
-    except Exception:
-        await db.rollback()
+    except BaseException:
+        if db.in_transaction:
+            await db.rollback()
         raise

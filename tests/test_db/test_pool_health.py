@@ -273,3 +273,45 @@ class TestInitDb:
         await reset_db()
         with pytest.raises(RuntimeError, match="Database not initialized"):
             get_db_conn()
+
+    @pytest.mark.asyncio
+    async def test_pool_acquire_after_close_all_raises_immediately(self) -> None:
+        """acquire() after close_all() must raise RuntimeError immediately without hanging."""
+        pool = DatabaseConnectionPool(timeout=5.0)
+        tmp = tempfile.mkdtemp()
+        try:
+            db_path = os.path.join(tmp, "test.db")
+            await pool.init(db_path, size=1)
+            await pool.close_all()
+            with pytest.raises(RuntimeError, match="Database connection pool not initialized"):
+                await pool.acquire()
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @pytest.mark.asyncio
+    async def test_pool_release_unhealthy_replacement_failure_raises(self) -> None:
+        """If replacing an unhealthy connection fails in release(), it must raise RuntimeError."""
+        pool = DatabaseConnectionPool()
+        tmp = tempfile.mkdtemp()
+        try:
+            db_path = os.path.join(tmp, "test.db")
+            await pool.init(db_path, size=1)
+            conn = await pool.acquire()
+            await conn.close()
+
+            # Sabotage _create_connection to simulate persistent failure
+            async def failing_create():
+                raise aiosqlite.OperationalError("Simulated disk I/O failure")
+
+            pool._create_connection = failing_create
+
+            with pytest.raises(RuntimeError, match="Failed to replace unhealthy connection in pool"):
+                await pool.release(conn)
+        finally:
+            await pool.close_all()
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
