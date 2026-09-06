@@ -80,6 +80,8 @@ for node in nodes:
 
 **Safety-sensitive Copilot action targets must be resolved before execution.** For `RESTART_CONTAINER`, accept common LLM target keys (`container_id`, `container`, `name`, `target`) but normalize them through the Master-side container resolver before persistence/execution. Use cached Docker inventory first, live `LIST_CONTAINERS` only as fallback, and fail closed on unknown or ambiguous fuzzy matches.
 
+**Destructive Fleet Actions & Protected Resources (Ticket C2).** Any destructive or service-interrupting actions (`DELETE_CONTAINER`, `STOP_CONTAINER`, `STOP_SERVICE`) are strictly role-gated to `admin` only (return HTTP 403 and log `AuditAction.SECURITY_INCIDENT` in the hash chain). `DELETE_CONTAINER` must NEVER be exposed in `copilot_actions` in plugin manifests. Critical system services (`ssh`, `sshd`, `docker`, `dockerd`, `containerd`, `networking`, `systemd-networkd`, `NetworkManager`, `systemd-resolved`, `systemd-journald`, `systemd-logind`, `dbus`, `vigile`, `vigile-worker`) are hardcoded in `protectedServices` and cannot be stopped under any circumstances. On the Go Worker, container deletion must inspect container state immediately before deletion, verify the container is exited/dead/created, verify exact `container_name` match, and enforce `v=false&force=false`.
+
 ---
 
 ## 6. TYPING

@@ -55,11 +55,13 @@ worker/vigile-worker
 worker/vigile-worker-new
 worker/vigile-worker-static
 worker/worker
+worker/worker-linux-*
 *.o
 *.a
 
 ## OS
 .DS_Store
+._.DS_Store
 .AppleDouble
 .LSOverride
 Thumbs.db
@@ -129,3 +131,5 @@ worker-cache/
 SESSION.md
 session.md 
 .mac_venv
+.db-audit-lock
+backup_audit_*.db
