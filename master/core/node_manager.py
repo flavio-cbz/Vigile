@@ -156,12 +156,21 @@ class NodeManager:
         self._state_change_callbacks: list = []
         # In-flight disk scan tracking (prevents concurrent scans per node)
         self._disk_scan_inflight: set[str] = set()
-        # Per-node last disk-scan trigger time (for 12h periodic scheduling)
         self._disk_scan_last_run: dict[str, float] = {}
         self._insights_manager: object | None = None
         # CPU drift detection: per-node epoch of last drift-triggered re-profile
         self._last_drift_trigger: dict[str, float] = {}
         self._DRIFT_COOLDOWN: float = 3600.0  # 1 hour cooldown
+        # Immediate in-memory metrics cache from latest STATUS_REPORT (CB-6)
+        self._latest_metrics: dict[str, dict] = {}
+
+    def set_latest_metrics(self, node_id: str, metrics: dict) -> None:
+        """Store the latest raw metrics from STATUS_REPORT in memory (CB-6)."""
+        self._latest_metrics[node_id] = metrics
+
+    def get_latest_metrics(self, node_id: str) -> dict | None:
+        """Retrieve the latest in-memory metrics for a node (CB-6)."""
+        return self._latest_metrics.get(node_id)
 
     # -----------------------------------------------------------------------
     # Startup / Shutdown
@@ -323,19 +332,28 @@ class NodeManager:
         # 4. Persist disk mount list from latest metrics snapshot (for mount selector).
         for nid in connected:
             try:
-                async with db.execute(
-                    "SELECT disks_json FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
-                    (nid,),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                if row and row["disks_json"]:
-                    try:
-                        disks = json.loads(row["disks_json"])
-                        mounts = [d["mount_point"] for d in disks if d.get("mount_point")]
-                        if mounts:
-                            await set_node_disk_mounts(db, nid, mounts)
-                    except Exception:
-                        pass
+                latest = self.get_latest_metrics(nid)
+                mounts = None
+                if latest and latest.get("disks"):
+                    mounts = [
+                        d["mount_point"]
+                        for d in latest["disks"]
+                        if isinstance(d, dict) and d.get("mount_point")
+                    ]
+                if not mounts:
+                    async with db.execute(
+                        "SELECT disks_json FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
+                        (nid,),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    if row and row["disks_json"]:
+                        try:
+                            disks = json.loads(row["disks_json"])
+                            mounts = [d["mount_point"] for d in disks if isinstance(d, dict) and d.get("mount_point")]
+                        except Exception:
+                            pass
+                if mounts:
+                    await set_node_disk_mounts(db, nid, mounts)
             except Exception as ex:
                 logger.warning(
                     "Cache updater: failed to persist disk mounts for node %s: %s", nid, ex
@@ -1118,6 +1136,34 @@ class NodeManager:
                     return
 
             logger.info("Node %s: triggered background disk scan (force=%s)", node_id, force)
+
+            # Read mounts from latest metrics in memory first (CB-6), then SQL fallback
+            mounts = None
+            latest = self.get_latest_metrics(node_id)
+            if latest and latest.get("disks"):
+                mounts = [
+                    d["mount_point"]
+                    for d in latest["disks"]
+                    if isinstance(d, dict) and d.get("mount_point")
+                ]
+            if not mounts:
+                try:
+                    async with db.execute(
+                        "SELECT disks_json FROM metrics_snapshots WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
+                        (node_id,),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    if row and row["disks_json"]:
+                        try:
+                            disks = json.loads(row["disks_json"])
+                            mounts = [d["mount_point"] for d in disks if isinstance(d, dict) and d.get("mount_point")]
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            if not mounts:
+                mounts = ["/"]
+
             result = await self._send_intent(
                 node_id,
                 {
@@ -1126,7 +1172,7 @@ class NodeManager:
                         "path": "/",
                         "max_depth": 4,
                         "min_size_bytes": 10 * 1024 * 1024,
-                        "mounts": ["/"],
+                        "mounts": mounts,
                     },
                 },
                 timeout=45.0,

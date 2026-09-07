@@ -79,13 +79,15 @@ async def worker_join_handler(websocket: WebSocket) -> None:
 
     from master.config import settings
 
-    if settings.enforce_https:
-        url = getattr(websocket, "url", None)
-        scheme = getattr(url, "scheme", None) if url else None
-        headers = getattr(websocket, "headers", {})
-        x_proto = headers.get("x-forwarded-proto", "") if hasattr(headers, "get") else ""
-        is_secure = scheme == "wss" or x_proto.lower() == "https"
-        if not is_secure:
+    url = getattr(websocket, "url", None)
+    scheme = getattr(url, "scheme", None) if url else None
+    headers = getattr(websocket, "headers", {})
+    x_proto = headers.get("x-forwarded-proto", "") if hasattr(headers, "get") else ""
+    is_secure = scheme == "wss" or x_proto.lower() == "https"
+    if not is_secure:
+        remote_addr = _get_remote_address(websocket) or "unknown"
+        logger.warning("SECURITY_WARNING: Cleartext connection established from %s", remote_addr)
+        if settings.enforce_https:
             logger.warning("Rejecting unencrypted WebSocket connection (enforce_https=True)")
             await websocket.accept()
             await websocket.close(code=4426, reason="WSS/TLS required")
@@ -784,6 +786,7 @@ async def _run_operational(
 
         elif msg_type == "STATUS_REPORT":
             logger.info("RECEIVED STATUS_REPORT from %s: %s", node_id, msg)
+            node_manager.set_latest_metrics(node_id, msg)
             # Normalize and store metrics snapshot via plugin system
             snapshot = await pm_mod.plugin_manager.async_call_first(
                 "normalize_status_report", raw_report=msg

@@ -35,6 +35,11 @@ from master.auto_update import auto_update_workers_task
 from master.proposal_expiry import proposal_expiry_task
 from master.core.outbox import outbox
 from master.core.proposal_dispatcher import ApprovedProposalDispatcher
+from master.plugins.metrics import (
+    metrics_flush_loop,
+    metrics_retention_loop,
+    flush_all as metrics_flush_all,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +342,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         service_collector_loop(db, node_manager)
     )
 
+    # 15. Metrics Flush & Retention Tasks (CB-5)
+    metrics_flush_task = asyncio.create_task(metrics_flush_loop(db))
+    metrics_retention_task = asyncio.create_task(metrics_retention_loop(db))
+
     logger.info("Master Node ready. 🚀")
 
     yield  # ← application runs here
@@ -350,6 +359,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     outbox_dispatch.cancel()
     outbox_cleanup.cancel()
     service_collector.cancel()
+    metrics_retention_task.cancel()
     try:
         await engine.shutdown()
     except Exception:
@@ -363,11 +373,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             outbox_dispatch,
             outbox_cleanup,
             service_collector,
-            return_exceptions=True
+            metrics_retention_task,
+            return_exceptions=True,
         )
     except Exception:
         logger.exception("Error during shutdown task cleanup")
+
+    # 1. Stop NodeManager (close all active worker WebSockets, preventing any new STATUS_REPORT)
     await node_manager.stop()
+
+    # 2. Cancel metrics flush loop
+    metrics_flush_task.cancel()
+    try:
+        await metrics_flush_task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    # 3. Drain all remaining buffered metrics snapshots into SQLite via executemany (CB-5)
+    try:
+        await metrics_flush_all(db)
+    except Exception:
+        logger.exception("Failed to flush remaining metrics on shutdown")
 
     # Close shared httpx client pool
     try:
@@ -377,5 +403,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.exception("Failed to close shared httpx client")
 
+    # 4. Close database
     await close_db()
     logger.info("Shutdown complete.")

@@ -9,8 +9,12 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/flavio-cbz/Vigile/worker/updater"
 )
 
 // Connection states.
@@ -36,16 +40,17 @@ const (
 
 // WorkerConn manages the WebSocket connection lifecycle.
 type WorkerConn struct {
-	mu          sync.Mutex
-	state       int
-	nodeID      string
-	ws          *WSConn
-	masterURL   string
-	joinToken   string
-	privKey     ed25519.PrivateKey
-	pubKey      ed25519.PublicKey
-	fingerprint Fingerprint
-	workerToken string
+	mu           sync.Mutex
+	state        int
+	nodeID       string
+	ws           *WSConn
+	masterURL    string
+	joinToken    string
+	privKey      ed25519.PrivateKey
+	pubKey       ed25519.PublicKey
+	fingerprint  Fingerprint
+	workerToken  string
+	sessionEpoch atomic.Uint64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -235,6 +240,17 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 
 	slog.Info("Operational phase started", "node_id", wc.nodeID)
 
+	// Per-session context: canceling opCancel immediately terminates all subcommands
+	// and intent goroutines tied to this operational connection session.
+	opCtx, opCancel := context.WithCancel(ctx)
+	defer opCancel()
+	currentEpoch := wc.sessionEpoch.Add(1)
+
+	// Confirm that previous update (if any) succeeded and reached operational state
+	if err := updater.ConfirmUpdate(); err == nil {
+		slog.Debug("Pending update confirmed upon operational start")
+	}
+
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
@@ -242,8 +258,8 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 	defer statusTicker.Stop()
 
 	// Send initial status report immediately on connection
-	initialReport := buildStatusReport(wc.ctx)
-	if err := wc.sendJSON(ctx, initialReport); err != nil {
+	initialReport := buildStatusReport(opCtx)
+	if err := wc.sendJSON(opCtx, initialReport); err != nil {
 		slog.Warn("initial status report error", "error", err)
 	}
 
@@ -253,7 +269,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 		data []byte
 		err  error
 	}
-	msgCh := make(chan wsMsg, 1)
+	msgCh := make(chan wsMsg, 32)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -262,7 +278,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 		}()
 		for {
 			select {
-			case <-wc.ctx.Done():
+			case <-opCtx.Done():
 				return
 			default:
 			}
@@ -271,14 +287,20 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 			}
 			data, err := ws.ReadText()
 			select {
+			case <-opCtx.Done():
+				return
 			case msgCh <- wsMsg{data, err}:
-			default:
 			}
 			if err != nil {
 				return
 			}
 		}
 	}()
+
+	// Semaphores for strict pool segregation & head-of-line blocking elimination (CB-4)
+	querySem := make(chan struct{}, 4)
+	mutationSem := make(chan struct{}, 1)
+	diskScanSem := make(chan struct{}, 1)
 
 	for {
 		select {
@@ -290,8 +312,12 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 			slog.Info("context cancelled, stopping operational phase")
 			return nil
 
+		case <-opCtx.Done():
+			slog.Info("operational context cancelled, stopping operational phase")
+			return nil
+
 		case <-heartbeatTicker.C:
-			if err := wc.sendJSON(ctx, map[string]interface{}{
+			if err := wc.sendJSON(opCtx, map[string]interface{}{
 				"type":    "HEARTBEAT",
 				"ts":      float64(time.Now().UnixMicro()) / 1_000_000,
 				"version": Version,
@@ -300,8 +326,8 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 			}
 
 		case <-statusTicker.C:
-			report := buildStatusReport(wc.ctx)
-			if err := wc.sendJSON(ctx, report); err != nil {
+			report := buildStatusReport(opCtx)
+			if err := wc.sendJSON(opCtx, report); err != nil {
 				slog.Warn("status report error", "error", err)
 			}
 
@@ -334,15 +360,121 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 				// Heartbeat acknowledged by Master
 
 			case "INTENT":
-				result := dispatchIntent(wc, msg.data)
-				var resObj map[string]interface{}
-				if err := json.Unmarshal(result, &resObj); err != nil {
-					slog.Warn("failed to parse intent result", "error", err)
+				var intent Intent
+				if err := json.Unmarshal(msg.data, &intent); err != nil {
+					slog.Warn("invalid intent JSON from master", "error", err)
 					continue
 				}
-				resObj["type"] = "INTENT_RESULT"
-				if err := wc.sendJSON(ctx, resObj); err != nil {
-					slog.Warn("failed to send INTENT_RESULT", "error", err)
+
+				if isMutationAction(intent.Action) {
+					// Fail-Fast immediate on mutations: no FIFO queueing
+					select {
+					case mutationSem <- struct{}{}:
+						go func(epoch uint64, rawData []byte, intentID string) {
+							defer func() {
+								if r := recover(); r != nil {
+									slog.Error("PANIC in mutation intent execution", "recover", r, "intent_id", intentID)
+								}
+								<-mutationSem
+							}()
+							result := dispatchIntent(opCtx, wc, rawData)
+							if wc.sessionEpoch.Load() != epoch {
+								slog.Warn("discarding mutation result from previous epoch", "intent_id", intentID)
+								return
+							}
+							var resObj map[string]interface{}
+							if err := json.Unmarshal(result, &resObj); err != nil {
+								slog.Warn("failed to parse intent result", "error", err)
+								return
+							}
+							resObj["type"] = "INTENT_RESULT"
+							if err := wc.sendJSON(opCtx, resObj); err != nil {
+								slog.Warn("failed to send INTENT_RESULT", "error", err, "intent_id", intentID)
+							}
+						}(currentEpoch, msg.data, intent.IntentID)
+					default:
+						resObj := map[string]interface{}{
+							"type":      "INTENT_RESULT",
+							"intent_id": intent.IntentID,
+							"success":   false,
+							"error":     "WORKER_BUSY: another mutation is already in progress on this node",
+						}
+						if err := wc.sendJSON(opCtx, resObj); err != nil {
+							slog.Warn("failed to send busy INTENT_RESULT", "error", err, "intent_id", intent.IntentID)
+						}
+					}
+				} else if intent.Action == "DISK_SCAN" {
+					// Strict mutual exclusion for disk scans + query semaphore
+					select {
+					case diskScanSem <- struct{}{}:
+						go func(epoch uint64, rawData []byte, intentID string) {
+							defer func() {
+								if r := recover(); r != nil {
+									slog.Error("PANIC in disk scan execution", "recover", r, "intent_id", intentID)
+								}
+								<-diskScanSem
+							}()
+							select {
+							case <-opCtx.Done():
+								return
+							case querySem <- struct{}{}:
+								defer func() { <-querySem }()
+							}
+							result := dispatchIntent(opCtx, wc, rawData)
+							if wc.sessionEpoch.Load() != epoch {
+								slog.Warn("discarding disk scan result from previous epoch", "intent_id", intentID)
+								return
+							}
+							var resObj map[string]interface{}
+							if err := json.Unmarshal(result, &resObj); err != nil {
+								slog.Warn("failed to parse intent result", "error", err)
+								return
+							}
+							resObj["type"] = "INTENT_RESULT"
+							if err := wc.sendJSON(opCtx, resObj); err != nil {
+								slog.Warn("failed to send INTENT_RESULT", "error", err, "intent_id", intentID)
+							}
+						}(currentEpoch, msg.data, intent.IntentID)
+					default:
+						resObj := map[string]interface{}{
+							"type":      "INTENT_RESULT",
+							"intent_id": intent.IntentID,
+							"success":   false,
+							"error":     "WORKER_BUSY: another disk scan is already in progress on this node",
+						}
+						if err := wc.sendJSON(opCtx, resObj); err != nil {
+							slog.Warn("failed to send busy INTENT_RESULT", "error", err, "intent_id", intent.IntentID)
+						}
+					}
+				} else {
+					// Read-only query pool (cap 4)
+					go func(epoch uint64, rawData []byte, intentID string) {
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("PANIC in query execution", "recover", r, "intent_id", intentID)
+							}
+						}()
+						select {
+						case <-opCtx.Done():
+							return
+						case querySem <- struct{}{}:
+							defer func() { <-querySem }()
+						}
+						result := dispatchIntent(opCtx, wc, rawData)
+						if wc.sessionEpoch.Load() != epoch {
+							slog.Warn("discarding query result from previous epoch", "intent_id", intentID)
+							return
+						}
+						var resObj map[string]interface{}
+						if err := json.Unmarshal(result, &resObj); err != nil {
+							slog.Warn("failed to parse intent result", "error", err)
+							return
+						}
+						resObj["type"] = "INTENT_RESULT"
+						if err := wc.sendJSON(opCtx, resObj); err != nil {
+							slog.Warn("failed to send INTENT_RESULT", "error", err, "intent_id", intentID)
+						}
+					}(currentEpoch, msg.data, intent.IntentID)
 				}
 
 			case "TOKEN_ROTATION_COMMAND":
@@ -357,7 +489,7 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 				if err := persistWorkerToken(newToken); err != nil {
 					slog.Warn("failed to persist rotated token", "error", err)
 				}
-				if err := wc.sendJSON(ctx, map[string]interface{}{
+				if err := wc.sendJSON(opCtx, map[string]interface{}{
 					"type": "TOKEN_ROTATION_ACK",
 				}); err != nil {
 					slog.Warn("failed to send TOKEN_ROTATION_ACK", "error", err)
@@ -369,6 +501,15 @@ func (wc *WorkerConn) RunOperational(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func isMutationAction(action string) bool {
+	return strings.HasPrefix(action, "STOP_") ||
+		strings.HasPrefix(action, "START_") ||
+		strings.HasPrefix(action, "RESTART_") ||
+		strings.HasPrefix(action, "DELETE_") ||
+		action == "UPDATE_WORKER" ||
+		action == "TOKEN_ROTATION"
 }
 
 // RunWithBackoff connects and runs with exponential backoff.

@@ -60,7 +60,7 @@ type IntentResult struct {
 }
 
 // dispatchIntent validates and executes an incoming intent.
-func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
+func dispatchIntent(ctx context.Context, wc *WorkerConn, raw []byte) []byte {
 	var msg Intent
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		return mustJSON(IntentResult{Error: fmt.Sprintf("invalid JSON: %v", err)})
@@ -81,43 +81,43 @@ func dispatchIntent(wc *WorkerConn, raw []byte) []byte {
 	var result IntentResult
 	switch msg.Action {
 	case "GET_STATS":
-		result = handleGetStats(wc.ctx, msg)
+		result = handleGetStats(ctx, msg)
 	case "READ_LOGS":
-		result = handleReadLogs(wc.ctx, msg)
+		result = handleReadLogs(ctx, msg)
 	case "LIST_CONTAINERS":
-		result = handleListContainers(wc.ctx, msg)
+		result = handleListContainers(ctx, msg)
 	case "RESTART_CONTAINER":
-		result = handleRestartContainer(wc.ctx, msg)
+		result = handleRestartContainer(ctx, msg)
 	case "STOP_CONTAINER":
-		result = handleStopContainer(wc.ctx, msg)
+		result = handleStopContainer(ctx, msg)
 	case "START_CONTAINER":
-		result = handleStartContainer(wc.ctx, msg)
+		result = handleStartContainer(ctx, msg)
 	case "DELETE_CONTAINER":
-		result = handleDeleteContainer(wc.ctx, msg)
+		result = handleDeleteContainer(ctx, msg)
 	case "LIST_SERVICES":
-		result = handleListServices(wc.ctx, msg)
+		result = handleListServices(ctx, msg)
 	case "STATUS_SERVICE":
-		result = handleStatusService(wc.ctx, msg)
+		result = handleStatusService(ctx, msg)
 	case "RESTART_SERVICE":
-		result = handleRestartService(wc.ctx, msg)
+		result = handleRestartService(ctx, msg)
 	case "STOP_SERVICE":
-		result = handleStopService(wc.ctx, msg)
+		result = handleStopService(ctx, msg)
 	case "START_SERVICE":
-		result = handleStartService(wc.ctx, msg)
+		result = handleStartService(ctx, msg)
 	case "READ_LOGS_SERVICE":
-		result = handleReadLogsService(wc.ctx, msg)
+		result = handleReadLogsService(ctx, msg)
 	case "UPDATE_WORKER":
-		result = handleUpdateWorker(wc.ctx, wc, msg)
+		result = handleUpdateWorker(ctx, wc, msg)
 	case "TOKEN_ROTATION":
-		result = handleTokenRotation(wc.ctx, wc, msg)
+		result = handleTokenRotation(ctx, wc, msg)
 	case "DISK_SCAN":
-		result = handleDiskScan(wc.ctx, msg)
+		result = handleDiskScan(ctx, msg)
 	case "LIST_LOG_SOURCES":
-		result = handleListLogSources(wc.ctx, msg)
+		result = handleListLogSources(ctx, msg)
 	case "LOG_HISTOGRAM":
-		result = handleLogHistogram(wc.ctx, msg)
+		result = handleLogHistogram(ctx, msg)
 	case "LIST_LOG_FILES":
-		result = handleListLogFiles(wc.ctx, msg)
+		result = handleListLogFiles(ctx, msg)
 	default:
 		result = IntentResult{
 			IntentID: msg.IntentID,

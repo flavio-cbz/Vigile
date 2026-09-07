@@ -777,23 +777,29 @@ async def test_get_node_stats_aggregated_includes_disks(client: AsyncClient, db,
     ]
     disks_json_str = json.dumps(disks_payload)
 
+    start_long = int(now - 7 * 86400)
+    end = int(now + 60)
+
     for days_ago in [5, 4, 3, 2, 1]:
-        t = now - days_ago * 86400
-        # Insert 3 snapshots in the same hour bucket, one with NULL disks_json to test MAX(disks_json)
+        # Center timestamps safely at :30 within the hour bucket (bucket_size = 3600)
+        hour_bucket = int((now - days_ago * 86400) / 3600)
+        t_center = hour_bucket * 3600 + 1800
+        t_null = t_center - 10
+        t_valid = t_center + 10
+
+        # Insert 2 snapshots in the same hour bucket, one with NULL disks_json to test MAX(disks_json)
         await db.execute(
             "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds, disks_json) "
             "VALUES (?, 'n-disks-agg', ?, ?, 10.0, 8000, 4000, 50.0, 1000, 100, 100000, 40000, 40.0, 3600.0, NULL)",
-            (f"s-agg-{days_ago}-null", t - 60, t - 60),
+            (f"s-agg-{days_ago}-null", t_null, t_null),
         )
         await db.execute(
             "INSERT INTO metrics_snapshots (id, node_id, collected_at, created_at, cpu_percent, mem_total_bytes, mem_used_bytes, mem_percent, swap_total_bytes, swap_used_bytes, disk_total_bytes, disk_used_bytes, disk_percent, uptime_seconds, disks_json) "
             "VALUES (?, 'n-disks-agg', ?, ?, 15.0, 8000, 4000, 50.0, 1000, 100, 100000, 40000, 40.0, 3600.0, ?)",
-            (f"s-agg-{days_ago}-valid", t, t, disks_json_str),
+            (f"s-agg-{days_ago}-valid", t_valid, t_valid, disks_json_str),
         )
     await db.commit()
 
-    start_long = int(now - 7 * 86400)
-    end = int(now + 60)
     response = await client.get(
         f"/api/nodes/n-disks-agg/stats?limit=5000&start={start_long}&end={end}",
         headers=auth_headers("operator"),

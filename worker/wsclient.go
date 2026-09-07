@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -87,8 +88,8 @@ const (
 type WSConn struct {
 	conn   net.Conn
 	reader *bufio.Reader
-	mu     sync.Mutex // protects writes + close
-	closed bool
+	mu     sync.Mutex // protects writeFrame serialization
+	closed atomic.Bool
 }
 
 // DialWebSocket performs the WebSocket handshake and returns an upgraded connection.
@@ -190,14 +191,26 @@ func computeAcceptKey(key string) string {
 
 // ── Frame I/O ──────────────────────────────────────────────────────────────
 
-// WriteText sends a text frame (masked, as required by RFC 6455 for clients).
-func (ws *WSConn) WriteText(data []byte) error {
-	ws.mu.Lock()
-	defer ws.mu.Unlock()
-	if ws.closed {
+// WriteTextWithTimeout sends a text frame with a strict write timeout.
+func (ws *WSConn) WriteTextWithTimeout(data []byte, timeout time.Duration) error {
+	if ws.closed.Load() {
 		return errors.New("ws: connection closed")
 	}
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	if ws.closed.Load() {
+		return errors.New("ws: connection closed")
+	}
+	if err := ws.conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	defer ws.conn.SetWriteDeadline(time.Time{})
 	return ws.writeFrame(opText, data)
+}
+
+// WriteText sends a text frame (masked, as required by RFC 6455 for clients).
+func (ws *WSConn) WriteText(data []byte) error {
+	return ws.WriteTextWithTimeout(data, 10*time.Second)
 }
 
 func (ws *WSConn) writeFrame(opcode byte, payload []byte) error {
@@ -328,15 +341,17 @@ func (ws *WSConn) readFrame() (opcode byte, payload []byte, err error) {
 
 // Close sends a WebSocket close frame and closes the TCP connection.
 func (ws *WSConn) Close() error {
-	ws.mu.Lock()
-	defer ws.mu.Unlock()
-	if ws.closed {
+	if ws.closed.Swap(true) {
 		return nil
 	}
-	ws.closed = true
-	// Best-effort close frame
-	if err := ws.writeFrame(opClose, []byte{0x03, 0xE8}); err != nil { // 1000 normal
-		slog.Debug("failed to send close frame", "error", err)
+	// Best-effort close frame: TryLock with max 200ms timeout, abandon immediately if locked
+	if ws.mu.TryLock() {
+		_ = ws.conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
+		if err := ws.writeFrame(opClose, []byte{0x03, 0xE8}); err != nil { // 1000 normal
+			slog.Debug("failed to send close frame", "error", err)
+		}
+		_ = ws.conn.SetWriteDeadline(time.Time{})
+		ws.mu.Unlock()
 	}
 	return ws.conn.Close()
 }

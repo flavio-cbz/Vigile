@@ -98,10 +98,11 @@ func TestMustJSON(t *testing.T) {
 
 func TestDispatchIntent(t *testing.T) {
 	wc := newTestWC(t)
+	ctx := context.Background()
 
 	t.Run("rejects invalid JSON", func(t *testing.T) {
 		raw := []byte(`{not valid json`)
-		result := dispatchIntent(wc, raw)
+		result := dispatchIntent(ctx, wc, raw)
 
 		var got IntentResult
 		if err := json.Unmarshal(result, &got); err != nil {
@@ -121,7 +122,7 @@ func TestDispatchIntent(t *testing.T) {
 			Action:   "FAKE_ACTION",
 		}
 		raw, _ := json.Marshal(intent)
-		result := dispatchIntent(wc, raw)
+		result := dispatchIntent(ctx, wc, raw)
 
 		var got IntentResult
 		if err := json.Unmarshal(result, &got); err != nil {
@@ -144,7 +145,7 @@ func TestDispatchIntent(t *testing.T) {
 			Action:   "NOPE_ACTION",
 		}
 		raw, _ := json.Marshal(intent)
-		result := dispatchIntent(wc, raw)
+		result := dispatchIntent(ctx, wc, raw)
 
 		var got IntentResult
 		if err := json.Unmarshal(result, &got); err != nil {
@@ -162,7 +163,7 @@ func TestDispatchIntent(t *testing.T) {
 			Params:   map[string]interface{}{"service": "nonexistent-svc"},
 		}
 		raw, _ := json.Marshal(intent)
-		result := dispatchIntent(wc, raw)
+		result := dispatchIntent(ctx, wc, raw)
 
 		var got IntentResult
 		if err := json.Unmarshal(result, &got); err != nil {
@@ -182,7 +183,7 @@ func TestDispatchIntent(t *testing.T) {
 			Action:   "DELETE_EVERYTHING",
 		}
 		raw, _ := json.Marshal(intent)
-		result := dispatchIntent(wc, raw)
+		result := dispatchIntent(ctx, wc, raw)
 
 		var got IntentResult
 		if err := json.Unmarshal(result, &got); err != nil {

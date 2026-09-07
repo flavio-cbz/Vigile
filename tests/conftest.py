@@ -115,20 +115,26 @@ def _isolate_global_node_manager():
     voie des _connections résiduelles d'un test précédent."""
     from master.core.node_manager import node_manager as _global_nm
 
+    def _clear_buffers():
+        _global_nm._connections.clear()
+        _global_nm._pending_intents.clear()
+        _global_nm._intent_nodes.clear()
+        _global_nm._intent_created_at.clear()
+        _global_nm._intent_max_age.clear()
+        if hasattr(_global_nm, "_latest_metrics"):
+            _global_nm._latest_metrics.clear()
+        try:
+            from master.plugins.metrics import _metrics_buffer
+            _metrics_buffer.clear()
+        except Exception:
+            pass
+
     # pre-test cleanup
-    _global_nm._connections.clear()
-    _global_nm._pending_intents.clear()
-    _global_nm._intent_nodes.clear()
-    _global_nm._intent_created_at.clear()
-    _global_nm._intent_max_age.clear()
+    _clear_buffers()
     yield
     # post-test cleanup — garantit que même un test qui enregistre une connexion
     # ne pollue pas le suivant (test_main_lifespan exige connected_nodes == [])
-    _global_nm._connections.clear()
-    _global_nm._pending_intents.clear()
-    _global_nm._intent_nodes.clear()
-    _global_nm._intent_created_at.clear()
-    _global_nm._intent_max_age.clear()
+    _clear_buffers()
 
 
 @pytest.fixture

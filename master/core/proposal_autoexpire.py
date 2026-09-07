@@ -90,7 +90,7 @@ async def auto_expire_proposals(db, nm=None) -> int:
             continue
 
         # 2. Metric condition check — heuristic keyword matching
-        reason = await _check_metric_resolved(db, proposal)
+        reason = await _check_metric_resolved(db, proposal, nm=nm)
         if reason:
             await _do_cancel(db, proposal, reason, log_action)
             canceled += 1
@@ -105,7 +105,7 @@ async def auto_expire_proposals(db, nm=None) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def _check_metric_resolved(db, proposal) -> str | None:
+async def _check_metric_resolved(db, proposal, nm=None) -> str | None:
     """Return a human-readable reason if the triggering metric has recovered.
 
     Returns ``None`` when the proposal doesn't reference a measurable metric
@@ -123,21 +123,33 @@ async def _check_metric_resolved(db, proposal) -> str | None:
     if metric is None:
         return None  # Non-metric proposal (e.g. restart container) — skip
 
-    # Fetch the latest metrics snapshot for the relevant node
-    # SAFE: metric is from fixed _RESOURCE_KEYWORDS whitelist (disk_percent, mem_percent, cpu_percent)
-    async with db.execute(
-        f"SELECT {metric}, collected_at FROM metrics_snapshots "
-        f"WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
-        (proposal.node_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
+    current_value = None
+    # 1. Prioritize reading latest metrics from memory cache (CB-6)
+    if nm is not None and proposal.node_id:
+        latest = nm.get_latest_metrics(proposal.node_id)
+        if latest is not None:
+            data = latest.get("metrics", latest)
+            if isinstance(data, dict) and data.get(metric) is not None:
+                try:
+                    current_value = float(data[metric])
+                except (ValueError, TypeError):
+                    pass
 
-    if row is None:
-        return None  # No metrics data yet
+    # 2. Fallback to SQL metrics_snapshots if not found in memory
+    if current_value is None:
+        async with db.execute(
+            f"SELECT {metric}, collected_at FROM metrics_snapshots "
+            f"WHERE node_id = ? ORDER BY collected_at DESC LIMIT 1",
+            (proposal.node_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
 
-    current_value = row[metric]
+        if row is None:
+            return None  # No metrics data yet
 
-    if current_value < METRIC_OK_THRESHOLD:
+        current_value = row[metric]
+
+    if current_value is not None and current_value < METRIC_OK_THRESHOLD:
         return (
             f"Condition résolue: {metric} à {current_value:.1f}% "
             f"(< {METRIC_OK_THRESHOLD:.0f}%)"

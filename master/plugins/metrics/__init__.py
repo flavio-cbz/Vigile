@@ -17,18 +17,49 @@ Zero dependencies beyond the project whitelist (pydantic).
 
 from __future__ import annotations
 
+import asyncio
+import collections
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from master.core.lock import LoopBoundLock
 from master.core.plugin_base import PluginBase, hook, route
 
 logger = logging.getLogger(__name__)
 
 plugin_id = "metrics"
+
+# ---------------------------------------------------------------------------
+# In-memory buffer & batch flush (CB-5)
+# ---------------------------------------------------------------------------
+
+_metrics_buffer: collections.deque = collections.deque(maxlen=500)
+_buffer_lock: asyncio.Lock = LoopBoundLock()
+_metrics_flush_event: asyncio.Event | None = None
+
+_INSERT_SQL = """
+INSERT INTO metrics_snapshots (
+    id, node_id, collected_at, created_at,
+    cpu_percent, cpu_load_1m, cpu_load_5m, cpu_load_15m, cpu_cores,
+    mem_total_bytes, mem_used_bytes, mem_percent,
+    swap_total_bytes, swap_used_bytes,
+    disk_total_bytes, disk_used_bytes, disk_percent,
+    uptime_seconds, processes, disks_json, top_processes_json,
+    net_bytes_recv, net_bytes_sent, net_packets_recv, net_packets_sent,
+    net_errors_in, net_errors_out, net_drops_in, net_drops_out,
+    disk_reads, disk_writes, disk_read_bytes, disk_write_bytes,
+    temp_celsius,
+    psi_cpu_avg10, psi_mem_avg10, psi_io_avg10,
+    file_handles_used, file_handles_max,
+    app_sshd_fds_used, app_sshd_fds_max, app_sshd_fds_percent,
+    entropy_avail, context_switches, cpu_throttled_count
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -403,16 +434,71 @@ def _normalize_status_report(raw_report: dict) -> dict | None:
         return None
 
 
+def _snapshot_to_row(node_id: str, snapshot: dict) -> tuple:
+    now = time.time()
+    row_id = str(uuid.uuid4())
+    return (
+        row_id,
+        node_id,
+        snapshot.get("collected_at", now),
+        now,
+        float(snapshot["cpu_percent"]) if snapshot.get("cpu_percent") is not None else 0.0,
+        snapshot.get("cpu_load_1m"),
+        snapshot.get("cpu_load_5m"),
+        snapshot.get("cpu_load_15m"),
+        snapshot.get("cpu_cores"),
+        int(snapshot["mem_total_bytes"]) if snapshot.get("mem_total_bytes") is not None else 0,
+        int(snapshot["mem_used_bytes"]) if snapshot.get("mem_used_bytes") is not None else 0,
+        float(snapshot["mem_percent"]) if snapshot.get("mem_percent") is not None else 0.0,
+        int(snapshot["swap_total_bytes"]) if snapshot.get("swap_total_bytes") is not None else 0,
+        int(snapshot["swap_used_bytes"]) if snapshot.get("swap_used_bytes") is not None else 0,
+        int(snapshot["disk_total_bytes"]) if snapshot.get("disk_total_bytes") is not None else 0,
+        int(snapshot["disk_used_bytes"]) if snapshot.get("disk_used_bytes") is not None else 0,
+        float(snapshot["disk_percent"]) if snapshot.get("disk_percent") is not None else 0.0,
+        float(snapshot["uptime_seconds"]) if snapshot.get("uptime_seconds") is not None else 0.0,
+        snapshot.get("processes"),
+        json.dumps(snapshot["disks"]) if snapshot.get("disks") else None,
+        json.dumps(snapshot["top_processes"]) if snapshot.get("top_processes") else None,
+        # Network I/O
+        snapshot.get("net_bytes_recv"),
+        snapshot.get("net_bytes_sent"),
+        snapshot.get("net_packets_recv"),
+        snapshot.get("net_packets_sent"),
+        snapshot.get("net_errors_in"),
+        snapshot.get("net_errors_out"),
+        snapshot.get("net_drops_in"),
+        snapshot.get("net_drops_out"),
+        # Disk I/O
+        snapshot.get("disk_reads"),
+        snapshot.get("disk_writes"),
+        snapshot.get("disk_read_bytes"),
+        snapshot.get("disk_write_bytes"),
+        # Temperature
+        snapshot.get("temp_celsius"),
+        # PSI
+        snapshot.get("psi_cpu_avg10"),
+        snapshot.get("psi_mem_avg10"),
+        snapshot.get("psi_io_avg10"),
+        # File handles
+        snapshot.get("file_handles_used"),
+        snapshot.get("file_handles_max"),
+        # Per-app sshd FD
+        snapshot.get("app_sshd_fds_used"),
+        snapshot.get("app_sshd_fds_max"),
+        snapshot.get("app_sshd_fds_percent"),
+        # Entropy / context switches / CPU throttling
+        snapshot.get("entropy_avail"),
+        snapshot.get("context_switches"),
+        snapshot.get("cpu_throttled_count"),
+    )
+
+
 async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
     """
     Handle a validated status report from a Worker.
 
-    Persists the snapshot into the metrics_snapshots table for
-    later retrieval via GET /api/nodes/{id}/stats.
-
-    Falls back to logging if no db handle is provided (graceful degradation).
-    Missing metrics are stored as NULL (None) rather than false zeros,
-    so consumers can distinguish "not reported" from "zero value" (resolves 🟡10).
+    Buffers the snapshot in memory (_metrics_buffer) for batch persistence
+    via executemany every 5s or upon 25 snapshots (CB-5).
     """
     cpu = snapshot.get("cpu_percent")
     mem = snapshot.get("mem_percent")
@@ -425,90 +511,118 @@ async def _on_status_report(node_id: str, snapshot: dict, db=None) -> None:
         logger.debug("on_status_report: no DB handle — skipping persistence")
         return
 
-    import time as _time
-    import uuid
+    row = _snapshot_to_row(node_id, snapshot)
+    async with _buffer_lock:
+        _metrics_buffer.append((db, row))
+        buf_len = len(_metrics_buffer)
 
-    now = _time.time()
-    row_id = str(uuid.uuid4())
+    if buf_len >= 25 and _metrics_flush_event is not None:
+        _metrics_flush_event.set()
 
-    await db.execute(
-        """
-        INSERT INTO metrics_snapshots (
-            id, node_id, collected_at, created_at,
-            cpu_percent, cpu_load_1m, cpu_load_5m, cpu_load_15m, cpu_cores,
-            mem_total_bytes, mem_used_bytes, mem_percent,
-            swap_total_bytes, swap_used_bytes,
-            disk_total_bytes, disk_used_bytes, disk_percent,
-            uptime_seconds, processes, disks_json, top_processes_json,
-            net_bytes_recv, net_bytes_sent, net_packets_recv, net_packets_sent,
-            net_errors_in, net_errors_out, net_drops_in, net_drops_out,
-            disk_reads, disk_writes, disk_read_bytes, disk_write_bytes,
-            temp_celsius,
-            psi_cpu_avg10, psi_mem_avg10, psi_io_avg10,
-            file_handles_used, file_handles_max,
-            app_sshd_fds_used, app_sshd_fds_max, app_sshd_fds_percent,
-            entropy_avail, context_switches, cpu_throttled_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            row_id,
-            node_id,
-            snapshot.get("collected_at", now),
-            now,
-            snapshot.get("cpu_percent"),
-            snapshot.get("cpu_load_1m"),
-            snapshot.get("cpu_load_5m"),
-            snapshot.get("cpu_load_15m"),
-            snapshot.get("cpu_cores"),
-            snapshot.get("mem_total_bytes"),
-            snapshot.get("mem_used_bytes"),
-            snapshot.get("mem_percent"),
-            snapshot.get("swap_total_bytes"),
-            snapshot.get("swap_used_bytes"),
-            snapshot.get("disk_total_bytes"),
-            snapshot.get("disk_used_bytes"),
-            snapshot.get("disk_percent"),
-            snapshot.get("uptime_seconds"),
-            snapshot.get("processes"),
-            json.dumps(snapshot["disks"]) if snapshot.get("disks") else None,
-            json.dumps(snapshot["top_processes"]) if snapshot.get("top_processes") else None,
-            # Network I/O
-            snapshot.get("net_bytes_recv"),
-            snapshot.get("net_bytes_sent"),
-            snapshot.get("net_packets_recv"),
-            snapshot.get("net_packets_sent"),
-            snapshot.get("net_errors_in"),
-            snapshot.get("net_errors_out"),
-            snapshot.get("net_drops_in"),
-            snapshot.get("net_drops_out"),
-            # Disk I/O
-            snapshot.get("disk_reads"),
-            snapshot.get("disk_writes"),
-            snapshot.get("disk_read_bytes"),
-            snapshot.get("disk_write_bytes"),
-            # Temperature
-            snapshot.get("temp_celsius"),
-            # PSI
-            snapshot.get("psi_cpu_avg10"),
-            snapshot.get("psi_mem_avg10"),
-            snapshot.get("psi_io_avg10"),
-            # File handles
-            snapshot.get("file_handles_used"),
-            snapshot.get("file_handles_max"),
-            # Per-app sshd FD
-            snapshot.get("app_sshd_fds_used"),
-            snapshot.get("app_sshd_fds_max"),
-            snapshot.get("app_sshd_fds_percent"),
-            # Entropy / context switches / CPU throttling
-            snapshot.get("entropy_avail"),
-            snapshot.get("context_switches"),
-            snapshot.get("cpu_throttled_count"),
-        ),
-    )
-    await db.commit()
-    logger.debug(
-        "Metrics snapshot persisted for node %s (id=%s)", node_id, row_id
-    )
+
+async def flush_metrics(db=None) -> int:
+    """Drain accumulated snapshots in memory and insert them into DB in batch via executemany (CB-5)."""
+    from master.db.database import get_db_conn
+
+    items = []
+    async with _buffer_lock:
+        while _metrics_buffer:
+            items.append(_metrics_buffer.popleft())
+
+    if not items:
+        return 0
+
+    by_db: dict[Any, list[tuple]] = {}
+    for conn, row in items:
+        target_db = db or conn or get_db_conn()
+        if target_db is None:
+            continue
+        if target_db not in by_db:
+            by_db[target_db] = []
+        by_db[target_db].append(row)
+
+    total_inserted = 0
+    for target_db, rows in by_db.items():
+        try:
+            await target_db.executemany(_INSERT_SQL, rows)
+            await target_db.commit()
+            total_inserted += len(rows)
+            logger.debug("Flushed %d metrics snapshots to DB", len(rows))
+        except Exception as exc:
+            logger.error("Failed to flush %d metrics snapshots to DB: %s", len(rows), exc)
+            async with _buffer_lock:
+                for r in reversed(rows):
+                    _metrics_buffer.appendleft((target_db, r))
+
+    return total_inserted
+
+
+async def flush_all(db=None) -> int:
+    """Drain all buffered metrics snapshots to SQLite immediately (CB-5)."""
+    return await flush_metrics(db)
+
+
+async def metrics_flush_loop(db=None) -> None:
+    """Background task: flushes accumulated snapshots every 5 seconds or upon 25 snapshots (CB-5)."""
+    global _metrics_flush_event
+    _metrics_flush_event = asyncio.Event()
+    while True:
+        try:
+            try:
+                await asyncio.wait_for(_metrics_flush_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            _metrics_flush_event.clear()
+            await flush_metrics(db)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.exception("Error in metrics flush loop: %s", exc)
+            await asyncio.sleep(1.0)
+
+
+async def purge_old_metrics(db=None, retention_days: int = 30, batch_size: int = 1000) -> int:
+    """Purge historical metrics snapshots older than retention_days in batches of batch_size (CB-5)."""
+    from master.db.database import get_db_conn
+
+    target_db = db or get_db_conn()
+    if target_db is None:
+        return 0
+
+    cutoff = time.time() - (retention_days * 86400)
+    total_deleted = 0
+    while True:
+        try:
+            cursor = await target_db.execute(
+                "DELETE FROM metrics_snapshots WHERE id IN ("
+                "SELECT id FROM metrics_snapshots WHERE collected_at < ? LIMIT ?"
+                ")",
+                (cutoff, batch_size),
+            )
+            deleted = cursor.rowcount
+            await target_db.commit()
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+        except Exception as exc:
+            logger.warning("Error during metrics snapshots purge: %s", exc)
+            break
+
+    if total_deleted > 0:
+        logger.info("Purged %d expired metrics snapshots (older than %d days)", total_deleted, retention_days)
+    return total_deleted
+
+
+async def metrics_retention_loop(db=None, retention_days: int = 30) -> None:
+    """Periodic task: purges expired snapshots every hour in batches of 1000."""
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            await purge_old_metrics(db, retention_days=retention_days)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.exception("Error in metrics retention loop: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -542,9 +656,20 @@ class MetricsPlugin(PluginBase):
         """Handle a validated status report from a Worker."""
         return await _on_status_report(node_id, snapshot, db=db)
 
+    async def flush_all(self, db: Any = None) -> int:
+        """Drain all buffered metrics snapshots to SQLite immediately (CB-5)."""
+        return await flush_all(db)
+
+    async def purge_old_metrics(self, db: Any = None, retention_days: int = 30) -> int:
+        """Purge historical metrics snapshots in batches (CB-5)."""
+        return await purge_old_metrics(db, retention_days=retention_days)
+
     @route("/history", method="GET")
     async def get_metrics_history(self, node_id: str | None = None, period: str = "24h") -> dict:
         """Fetch historical metrics for Recharts from metrics_snapshots table."""
+        # Ensure latest buffered metrics are flushed before querying history
+        await flush_metrics()
+
         now = time.time()
         time_map = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}
         duration = time_map.get(period, 86400)

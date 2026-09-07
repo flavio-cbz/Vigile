@@ -101,3 +101,36 @@ func TestGetParamInt(t *testing.T) {
 		}
 	})
 }
+
+func TestIsMutationAction(t *testing.T) {
+	mutations := []string{
+		"STOP_CONTAINER", "START_CONTAINER", "RESTART_CONTAINER", "DELETE_CONTAINER",
+		"STOP_SERVICE", "START_SERVICE", "RESTART_SERVICE",
+		"UPDATE_WORKER", "TOKEN_ROTATION",
+	}
+	for _, m := range mutations {
+		if !isMutationAction(m) {
+			t.Errorf("expected %q to be recognized as mutation", m)
+		}
+	}
+
+	queries := []string{
+		"GET_STATS", "READ_LOGS", "LIST_CONTAINERS", "LIST_SERVICES",
+		"STATUS_SERVICE", "READ_LOGS_SERVICE", "DISK_SCAN", "LIST_LOG_SOURCES",
+		"LOG_HISTOGRAM", "LIST_LOG_FILES",
+	}
+	for _, q := range queries {
+		if isMutationAction(q) {
+			t.Errorf("expected %q NOT to be recognized as mutation", q)
+		}
+	}
+}
+
+func TestSessionEpochIncrement(t *testing.T) {
+	wc := &WorkerConn{}
+	e1 := wc.sessionEpoch.Add(1)
+	e2 := wc.sessionEpoch.Add(1)
+	if e1 != 1 || e2 != 2 {
+		t.Errorf("expected sessionEpoch to increment 1, 2, got %d, %d", e1, e2)
+	}
+}

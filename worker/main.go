@@ -23,15 +23,26 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"github.com/flavio-cbz/Vigile/worker/updater"
 )
 
 // Logger for structured output (stdout for journald collection).
 
 func main() {
+	// ── Automated rollback check ─────────────────────────────────────────
+	if execPath, err := os.Executable(); err == nil {
+		if rolledBack, rErr := updater.CheckAndRollbackIfFailed(execPath); rolledBack {
+			slog.Error("Automated rollback performed: exiting to let supervisor restart previous binary", "error", rErr)
+			os.Exit(1)
+		}
+	}
+
 	// ── CLI flags ────────────────────────────────────────────────────────
 	masterURL := flag.String("master", os.Getenv("MASTER_URL"), "Master WebSocket URL (e.g. https://master:8443)")
 	joinToken := flag.String("token", os.Getenv("JOIN_TOKEN"), "JOIN_TOKEN for enrollment")
 	keyDir := flag.String("key-dir", os.Getenv("VIGILE_KEY_DIR"), "Directory for keys and config (default: /etc/vigile or %ProgramData%\\vigile on Windows)")
+	insecureNoTLS := flag.Bool("insecure-no-tls", false, "Allow insecure unencrypted connections (ws://, http://)")
 	flag.Parse()
 
 	if *keyDir != "" {
@@ -45,7 +56,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	allowInsecure := os.Getenv("ALLOW_INSECURE") == "true"
+	allowInsecure := *insecureNoTLS || os.Getenv("ALLOW_INSECURE") == "true" || os.Getenv("VIGILE_INSECURE_NO_TLS") == "true"
+
+	if (strings.HasPrefix(url, "ws://") || strings.HasPrefix(url, "http://")) && !allowInsecure {
+		slog.Error("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set -insecure-no-tls, ALLOW_INSECURE=true or VIGILE_INSECURE_NO_TLS=true to bypass.")
+		os.Exit(1)
+	}
 
 	// Normalize: ensure http/https scheme for WebSocket upgrade
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") &&
@@ -61,13 +77,13 @@ func main() {
 	}
 
 	if strings.HasPrefix(url, "http://") && !allowInsecure {
-		slog.Error("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set ALLOW_INSECURE=true to bypass.")
+		slog.Error("FATAL: Unencrypted connection (HTTP/WS) is forbidden by default. Set -insecure-no-tls, ALLOW_INSECURE=true or VIGILE_INSECURE_NO_TLS=true to bypass.")
 		os.Exit(1)
 	}
 
 	slog.Info("Vigile Worker starting")
 	if allowInsecure {
-		slog.Warn("ALLOW_INSECURE=true is set. Traffic to the Master will not be encrypted. DO NOT USE IN PRODUCTION!")
+		slog.Warn("Insecure unencrypted transport permitted. Traffic to the Master will not be encrypted. DO NOT USE IN PRODUCTION!")
 	} else {
 		slog.Info("secure transport enforced (HTTPS/WSS)")
 	}
