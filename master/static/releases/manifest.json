@@ -1,0 +1,35 @@
+{
+  "version": "1.2.0",
+  "channel": "stable",
+  "released_at": "2026-09-07T21:37:38Z",
+  "binaries": [
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "url": "/api/nodes/binary/linux/amd64/worker",
+      "sha256": "1b7a7888934635f5a57c2b770c7a517020831f30c3db8dd1f1da421931b5ee5a",
+      "size": 6283416
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "url": "/api/nodes/binary/linux/arm64/worker",
+      "sha256": "039971195b6839b7f1e42d0a7c90b7d968c9610293f13ea2cf241684401c4b6d",
+      "size": 6029464
+    },
+    {
+      "os": "darwin",
+      "arch": "amd64",
+      "url": "/api/nodes/binary/darwin/amd64/worker",
+      "sha256": "288b141e7b4fc83d8cd2e681a2a2d52f27b5ce6b726ea042f9b2dd3e0d76a955",
+      "size": 6413200
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "url": "/api/nodes/binary/darwin/arm64/worker",
+      "sha256": "a13a4fbf83b715b6e02d5f646d4e2ba4b65dc73235674897cd7e2b0dd86f6921",
+      "size": 6129186
+    }
+  ]
+}
