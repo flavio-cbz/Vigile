@@ -6,20 +6,22 @@ Ce document définit les règles partagées et le protocole méthodologique non 
 
 ---
 
-## 1. Index des Fichiers de Tickets
+## 1. Index des Fichiers de Tickets Actifs
 
 | Fichier | Contenu & Objectifs | Risque & Garde-fou |
 |---|---|---|
-| [`B-services.md`](B-services.md) | **B4** (chargement services p95 < 100ms) et **B5** (suppression boutons refresh) | Standard (Prérequis B1) |
-| [`C1-disques.md`](C1-disques.md) | **C1** (sélecteur point de montage & cache multi-path `(node_id, path)`) | Standard |
-| [`C2-services-docker.md`](C2-services-docker.md) | **C2** (actions destructrices `DELETE_CONTAINER`, `STOP_SERVICE`) | **Maximal** (Validation humaine stricte) |
 | [`C3-sonarr-radarr-overseerr.md`](C3-sonarr-radarr-overseerr.md) | **C3** (plugins Sonarr, Radarr, Overseerr — bloc catalogue `media-service-card`) | Renforcé (Anti-hallucination API) |
 | [`C4-plex.md`](C4-plex.md) | **C4** (vraie intégration API Plex, flux live B1, token chiffré) | Renforcé (Anti-hallucination API) |
 | [`C4.2-plex-activites-et-previsualisation.md`](C4.2-plex-activites-et-previsualisation.md) | **C4.2** (Plex : prévisualisation lectures & hub tâches d'arrière-plan / activities) | Renforcé (Anti-hallucination API) |
 | [`D1-migration-plugins.md`](D1-migration-plugins.md) | **D1** (migration des 9 plugins vers manifests déclaratifs V2) | Renforcé (1 session / plugin, captures) |
-| [`E-nettoyage-ui-ux.md`](E-nettoyage-ui-ux.md) | **E1 à E5** (traductions, IP serveur, popover aide, cap proposals, shortcuts logs) | Standard (Protocole allégé 2 sessions) |
 | [`F1-dette-technique.md`](F1-dette-technique.md) | **F1** (audit exhaustif et unification des routes API backend) | Standard (Session 0 Audit préalable) |
 | [`G1-ia-copilote.md`](G1-ia-copilote.md) | **G1** (fiabilisation streaming SSE/WS, contexte frais, structured proposals) | Renforcé (Observabilité & Résilience) |
+
+### Tickets Terminés & Mergés
+- **Chantier B (B4, B5)** : Cache services p95 < 100ms, SingleFlight, auto-refresh passif — *Mergé dans commit `d67390b`*.
+- **Chantier C1 (C1)** : Sélecteur point de montage, cache SQLite multi-path, drill-down treemap — *Mergé dans commit `2fb467a`*.
+- **Chantier C2 (C2)** : Actions destructives fleet (`DELETE_CONTAINER`, `STOP_SERVICE`) avec garde-fous terminaux, sanitization et audit SHA256 — *Mergé dans commit `66c42fc`*.
+- **Chantier E (E1 à E5)** : Parité i18n, IP header, popover aide contextuelle, tri proposals et raccourcis logs — *Mergé dans commits `38889ce`, `d8aa7f7`, `4fb0fe1`*.
 
 > **Note :** La table d'assignation des modèles et les benchmarks de routage pour l'opérateur humain sont documentés dans [`docs/plans/00-modeles-et-routage.md`](../00-modeles-et-routage.md).
 
