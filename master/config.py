@@ -145,6 +145,8 @@ class Settings(BaseModel):
     )
     worker_binary_github_token: str = os.getenv("WORKER_BINARY_GITHUB_TOKEN", "")
     auto_update_workers: bool = os.getenv("AUTO_UPDATE_WORKERS", "false").lower() in ("true", "1")
+    auto_update_interval_seconds: int = int(os.getenv("AUTO_UPDATE_INTERVAL_SECONDS", "3600"))
+    auto_update_canary: bool = os.getenv("AUTO_UPDATE_CANARY", "true").lower() in ("true", "1")
     offline_mode: bool = os.getenv("OFFLINE_MODE", "false").lower() == "true"
     worker_binary_local_dir: str = os.getenv("WORKER_BINARY_LOCAL_DIR", "/var/cache/vigile/worker")
     bootstrap_admin_password: str = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")

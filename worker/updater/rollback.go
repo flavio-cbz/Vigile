@@ -25,6 +25,7 @@ type UpdatePendingState struct {
 	NewVersion      string    `json:"new_version"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	Confirmed       bool      `json:"confirmed"`
+	Attempts        int       `json:"attempts,omitempty"`
 }
 
 // MarkUpdatePending writes update metadata prior to process restart.
@@ -44,7 +45,11 @@ func MarkUpdatePending(prevVer, newVer string) error {
 
 // ConfirmUpdate clears update pending state upon successful WSS connection / heartbeat.
 func ConfirmUpdate() error {
-	return os.Remove(getPendingPath())
+	err := os.Remove(getPendingPath())
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // CheckAndRollbackIfFailed checks if pending update timed out without confirmation and performs automated rollback.
@@ -70,18 +75,38 @@ func CheckAndRollbackIfFailed(execPath string) (bool, error) {
 		return false, nil
 	}
 
-	// If pending update is older than 60s, trigger rollback
-	if time.Since(state.UpdatedAt) > 60*time.Second {
+	state.Attempts++
+	if updatedData, err := json.Marshal(state); err == nil {
+		_ = sys.WriteFileAtomic(pendingPath, updatedData, 0600)
+	}
+
+	// If pending update is older than 60s or failed >= 5 times, trigger rollback
+	if state.Attempts >= 5 || time.Since(state.UpdatedAt) > 60*time.Second {
 		backupPath := execPath + ".previous"
 		if _, err := os.Stat(backupPath); err == nil && execPath != "" {
-			if err := sys.CopyFile(backupPath, execPath, 0755); err != nil {
-				slog.Warn("automated rollback: failed to restore backup binary", "backup_path", backupPath, "exec_path", execPath, "error", err)
+			tmpRestore := execPath + ".restore.tmp"
+			if err := sys.CopyFile(backupPath, tmpRestore, 0755); err == nil {
+				if rErr := os.Rename(tmpRestore, execPath); rErr != nil {
+					slog.Warn("automated rollback: failed to rename restored binary", "error", rErr)
+				}
+			} else {
+				slog.Warn("automated rollback: failed to copy backup binary to tmp", "backup_path", backupPath, "tmp", tmpRestore, "error", err)
 			}
 		}
+
+		// Symlink restoration if previous release link exists
+		if prevTarget, err := os.Readlink(DefaultPreviousLink); err == nil && prevTarget != "" {
+			if rErr := os.Remove(DefaultCurrentLink); rErr == nil || os.IsNotExist(rErr) {
+				if err := os.Symlink(prevTarget, DefaultCurrentLink); err != nil {
+					slog.Warn("automated rollback: failed to restore current symlink", "target", prevTarget, "error", err)
+				}
+			}
+		}
+
 		if err := os.Remove(pendingPath); err != nil {
 			slog.Debug("failed to remove pending update file after rollback", "path", pendingPath, "error", err)
 		}
-		return true, fmt.Errorf("automated rollback performed for failed update version %s", state.NewVersion)
+		return true, fmt.Errorf("automated rollback performed for failed update version %s after %d attempts", state.NewVersion, state.Attempts)
 	}
 
 	return false, nil

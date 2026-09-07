@@ -334,6 +334,40 @@ async def _fetch_and_cache(
     return binary_path
 
 
+def _synthesize_local_manifest(static_rel_dir: Path) -> dict | None:
+    """Build a manifest dictionary dynamically from local static releases if present."""
+    if not static_rel_dir.exists():
+        return None
+    binaries = []
+    for p in static_rel_dir.glob("worker-*"):
+        if p.name.endswith(".sha256") or p.name.endswith(".sig") or p.is_dir():
+            continue
+        parts = p.name.split("-")
+        if len(parts) >= 3:
+            os_name = parts[1]
+            arch_name = parts[2].replace(".exe", "")
+            sha_file = p.with_name(p.name + ".sha256")
+            if sha_file.exists():
+                sha256_val = sha_file.read_text().strip().split()[0]
+            else:
+                sha256_val = hashlib.sha256(p.read_bytes()).hexdigest()
+            binaries.append({
+                "os": os_name,
+                "arch": arch_name,
+                "url": f"/api/nodes/binary/{os_name}/{arch_name}/worker",
+                "sha256": sha256_val,
+                "size": p.stat().st_size,
+            })
+    if not binaries:
+        return None
+    return {
+        "version": "1.2.0",
+        "channel": "stable",
+        "released_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "binaries": binaries,
+    }
+
+
 async def _fetch_manifest(settings) -> dict:
     now = time.time()
     if (
@@ -342,8 +376,35 @@ async def _fetch_manifest(settings) -> dict:
     ):
         return _manifest_cache["data"]
 
-    data = await _fetch_url(settings.worker_binary_manifest_url, settings)
-    manifest = json.loads(data)
+    static_rel_dir = Path(__file__).resolve().parent.parent / "static" / "releases"
+    local_manifest_file = static_rel_dir / "manifest.json"
+
+    manifest = None
+    if getattr(settings, "offline_mode", False):
+        if local_manifest_file.exists():
+            manifest = json.loads(local_manifest_file.read_text(encoding="utf-8"))
+        else:
+            manifest = _synthesize_local_manifest(static_rel_dir)
+        if manifest:
+            _manifest_cache["data"] = manifest
+            _manifest_cache["fetched_at"] = now
+            return manifest
+
+    try:
+        data = await _fetch_url(settings.worker_binary_manifest_url, settings)
+        manifest = json.loads(data)
+    except Exception as exc:
+        logger.info("Could not fetch remote worker binary manifest (%s). Checking local fallbacks...", exc)
+        if local_manifest_file.exists():
+            manifest = json.loads(local_manifest_file.read_text(encoding="utf-8"))
+        else:
+            manifest = _synthesize_local_manifest(static_rel_dir)
+
+        if manifest:
+            logger.info("Using local static worker manifest as fallback (version %s)", manifest.get("version"))
+        else:
+            raise
+
     _manifest_cache["data"] = manifest
     _manifest_cache["fetched_at"] = now
     return manifest
